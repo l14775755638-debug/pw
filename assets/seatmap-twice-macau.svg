@@ -1,0 +1,23 @@
+<svg width="1200" height="520" viewBox="0 0 1200 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Twice 澳门官方座位图模拟</title>
+  <desc id="desc">静态座位图示意，包含舞台、VIP、A区、B区、C区。</desc>
+  <rect width="1200" height="520" fill="#fffdf8"/>
+  <rect x="376" y="34" width="448" height="74" rx="6" fill="#1d2433"/>
+  <text x="600" y="80" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="28" font-weight="700">STAGE</text>
+  <rect x="408" y="132" width="180" height="116" rx="8" fill="#cce6df" stroke="#146c75" stroke-width="3"/>
+  <rect x="612" y="132" width="180" height="116" rx="8" fill="#cce6df" stroke="#146c75" stroke-width="3"/>
+  <text x="498" y="197" text-anchor="middle" fill="#0e4d55" font-family="Arial, sans-serif" font-size="26" font-weight="700">VIP A3</text>
+  <text x="702" y="197" text-anchor="middle" fill="#0e4d55" font-family="Arial, sans-serif" font-size="26" font-weight="700">VIP B2</text>
+  <rect x="158" y="150" width="188" height="132" rx="8" fill="#f4d7bf" stroke="#b35d2e" stroke-width="3"/>
+  <rect x="854" y="150" width="188" height="132" rx="8" fill="#f4d7bf" stroke="#b35d2e" stroke-width="3"/>
+  <text x="252" y="224" text-anchor="middle" fill="#7f3f1f" font-family="Arial, sans-serif" font-size="25" font-weight="700">A区 105</text>
+  <text x="948" y="224" text-anchor="middle" fill="#7f3f1f" font-family="Arial, sans-serif" font-size="25" font-weight="700">A区 103</text>
+  <rect x="94" y="320" width="246" height="110" rx="8" fill="#e8e4f4" stroke="#6650a4" stroke-width="3"/>
+  <rect x="477" y="292" width="246" height="110" rx="8" fill="#f5eccb" stroke="#a87900" stroke-width="3"/>
+  <rect x="860" y="320" width="246" height="110" rx="8" fill="#e8e4f4" stroke="#6650a4" stroke-width="3"/>
+  <text x="217" y="383" text-anchor="middle" fill="#45326f" font-family="Arial, sans-serif" font-size="24" font-weight="700">B区 207</text>
+  <text x="600" y="355" text-anchor="middle" fill="#775400" font-family="Arial, sans-serif" font-size="24" font-weight="700">C区</text>
+  <text x="983" y="383" text-anchor="middle" fill="#45326f" font-family="Arial, sans-serif" font-size="24" font-weight="700">A区 101</text>
+  <path d="M362 444 C480 486 718 486 838 444" fill="none" stroke="#d7d1c4" stroke-width="18" stroke-linecap="round"/>
+  <text x="600" y="486" text-anchor="middle" fill="#687083" font-family="Arial, sans-serif" font-size="18">澳门 Galaxy Arena · 静态参考图</text>
+</svg>

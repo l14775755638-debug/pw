@@ -1,0 +1,20 @@
+<svg width="1100" height="720" viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">BigBang 高阳票源 D 原始上传图模拟</title>
+  <desc id="desc">模拟中文韩币票源原图，包含红笔标记。</desc>
+  <rect width="1100" height="720" fill="#f1f1ee"/>
+  <rect x="62" y="56" width="976" height="590" fill="#fff" stroke="#222" stroke-width="3"/>
+  <rect x="62" y="56" width="976" height="74" fill="#f2d2c3" stroke="#222" stroke-width="3"/>
+  <text x="90" y="103" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#111">BigBang 高阳 KINTEX 库存表</text>
+  <g font-family="Arial, sans-serif" font-size="22">
+    <rect x="62" y="130" width="976" height="58" fill="#ffe7dc"/>
+    <g font-weight="700"><text x="94" y="166">日期</text><text x="254" y="166">区域</text><text x="438" y="166">座位</text><text x="636" y="166">票价</text><text x="800" y="166">数量</text><text x="906" y="166">备注</text></g>
+    <path d="M62 188H1038M62 252H1038M62 316H1038M62 380H1038" stroke="#222" stroke-width="2"/>
+    <path d="M222 130V380M402 130V380M612 130V380M772 130V380M874 130V380" stroke="#222" stroke-width="2"/>
+    <text x="94" y="230">2026-10-03</text><text x="254" y="230">Floor F1</text><text x="438" y="230">A列 7-8</text><text x="636" y="230">KRW 420,000</text><text x="800" y="230">2</text><text x="906" y="230">连座</text>
+    <text x="94" y="294">2026-10-03</text><text x="254" y="294">2층 214</text><text x="438" y="294">5열 11</text><text x="636" y="294">KRW 260,000</text><text x="800" y="294">1</text><text x="906" y="294">正面视野</text>
+    <text x="94" y="358">2026-10-04</text><text x="254" y="358">VIP Standing</text><text x="438" y="358">入场号 088</text><text x="636" y="358">KRW 580,000</text><text x="800" y="358">1</text><text x="906" y="358">早号</text>
+  </g>
+  <rect x="238" y="202" width="338" height="42" fill="none" stroke="#d71920" stroke-width="7"/>
+  <text x="156" y="506" font-family="Arial, sans-serif" font-size="34" fill="#111">黑笔：F1 连座确认，可优先问</text>
+  <path d="M156 522c172 42 360 28 510-30" fill="none" stroke="#111" stroke-width="7" stroke-linecap="round"/>
+</svg>

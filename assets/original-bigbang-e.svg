@@ -1,0 +1,20 @@
+<svg width="1100" height="720" viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">BigBang 高阳票源 E 原始上传图模拟</title>
+  <desc id="desc">模拟英文混合票源原图，包含手写避雷提示。</desc>
+  <rect width="1100" height="720" fill="#eef4f2"/>
+  <rect x="64" y="52" width="972" height="596" fill="#fff" stroke="#1a332f" stroke-width="3"/>
+  <rect x="64" y="52" width="972" height="76" fill="#bee8db" stroke="#1a332f" stroke-width="3"/>
+  <text x="92" y="100" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#12332e">BB GOYANG / source note</text>
+  <g font-family="Arial, sans-serif" font-size="22">
+    <rect x="64" y="128" width="972" height="58" fill="#d9f4ed"/>
+    <g font-weight="700"><text x="92" y="164">Show Day</text><text x="250" y="164">Block</text><text x="430" y="164">Seat No.</text><text x="638" y="164">Ask</text><text x="790" y="164">Count</text><text x="900" y="164">Notes</text></g>
+    <path d="M64 186H1036M64 250H1036M64 314H1036M64 378H1036" stroke="#1a332f" stroke-width="2"/>
+    <path d="M222 128V378M398 128V378M614 128V378M762 128V378M872 128V378" stroke="#1a332f" stroke-width="2"/>
+    <text x="92" y="228">Oct 3</text><text x="250" y="228">R区 112</text><text x="430" y="228">Row 6 Seat 1-2</text><text x="638" y="228">3300 CNY</text><text x="790" y="228">2</text><text x="900" y="228">aisle pair</text>
+    <text x="92" y="292">Oct 4</text><text x="250" y="292">Floor F3</text><text x="430" y="292">B列 20</text><text x="638" y="292">2600 CNY</text><text x="790" y="292">1</text><text x="900" y="292">extended stage</text>
+    <text x="92" y="356">Oct 4</text><text x="250" y="356">3층 318</text><text x="430" y="356">9열 6-9</text><text x="638" y="356">1500 CNY</text><text x="790" y="356">4</text><text x="900" y="356">can split</text>
+  </g>
+  <ellipse cx="328" cy="286" rx="118" ry="38" fill="none" stroke="#d71920" stroke-width="7"/>
+  <text x="152" y="500" font-family="Arial, sans-serif" font-size="34" fill="#111">note: avoid if buyer asks exact center</text>
+  <path d="M158 526h536" stroke="#d71920" stroke-width="7" stroke-linecap="round"/>
+</svg>

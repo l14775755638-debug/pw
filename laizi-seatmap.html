@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>赖子座位图热区标注</title>
+    <link rel="stylesheet" href="laizi-seatmap.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="toolbar" aria-label="座位图工具栏">
+        <div>
+          <p class="eyebrow">演出座位图</p>
+          <h1>座位区域点击校验</h1>
+        </div>
+        <div class="selected-panel" aria-live="polite">
+          <span>当前区域</span>
+          <strong id="selectedZone">未选择</strong>
+        </div>
+      </section>
+
+      <section class="map-layout">
+        <div class="map-frame">
+          <div class="seatmap-stage" id="seatmapStage">
+            <img src="assets/laizi-seatmap.jpg" alt="演出座位图" />
+            <svg
+              id="seatOverlay"
+              viewBox="0 0 1108 1108"
+              aria-label="可点击座位区域"
+              role="group"
+            ></svg>
+            <div class="hover-tip hidden" id="hoverTip"></div>
+          </div>
+        </div>
+
+        <aside class="zone-list" aria-label="座位区域列表">
+          <div class="list-head">
+            <p class="eyebrow">已识别热区</p>
+            <strong id="zoneCount">0 个</strong>
+          </div>
+          <div class="zone-buttons" id="zoneButtons"></div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="laizi-seatmap.js"></script>
+  </body>
+</html>

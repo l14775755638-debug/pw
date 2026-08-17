@@ -1,0 +1,20 @@
+<svg width="1100" height="720" viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Twice 澳门票源 B 原始上传图模拟</title>
+  <desc id="desc">模拟英文票源原图，包含蓝色表头和圈注。</desc>
+  <rect width="1100" height="720" fill="#eef3f6"/>
+  <rect x="70" y="58" width="960" height="566" fill="#fff" stroke="#334" stroke-width="3"/>
+  <rect x="70" y="58" width="960" height="78" fill="#c7dcff" stroke="#334" stroke-width="3"/>
+  <text x="96" y="106" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#10233f">TWICE MACAU - seller sheet</text>
+  <g font-family="Arial, sans-serif" font-size="22">
+    <rect x="70" y="136" width="960" height="58" fill="#dde9ff"/>
+    <g font-weight="700"><text x="102" y="172">Date</text><text x="250" y="172">Section</text><text x="430" y="172">Seat</text><text x="640" y="172">Price</text><text x="790" y="172">Qty</text><text x="900" y="172">Remark</text></g>
+    <path d="M70 194H1030M70 258H1030M70 322H1030M70 386H1030" stroke="#334" stroke-width="2"/>
+    <path d="M216 136V386M398 136V386M612 136V386M760 136V386M860 136V386" stroke="#334" stroke-width="2"/>
+    <text x="102" y="236">Sep 12</text><text x="250" y="236">VIP B2</text><text x="430" y="236">Row 3 Seat 5</text><text x="640" y="236">3000</text><text x="790" y="236">1</text><text x="900" y="236">instant confirm</text>
+    <text x="102" y="300">Sep 13</text><text x="250" y="300">A1</text><text x="430" y="300">Row 8 Seat 16-17</text><text x="640" y="300">2200</text><text x="790" y="300">2</text><text x="900" y="300">pair only</text>
+    <text x="102" y="364">Sep 13</text><text x="250" y="364">C区</text><text x="430" y="364">中区靠走道</text><text x="640" y="364">980</text><text x="790" y="364">4</text><text x="900" y="364">可拆 2+2</text>
+  </g>
+  <ellipse cx="316" cy="228" rx="92" ry="34" fill="none" stroke="#d71920" stroke-width="7"/>
+  <text x="150" y="500" font-family="Arial, sans-serif" font-size="34" fill="#0b57d0">blue mark = pair only checked</text>
+  <path d="M690 470c46-36 116-40 172-10" fill="none" stroke="#0b57d0" stroke-width="9" stroke-linecap="round"/>
+</svg>

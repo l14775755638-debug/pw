@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>票务搜索管理模拟页</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+    <div class="runtime-banner hidden" id="runtimeBanner">
+      <span>请使用本地预览地址测试上传和前台同步。</span>
+      <a href="http://127.0.0.1:4173/index.html?admin=1">打开后台预览</a>
+    </div>
+    <div class="app-shell" id="customerView">
+      <aside class="event-panel" aria-label="演出列表">
+        <div class="brand">
+          <div>
+            <p class="eyebrow">票务搜索</p>
+            <h1>选择演出</h1>
+          </div>
+          <span class="status-dot" aria-label="在线"></span>
+        </div>
+
+        <div class="event-list" id="eventList"></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="eventLocation">澳门 · Galaxy Arena</p>
+            <h2 id="eventTitle">Twice 澳门</h2>
+          </div>
+          <button class="admin-button" type="button" data-mode-shortcut="admin">后台</button>
+        </header>
+
+        <section class="choice-section" aria-label="日期和排序">
+          <div>
+            <p class="eyebrow">先选日期</p>
+            <div class="segmented-control" id="dateFilter"></div>
+          </div>
+          <div>
+            <p class="eyebrow">排序方式</p>
+            <div class="segmented-control" id="sortFilter">
+              <button class="segment-button active" type="button" data-sort="recommended">优先推荐</button>
+              <button class="segment-button" type="button" data-sort="price-asc">价格低到高</button>
+              <button class="segment-button" type="button" data-sort="price-desc">价格高到低</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="seatmap-section" aria-label="官方座位图">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">官方座位图</p>
+              <h3 id="seatmapTitle">Twice 澳门座位参考</h3>
+            </div>
+            <span id="eventDatePill" class="date-pill">2026.09.12 / 09.13</span>
+          </div>
+          <div class="seatmap-frame interactive-seatmap" id="seatmapFrame" aria-label="可点击座位区域"></div>
+          <div class="zone-drawer" id="zoneDrawer" aria-live="polite"></div>
+        </section>
+
+        <section class="search-section" aria-label="票源搜索">
+          <div class="search-box">
+            <input
+              id="searchInput"
+              type="search"
+              placeholder="搜索区域、座位号、票价，例如：FE、208、375内、4300"
+              autocomplete="off"
+            />
+            <button id="clearButton" class="icon-button" type="button" aria-label="清空搜索">×</button>
+          </div>
+          <div class="search-meta">
+            <span id="resultCount">输入关键词后展示匹配票源</span>
+            <span>点“表格来源”查看原始上传图</span>
+          </div>
+        </section>
+
+        <section class="results" id="results" aria-label="搜索结果"></section>
+      </main>
+    </div>
+
+    <div class="image-modal hidden" id="imageModal" role="dialog" aria-modal="true" aria-label="原始上传图">
+      <div class="image-modal-backdrop" data-close-modal></div>
+      <div class="image-modal-panel">
+        <div class="image-modal-header">
+          <div>
+            <p class="eyebrow">原始上传图</p>
+            <h3 id="modalTitle">票源原图</h3>
+          </div>
+          <button class="icon-close" type="button" data-close-modal aria-label="关闭">×</button>
+        </div>
+        <div class="original-image-frame">
+          <img id="modalImage" src="" alt="原始上传票源图" />
+          <iframe id="modalPdf" class="hidden" title="原始上传 PDF"></iframe>
+        </div>
+      </div>
+    </div>
+
+    <div class="admin-shell hidden" id="adminView">
+      <aside class="admin-sidebar">
+        <div class="brand">
+          <div>
+            <p class="eyebrow">后台管理</p>
+            <h1>票源中心</h1>
+          </div>
+          <span class="status-dot" aria-label="已登录"></span>
+        </div>
+        <nav class="admin-nav" id="adminEventList" aria-label="后台演出列表">
+          <button class="admin-nav-item active" type="button" data-admin-event-id="tws-macau">
+            <strong>TWS 澳门</strong>
+            <span>座位图 + 票源 PDF</span>
+          </button>
+          <button class="admin-nav-item" type="button" data-admin-event-id="bigbang-goyang">
+            <strong>BigBang 高阳</strong>
+            <span>座位图 + 票源 PDF</span>
+          </button>
+        </nav>
+      </aside>
+
+      <main class="admin-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">后台工作台 · 当前演出</p>
+            <h2 id="adminEventTitle">TWS 澳门</h2>
+          </div>
+          <button class="admin-button" type="button" data-mode-shortcut="customer">查看客户前台</button>
+        </header>
+
+        <nav class="admin-workflow-tabs" id="adminWorkflowTabs" aria-label="后台流程导航">
+          <button class="workflow-tab active" type="button" data-admin-jump="adminOverviewPanel">资料概览</button>
+          <button class="workflow-tab" type="button" data-admin-jump="adminAiPanel">AI配置</button>
+          <button class="workflow-tab" type="button" data-admin-jump="adminSeatmapPanel">座位图热区</button>
+          <button class="workflow-tab" type="button" data-admin-jump="adminUploadPanel">上传识别</button>
+          <button class="workflow-tab" type="button" data-admin-jump="adminPendingPanel">待确认</button>
+          <button class="workflow-tab" type="button" data-admin-jump="reviewPanel">校对发布</button>
+          <button class="workflow-tab" type="button" data-admin-jump="adminPublishedPanel">已发布</button>
+        </nav>
+
+        <section class="admin-grid">
+          <article class="admin-panel wide" id="adminOverviewPanel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">一对一资料包</p>
+                <h3>一个演出 = 一张座位图 + 多个票源文件</h3>
+              </div>
+              <button class="small-button" id="toggleNewEventForm" type="button">新增演出</button>
+            </div>
+            <form class="new-event-form hidden" id="newEventForm">
+              <label class="admin-field">
+                <span>演出名称</span>
+                <input id="newEventName" type="text" placeholder="例如：BLACKPINK 香港" />
+              </label>
+              <label class="admin-field">
+                <span>城市/场馆</span>
+                <input id="newEventLocation" type="text" placeholder="例如：香港 · AsiaWorld-Arena" />
+              </label>
+              <label class="admin-field">
+                <span>演出日期</span>
+                <input id="newEventDates" type="text" placeholder="例如：10月3日 / 10月4日" />
+              </label>
+              <div class="admin-actions">
+                <button class="small-button" id="createEventButton" type="button">创建演出</button>
+                <button class="small-button ghost" id="cancelNewEventButton" type="button">取消</button>
+              </div>
+              <p class="upload-status" id="newEventStatus">创建后可以立即上传座位图和票源 PDF。</p>
+            </form>
+            <div class="event-package-summary">
+              <div>
+                <span>演出名称</span>
+                <strong id="adminPackageName">TWS 澳门</strong>
+              </div>
+              <div>
+                <span>座位图</span>
+                <strong id="adminSeatmapName">tws-seatmap.jpg</strong>
+              </div>
+              <div>
+                <span>已发布票源表</span>
+                <strong id="adminTableCount">5 张</strong>
+              </div>
+              <div>
+                <span>可点击区域</span>
+                <strong id="adminZoneCount">17 个</strong>
+              </div>
+            </div>
+            <div class="admin-checklist" id="adminChecklist"></div>
+          </article>
+
+          <article class="admin-panel wide" id="adminAiPanel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">AI识别模板</p>
+                <h3>先用阿里云百炼 Qwen-VL 识别座位图</h3>
+              </div>
+              <button class="small-button ghost" id="copyEnvTemplateButton" type="button">复制配置模板</button>
+            </div>
+            <div class="model-choice-grid">
+              <button class="model-choice active" type="button" data-ai-provider="aliyun">
+                <span>推荐</span>
+                <strong>阿里云百炼 Qwen-VL</strong>
+                <em>适合座位图、表格截图、区域坐标识别；国内充值更方便。</em>
+              </button>
+              <button class="model-choice" type="button" data-ai-provider="volcengine">
+                <span>备用</span>
+                <strong>火山方舟 豆包视觉</strong>
+                <em>适合国内支付备用方案，后续可切换接口测试。</em>
+              </button>
+              <button class="model-choice" type="button" data-ai-provider="openai">
+                <span>回退</span>
+                <strong>OpenAI gpt-5.4</strong>
+                <em>如果后面能充值，可一键回到原来的识别通道。</em>
+              </button>
+            </div>
+            <div class="ai-config-grid">
+              <label class="admin-field">
+                <span>当前识别引擎</span>
+                <input id="aiProviderInput" type="text" value="阿里云百炼 / qwen3-vl-plus" readonly />
+              </label>
+              <label class="admin-field">
+                <span>API Key 环境变量</span>
+                <input id="aiKeyNameInput" type="text" value="DASHSCOPE_API_KEY" readonly />
+              </label>
+              <label class="admin-field">
+                <span>模型名称</span>
+                <input id="aiModelInput" type="text" value="qwen3-vl-plus" readonly />
+              </label>
+            </div>
+            <div class="env-template" id="envTemplate">
+              <code>AI_PROVIDER=aliyun</code>
+              <code>DASHSCOPE_API_KEY=填你的阿里云百炼Key</code>
+              <code>ALIYUN_VISION_MODEL=qwen3-vl-plus</code>
+            </div>
+            <p class="upload-detection" id="aiConfigStatus">扫描热区已合并：优先套用模板，其次 AI 识别，失败时自动本地兜底扫描。</p>
+          </article>
+
+          <article class="admin-panel" id="adminSeatmapPanel">
+            <p class="eyebrow">座位图</p>
+            <h3>上传/更换当前演出座位图</h3>
+            <label class="upload-box">
+              <input id="seatmapUploadInput" type="file" accept="image/*" />
+              <strong>选择官方座位图</strong>
+              <span id="selectedSeatmapName">当前使用：tws-seatmap.jpg</span>
+              <em>支持 JPG / PNG / 长图；PDF 请放到票源文件上传区。</em>
+            </label>
+            <div class="seatmap-admin-preview" id="seatmapMarkerStage">
+              <img id="adminSeatmapPreview" src="assets/tws-seatmap.jpg" alt="当前演出座位图预览" />
+              <div class="seatmap-marker-layer" id="seatmapMarkerLayer"></div>
+            </div>
+            <div class="admin-actions">
+              <button class="small-button" id="applySeatmapButton" type="button">保存座位图</button>
+              <button class="small-button ghost" id="scanSeatmapButton" type="button">扫描热区</button>
+              <button class="small-button ghost hidden" id="fallbackScanButton" type="button">本地兜底扫描</button>
+              <button class="small-button ghost" id="saveScannedZonesButton" type="button">保存热区</button>
+              <button class="small-button ghost" id="testSeatmapButton" type="button">前台测试座位图</button>
+            </div>
+            <div class="template-library">
+              <div class="template-library-head">
+                <div>
+                  <strong>座位图模板库</strong>
+                  <span id="templateLibrarySummary">模板会保存座位图底图和精准热区，新演出可一键套用。</span>
+                </div>
+                <div class="template-library-actions">
+                  <button class="small-button ghost" id="saveSeatmapTemplateButton" type="button">保存整套模板</button>
+                  <button class="small-button ghost" id="applyMatchedTemplateButton" type="button">套用匹配模板</button>
+                  <button class="small-button ghost" id="toggleTemplateLibraryButton" type="button">模板大全</button>
+                </div>
+              </div>
+              <div class="template-list collapsed" id="seatmapTemplateList" hidden></div>
+            </div>
+            <label class="admin-field">
+              <span>未识别区域编号补救</span>
+              <input id="zoneNameInput" type="text" placeholder="例如：205,206" />
+            </label>
+            <div class="zone-scan-results" id="zoneScanResults">
+              <div>
+                <strong>清单 A · 已识别</strong>
+                <span id="recognizedZonesList">等待扫描</span>
+              </div>
+              <div>
+                <strong>清单 B · 未识别</strong>
+                <span id="unrecognizedZonesList">等待扫描</span>
+              </div>
+            </div>
+            <p class="upload-detection" id="zoneMarkingStatus">上传座位图后点击“智能识别区域”。系统会列出已识别和未识别区域。</p>
+            <p class="upload-status" id="seatmapStatus">座位图保存后，前台当前演出会使用这张图。</p>
+          </article>
+
+          <article class="admin-panel" id="adminUploadPanel">
+            <p class="eyebrow">票源文件</p>
+            <h3>上传当前演出的图片/PDF</h3>
+            <form class="upload-form" id="ticketUploadForm">
+              <label class="upload-box">
+                <input id="sourceFileInput" type="file" accept="image/*,.pdf,application/pdf" />
+                <strong>选择微信截图、长图、JPG/PNG 或 PDF</strong>
+                <span id="selectedSourceName">文件会归入当前选中的演出。</span>
+              </label>
+              <label class="admin-field">
+                <span>表名</span>
+                <input id="uploadTableTitle" type="text" value="新上传票源" />
+              </label>
+              <p class="upload-detection" id="pdfDetectionStatus">选择 PDF 后自动识别页数/候选表数量。</p>
+              <label class="admin-field">
+                <span>粘贴识别后的表格内容</span>
+                <textarea id="uploadTableText" rows="7">日期	票价	区域	行	座位	数量	售价
+9月19日	1888	205	H	1X	2	4800
+9月19日	1888	204	J	3X	1	4500</textarea>
+              </label>
+              <button class="small-button" id="publishUploadButton" type="button">生成待确认表</button>
+              <p class="upload-status" id="uploadStatus">先选择原始图片/PDF，再生成待确认表。</p>
+            </form>
+            <div class="admin-kv">
+              <span>目标演出</span>
+              <strong id="uploadTargetEvent">TWS 澳门</strong>
+            </div>
+            <div class="admin-kv">
+              <span>支持格式</span>
+              <strong>JPG / PNG / PDF / 长截图</strong>
+            </div>
+            <div class="admin-kv">
+              <span>拆分方式</span>
+              <strong>图片按张入库，PDF 自动识别页数/候选表</strong>
+            </div>
+            <div class="admin-kv">
+              <span>本批表主</span>
+              <strong>内部可见，客户隐藏</strong>
+            </div>
+          </article>
+
+          <article class="admin-panel wide" id="adminPendingPanel">
+            <p class="eyebrow">识别流程</p>
+            <h3>上传后先进入待确认，再发布给客户</h3>
+            <div class="ocr-flow" aria-label="图片 PDF 识别流程">
+              <span>1 上传原图/PDF</span>
+              <span>2 自动拆页/分表</span>
+              <span>3 OCR 读表确认</span>
+              <span>4 发布前台</span>
+            </div>
+            <div class="admin-actions batch-actions">
+              <button class="small-button" id="confirmAllButton" type="button">一键确认并发布全部</button>
+              <button class="small-button ghost" id="clearPendingButton" type="button">清空待确认</button>
+            </div>
+            <div class="upload-records" id="uploadRecords" aria-live="polite">
+              <strong>当前演出待确认/本次上传记录</strong>
+              <div class="empty-upload-record">还没有发布记录。</div>
+            </div>
+          </article>
+
+          <article class="admin-panel wide" id="reviewPanel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">解析结果校对</p>
+                <h3 id="reviewTitle">选择一张待确认表</h3>
+              </div>
+              <button class="small-button" id="confirmReviewButton" type="button" disabled>确认并发布</button>
+            </div>
+            <div class="review-layout" id="reviewLayout">
+              <div class="empty-state">上传票源文件后，先在上方待确认列表中选择一张表进行校对。</div>
+            </div>
+          </article>
+
+          <article class="admin-panel wide" id="adminPublishedPanel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">票源表管理</p>
+                <h3>后台保留原图和表主，前台只显示可售票源</h3>
+              </div>
+              <button class="small-button" type="button">导出当前演出</button>
+            </div>
+            <div class="admin-table" id="publishedTables"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
