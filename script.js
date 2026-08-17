@@ -1214,6 +1214,7 @@ function createSeatmapPixelSampler(image, seatmapSize) {
     return null;
   }
   const data = imageData.data;
+  const background = getEdgeBackgroundColor(data, canvas.width, canvas.height);
   const componentIds = new Int32Array(canvas.width * canvas.height);
   componentIds.fill(-1);
   const components = [];
@@ -1223,7 +1224,7 @@ function createSeatmapPixelSampler(image, seatmapSize) {
   };
   const isSeatIndex = (index) => {
     const [red, green, blue] = colorAtIndex(index);
-    return isLikelySeatPixel(red, green, blue);
+    return isAdaptiveSeatPixel(red, green, blue, background);
   };
   const clampX = (x) => Math.max(0, Math.min(canvas.width - 1, Math.round(x)));
   const clampY = (y) => Math.max(0, Math.min(canvas.height - 1, Math.round(y)));
@@ -1472,7 +1473,7 @@ function getZoneAtPoint(point) {
       area: getPolygonArea(zone.polygon),
       distance: getDistanceSquared(point, getPolygonCenter(zone.polygon)),
     }))
-    .sort((a, b) => a.distance - b.distance || a.area - b.area);
+    .sort((a, b) => a.area - b.area || a.distance - b.distance);
   return candidates[0]?.zone || null;
 }
 
@@ -1528,21 +1529,29 @@ function getZoneFromSeatComponent(point) {
         zone,
         overlapSamples,
         overlapRatio: polygonSamples ? overlapSamples / polygonSamples : 0,
+        componentCenterInside: pointInPolygon(component.center, zone.polygon) ? 1 : 0,
         exactHit: pointInPolygon(point, zone.polygon) ? 1 : 0,
         distanceToClick: Math.sqrt(getDistanceSquared(center, point)),
         distanceToComponent: Math.sqrt(getDistanceSquared(center, component.center)),
         area: getPolygonArea(zone.polygon),
       };
     })
-    .filter((candidate) => candidate.overlapSamples > 0 || candidate.distanceToComponent <= maxDistance)
+    .filter(
+      (candidate) =>
+        candidate.exactHit ||
+        candidate.componentCenterInside ||
+        candidate.overlapRatio >= 0.16 ||
+        (candidate.overlapSamples >= 4 && candidate.distanceToComponent <= maxDistance * 0.55),
+    )
     .sort(
       (a, b) =>
-        b.overlapSamples - a.overlapSamples ||
-        b.overlapRatio - a.overlapRatio ||
         b.exactHit - a.exactHit ||
+        b.componentCenterInside - a.componentCenterInside ||
+        b.overlapRatio - a.overlapRatio ||
+        b.overlapSamples - a.overlapSamples ||
+        a.area - b.area ||
         a.distanceToComponent - b.distanceToComponent ||
-        a.distanceToClick - b.distanceToClick ||
-        a.area - b.area,
+        a.distanceToClick - b.distanceToClick,
     );
 
   return candidates[0]?.zone || null;
@@ -1558,6 +1567,21 @@ function getZoneFromTarget(target) {
   const hotspot = target.closest("[data-zone-id]");
   if (!hotspot) return null;
   return currentEvent.zones.find((zone) => zone.id === hotspot.dataset.zoneId) || null;
+}
+
+function getZoneForSeatmapEvent(event, seatmap) {
+  const targetZone = getZoneFromTarget(event.target);
+  const pointerZone = getZoneForPointer(event, seatmap);
+  if (!targetZone || !pointerZone || targetZone.id === pointerZone.id) return targetZone || pointerZone;
+
+  const point = getSeatmapPoint(event, seatmap);
+  if (!point) return targetZone;
+  const targetHit = pointInPolygon(point, targetZone.polygon);
+  const pointerHit = pointInPolygon(point, pointerZone.polygon);
+  if (targetHit && pointerHit) {
+    return getPolygonArea(targetZone.polygon) <= getPolygonArea(pointerZone.polygon) ? targetZone : pointerZone;
+  }
+  return targetHit ? targetZone : pointerZone;
 }
 
 function getPolygonPoints(polygon) {
@@ -2220,8 +2244,9 @@ function renderSeatmapMarkers() {
       const center = getPolygonCenter(zone.polygon);
       const x = (center.x / width) * 100;
       const y = (center.y / height) * 100;
+      const label = zone.status === "missing" ? `缺${zone.missingIndex || "?"}` : zone.label;
       return `
-        <span class="seatmap-marker ${zone.status}" style="left:${x}%;top:${y}%;">${zone.label}</span>
+        <span class="seatmap-marker ${zone.status}" style="left:${x}%;top:${y}%;">${label}</span>
       `;
     })
     .join("");
@@ -2231,6 +2256,19 @@ function renderSeatmapMarkers() {
     </svg>
     ${labels}
   `;
+  updateSeatmapPreviewLayerSize();
+}
+
+function updateSeatmapPreviewLayerSize() {
+  const stage = document.querySelector("#seatmapMarkerStage");
+  if (!stage || !seatmapMarkerLayer || !adminSeatmapPreview) return;
+  if (!adminSeatmapPreview.complete || !adminSeatmapPreview.naturalWidth || !adminSeatmapPreview.naturalHeight) return;
+  const stageRect = stage.getBoundingClientRect();
+  const imageRect = adminSeatmapPreview.getBoundingClientRect();
+  seatmapMarkerLayer.style.left = `${imageRect.left - stageRect.left}px`;
+  seatmapMarkerLayer.style.top = `${imageRect.top - stageRect.top}px`;
+  seatmapMarkerLayer.style.width = `${imageRect.width}px`;
+  seatmapMarkerLayer.style.height = `${imageRect.height}px`;
 }
 
 function isYellowPixel(red, green, blue) {
@@ -3183,7 +3221,7 @@ sortFilter.addEventListener("click", (event) => {
 seatmapFrame.addEventListener("click", (event) => {
   const seatmap = event.target.closest(".seatmap-stage");
   if (!seatmap) return;
-  const zone = getZoneForPointer(event, seatmap) || getZoneFromTarget(event.target);
+  const zone = getZoneForSeatmapEvent(event, seatmap);
   if (!zone) return;
   selectZone(zone);
 });
@@ -3191,7 +3229,7 @@ seatmapFrame.addEventListener("click", (event) => {
 seatmapFrame.addEventListener("mousemove", (event) => {
   const seatmap = event.target.closest(".seatmap-stage");
   if (!seatmap) return;
-  const zone = getZoneForPointer(event, seatmap) || getZoneFromTarget(event.target);
+  const zone = getZoneForSeatmapEvent(event, seatmap);
   hoveredZone = zone || null;
   seatmap.style.cursor = zone ? "pointer" : "default";
   updateSeatmapHotspots();
@@ -3258,6 +3296,9 @@ clearButton.addEventListener("click", () => {
   searchInput.focus();
   renderResults();
 });
+
+adminSeatmapPreview.addEventListener("load", updateSeatmapPreviewLayerSize);
+window.addEventListener("resize", updateSeatmapPreviewLayerSize);
 
 async function applyPendingSeatmapToCurrentEvent({ autoScan = false } = {}) {
   if (!pendingSeatmap) {
