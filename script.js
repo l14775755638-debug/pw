@@ -1,4 +1,8 @@
+const REVIEW_FLAGS_VERSION = 16;
+const ROW_COLOR_LOGIC_VERSION = 10;
+const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
+const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
 const LAIZI_SEATMAP_TEMPLATE_ZONES = [
   { id: "311", label: "311", points: [[229, 279], [278, 225], [400, 225], [400, 309], [365, 309], [365, 323], [309, 323], [267, 323]] },
   { id: "312", label: "312", points: [[402, 225], [503, 225], [503, 309], [475, 309], [475, 376], [402, 376]] },
@@ -60,20 +64,75 @@ const LAIZI_SEATMAP_TEMPLATE_ZONES = [
   { id: "WC-R2", label: "轮椅席 右下", points: [[789, 898], [900, 786], [913, 797], [799, 910]] },
 ];
 
+const ITZY_VENETIAN_TEMPLATE_ZONES = [
+  { id: "223", label: "223", points: [[353, 345], [487, 345], [487, 436], [399, 436]] },
+  { id: "224", label: "224", points: [[503, 345], [606, 345], [606, 436], [503, 436]] },
+  { id: "225", label: "225", points: [[620, 345], [724, 345], [724, 436], [620, 436]] },
+  { id: "226", label: "226", points: [[739, 345], [854, 345], [921, 393], [841, 436], [739, 436]] },
+  { id: "222", label: "222", points: [[307, 388], [408, 388], [408, 486], [327, 563], [260, 501]] },
+  { id: "227", label: "227", points: [[837, 394], [918, 388], [1015, 484], [937, 563], [801, 438]] },
+  { id: "221", label: "221", points: [[128, 566], [258, 446], [321, 512], [264, 598], [238, 598], [238, 584]] },
+  { id: "228", label: "228", points: [[945, 513], [1027, 476], [1096, 547], [1032, 599], [954, 599], [899, 551]] },
+  { id: "220", label: "220", points: [[128, 586], [236, 586], [236, 633], [128, 633]] },
+  { id: "229", label: "229", points: [[1000, 584], [1096, 584], [1096, 632], [1000, 632]] },
+  { id: "219", label: "219", points: [[128, 647], [236, 647], [236, 759], [128, 759]] },
+  { id: "230", label: "230", points: [[989, 647], [1096, 647], [1096, 759], [989, 759]] },
+  { id: "218", label: "218", points: [[128, 772], [236, 772], [236, 881], [128, 881]] },
+  { id: "231", label: "231", points: [[989, 773], [1096, 773], [1096, 884], [989, 884]] },
+  { id: "217", label: "217", points: [[128, 895], [236, 895], [236, 1008], [128, 1008]] },
+  { id: "232", label: "232", points: [[989, 897], [1096, 897], [1096, 1008], [989, 1008]] },
+  { id: "216", label: "216", points: [[128, 1021], [236, 1021], [236, 1135], [128, 1135]] },
+  { id: "201", label: "201", points: [[989, 1022], [1096, 1022], [1096, 1138], [989, 1138]] },
+  { id: "215", label: "215", points: [[128, 1147], [236, 1147], [236, 1265], [128, 1265]] },
+  { id: "202", label: "202", points: [[989, 1148], [1096, 1148], [1096, 1264], [989, 1264]] },
+  { id: "214", label: "214", points: [[128, 1280], [236, 1280], [236, 1371], [128, 1371]] },
+  { id: "203", label: "203", points: [[989, 1277], [1096, 1277], [1096, 1370], [989, 1370]] },
+  { id: "118", label: "118", points: [[405, 474], [452, 610], [389, 670], [337, 513]] },
+  { id: "119", label: "119", points: [[444, 474], [542, 474], [542, 607], [490, 607]] },
+  { id: "120", label: "120", points: [[557, 474], [655, 474], [655, 607], [610, 607], [610, 548], [581, 548], [581, 607], [557, 607]] },
+  { id: "121", label: "121", points: [[671, 474], [770, 474], [736, 607], [671, 607]] },
+  { id: "122", label: "122", points: [[783, 474], [864, 474], [806, 607], [736, 607]] },
+  { id: "117", label: "117", points: [[270, 610], [389, 580], [445, 644], [344, 681], [270, 681]] },
+  { id: "123", label: "123", points: [[826, 586], [904, 610], [960, 669], [908, 706], [816, 681]] },
+  { id: "116", label: "116", points: [[276, 686], [360, 686], [360, 771], [276, 771]] },
+  { id: "124", label: "124", points: [[864, 686], [948, 686], [948, 767], [864, 767]] },
+  { id: "115", label: "115", points: [[276, 783], [360, 783], [360, 888], [276, 888]] },
+  { id: "125", label: "125", points: [[864, 778], [948, 778], [948, 887], [864, 887]] },
+  { id: "114", label: "114", points: [[276, 905], [360, 905], [360, 1001], [276, 1001]] },
+  { id: "126", label: "126", points: [[864, 897], [948, 897], [948, 1007], [864, 1007]] },
+  { id: "113", label: "113", points: [[276, 1015], [360, 1015], [360, 1113], [276, 1113]] },
+  { id: "101", label: "101", points: [[864, 1020], [948, 1020], [948, 1098], [864, 1098]] },
+  { id: "112", label: "112", points: [[276, 1134], [360, 1134], [360, 1224], [276, 1224]] },
+  { id: "102", label: "102", points: [[864, 1118], [948, 1118], [948, 1208], [864, 1208]] },
+  { id: "111", label: "111", points: [[276, 1238], [360, 1238], [360, 1320], [326, 1342], [276, 1320]] },
+  { id: "103", label: "103", points: [[864, 1227], [948, 1227], [948, 1320], [914, 1341], [864, 1320]] },
+  { id: "FS", label: "FS", aliases: ["VIP", "VIP Standing", "Standing"], points: [[410, 711], [477, 638], [759, 638], [824, 711], [824, 944], [410, 944]] },
+  { id: "FE", label: "FE", aliases: ["VIP", "VIP Standing", "Standing"], points: [[403, 966], [507, 966], [507, 1177], [403, 1177]] },
+  { id: "FW", label: "FW", aliases: ["VIP", "VIP Standing", "Standing"], points: [[729, 966], [833, 966], [833, 1177], [729, 1177]] },
+];
+
 function createTemplateZones(templateZones, sourceSize, targetSize = sourceSize) {
   const scaleX = targetSize.width / sourceSize.width;
   const scaleY = targetSize.height / sourceSize.height;
   return templateZones.map((zone) => ({
     id: String(zone.id).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-+|-+$/g, ""),
     label: zone.label,
-    aliases: [zone.label, zone.id],
+    aliases: [...new Set([zone.label, zone.id, ...(zone.aliases || [])].map(String))],
     polygon: zone.points.map(([x, y]) => [Math.round(x * scaleX), Math.round(y * scaleY)]),
     source: "template",
   }));
 }
 
 function createLaiziTemplateZones(targetSize = LAIZI_SEATMAP_SIZE) {
-  return createTemplateZones(LAIZI_SEATMAP_TEMPLATE_ZONES, LAIZI_SEATMAP_SIZE, targetSize);
+  return createTemplateZones(
+    LAIZI_SEATMAP_TEMPLATE_ZONES.filter((zone) => !String(zone.id).startsWith("WC-")),
+    LAIZI_SEATMAP_SIZE,
+    targetSize,
+  );
+}
+
+function createItzyVenetianTemplateZones(targetSize = ITZY_VENETIAN_SEATMAP_SIZE) {
+  return createTemplateZones(ITZY_VENETIAN_TEMPLATE_ZONES, ITZY_VENETIAN_SEATMAP_SIZE, targetSize);
 }
 
 const events = [
@@ -251,6 +310,24 @@ const events = [
     tables: [],
   },
   {
+    id: "nct-dream-10th-fm",
+    name: "地租十周年FM",
+    artist: "NCT DREAM",
+    city: "",
+    location: "待填写城市 · 待填写场馆",
+    dates: "待定",
+    dateOptions: [{ id: "nct-dream-10th-fm-tbd", label: "待定", aliases: ["待定"] }],
+    venue: "待填写场馆",
+    venueLocal: "",
+    seatmapTitle: "地租十周年FM 官方座位图",
+    seatmapImage: "assets/nct-dream-10th-fm-seatmap.jpg",
+    seatmapFileName: "nct-dream-10th-fm-seatmap.jpg",
+    seatmapSize: { width: 1206, height: 1226 },
+    seatmapTemplateId: "builtin-nct-dream-10th-fm",
+    zones: [],
+    tables: [],
+  },
+  {
     id: "bigbang-goyang",
     name: "BigBang 高阳",
     location: "韩国高阳 · KINTEX",
@@ -261,17 +338,11 @@ const events = [
     ],
     venue: "KINTEX",
     seatmapTitle: "BigBang 高阳官方座位图",
-    seatmapImage: "assets/seatmap-bigbang-goyang.svg",
-    seatmapSize: { width: 1200, height: 520 },
-    zones: [
-      { id: "f1", label: "Floor F1", aliases: ["Floor F1", "F1"], polygon: [[210, 152], [420, 152], [420, 298], [210, 298]] },
-      { id: "vip-standing", label: "VIP Standing", aliases: ["VIP Standing", "VIP"], polygon: [[494, 152], [704, 152], [704, 298], [494, 298]] },
-      { id: "f3", label: "Floor F3", aliases: ["Floor F3", "F3"], polygon: [[778, 152], [988, 152], [988, 298], [778, 298]] },
-      { id: "112", label: "R区 112", aliases: ["R区112", "R区 112", "112"], polygon: [[108, 344], [322, 344], [322, 444], [108, 444]] },
-      { id: "214", label: "2층 214", aliases: ["2층214", "2층 214", "214"], polygon: [[386, 344], [600, 344], [600, 444], [386, 444]] },
-      { id: "318", label: "3층 318", aliases: ["3층318", "3층 318", "318"], polygon: [[664, 344], [878, 344], [878, 444], [664, 444]] },
-      { id: "316", label: "316", aliases: ["316"], polygon: [[942, 344], [1092, 344], [1092, 444], [942, 444]] },
-    ],
+    seatmapImage: "assets/bigbang-goyang-seatmap.jpg",
+    seatmapFileName: "bigbang-goyang-seatmap.jpg",
+    seatmapSize: { width: 1206, height: 1679 },
+    seatmapTemplateId: "builtin-bigbang-goyang",
+    zones: [],
     tables: [
       {
         id: "bigbang-source-d",
@@ -297,21 +368,50 @@ const events = [
       },
     ],
   },
+  {
+    id: "bigbang-singapore",
+    name: "BIGBANG 新加坡",
+    artist: "BIGBANG",
+    city: "新加坡",
+    location: "新加坡 · National Stadium",
+    dates: "2026.10.17",
+    dateOptions: [
+      { id: "20261017", label: "10月17日", aliases: ["10.17", "10月17日", "20261017", "2026-10-17", "2026.10.17"] },
+    ],
+    venue: "National Stadium",
+    venueLocal: "National Stadium",
+    seatmapTitle: "BIGBANG 新加坡官方座位图",
+    seatmapImage: "assets/bigbang-singapore-seatmap.jpg",
+    seatmapFileName: "bigbang-singapore-seatmap.jpg",
+    seatmapSize: { width: 1206, height: 1181 },
+    seatmapTemplateId: "builtin-bigbang-singapore",
+    zones: [],
+    tables: [],
+  },
 ];
 
 let currentEvent = events[0];
 let searchTerm = "";
+let eventSearchTerm = "";
+let eventPickerOpen = false;
 let selectedDateId = null;
 let sortMode = "recommended";
 let selectedZone = null;
 let hoveredZone = null;
 let seatmapPixelSampler = null;
+let seatmapHotspotVisible = false;
+let seatmapEditingZoneId = "";
+let seatmapEditDraftPolygon = null;
+let seatmapEditDragging = null;
 
 const customerView = document.querySelector("#customerView");
 const adminView = document.querySelector("#adminView");
 const modeButtons = document.querySelectorAll("[data-mode]");
 const modeShortcuts = document.querySelectorAll("[data-mode-shortcut]");
 const eventList = document.querySelector("#eventList");
+const eventSearchInput = document.querySelector("#eventSearchInput");
+const eventPickerToggle = document.querySelector("#eventPickerToggle");
+const eventPickerMeta = document.querySelector("#eventPickerMeta");
 const eventTitle = document.querySelector("#eventTitle");
 const eventLocation = document.querySelector("#eventLocation");
 const eventDatePill = document.querySelector("#eventDatePill");
@@ -366,12 +466,21 @@ const zoneMarkingStatus = document.querySelector("#zoneMarkingStatus");
 const recognizedZonesList = document.querySelector("#recognizedZonesList");
 const unrecognizedZonesList = document.querySelector("#unrecognizedZonesList");
 const confirmAllButton = document.querySelector("#confirmAllButton");
+const publishReadyButton = document.querySelector("#publishReadyButton");
+const showManualReviewButton = document.querySelector("#showManualReviewButton");
 const clearPendingButton = document.querySelector("#clearPendingButton");
+const clearPublishedButton = document.querySelector("#clearPublishedButton");
 const toggleNewEventForm = document.querySelector("#toggleNewEventForm");
+const deleteCurrentEventButton = document.querySelector("#deleteCurrentEventButton");
 const newEventForm = document.querySelector("#newEventForm");
+const newEventArtist = document.querySelector("#newEventArtist");
+const newEventCity = document.querySelector("#newEventCity");
+const newEventVenue = document.querySelector("#newEventVenue");
 const newEventName = document.querySelector("#newEventName");
-const newEventLocation = document.querySelector("#newEventLocation");
 const newEventDates = document.querySelector("#newEventDates");
+const eventArtistHistory = document.querySelector("#eventArtistHistory");
+const eventCityHistory = document.querySelector("#eventCityHistory");
+const eventVenueHistory = document.querySelector("#eventVenueHistory");
 const createEventButton = document.querySelector("#createEventButton");
 const cancelNewEventButton = document.querySelector("#cancelNewEventButton");
 const newEventStatus = document.querySelector("#newEventStatus");
@@ -382,6 +491,19 @@ const uploadTableTitle = document.querySelector("#uploadTableTitle");
 const pdfDetectionStatus = document.querySelector("#pdfDetectionStatus");
 const uploadTableText = document.querySelector("#uploadTableText");
 const uploadStatus = document.querySelector("#uploadStatus");
+const failedOcrPanel = document.querySelector("#failedOcrPanel");
+const failedOcrSummary = document.querySelector("#failedOcrSummary");
+const failedOcrList = document.querySelector("#failedOcrList");
+const failedOcrData = document.querySelector("#failedOcrData");
+const retryFailedOcrButton = document.querySelector("#retryFailedOcrButton");
+const copyFailedOcrButton = document.querySelector("#copyFailedOcrButton");
+const fieldMappingPanel = document.querySelector("#fieldMappingPanel");
+const fieldMappingTitle = document.querySelector("#fieldMappingTitle");
+const fieldMappingSummary = document.querySelector("#fieldMappingSummary");
+const fieldMappingTable = document.querySelector("#fieldMappingTable");
+const fieldMappingStatus = document.querySelector("#fieldMappingStatus");
+const confirmFieldMappingButton = document.querySelector("#confirmFieldMappingButton");
+const cancelFieldMappingButton = document.querySelector("#cancelFieldMappingButton");
 const uploadRecords = document.querySelector("#uploadRecords");
 const publishUploadButton = document.querySelector("#publishUploadButton");
 const reviewTitle = document.querySelector("#reviewTitle");
@@ -395,6 +517,13 @@ const uploadedTables = [];
 const pendingTables = [];
 let selectedPendingTableId = null;
 const STORAGE_KEY = "ticket-admin-state-v1";
+let eventDraftHistory = { artists: [], cities: [], venues: [] };
+let manualReviewOnly = false;
+let pendingReviewFocusRowIndex = null;
+let reviewAiBusy = false;
+const editingReviewRows = new Set();
+let fieldMappingTemplates = [];
+let fieldMappingDraft = null;
 let markingZones = [];
 let markingIndex = 0;
 let isMarkingZones = false;
@@ -402,7 +531,9 @@ let scannedRegions = [];
 let aiStatus = null;
 let activeTicketOcrJobId = null;
 let activeTicketOcrPollTimer = null;
+let lastTicketOcrJobSnapshot = null;
 let seatmapTemplates = [];
+let externalSeatmapTemplates = [];
 let templateLibraryOpen = false;
 let seatmapUploadRunId = 0;
 const aiProviderTemplates = {
@@ -430,7 +561,7 @@ const aiProviderTemplates = {
 };
 
 function normalize(value) {
-  return String(value).toLowerCase().replace(/[\\s/（）()·.-]+/g, "");
+  return String(value).toLowerCase().replace(/[\s/\\（）()·.-]+/g, "");
 }
 
 function rowMatches(row, term) {
@@ -442,7 +573,59 @@ function rowMatches(row, term) {
 function splitTableLine(line) {
   if (line.includes("\t")) return line.split("\t");
   if (line.includes(",")) return line.split(",");
-  return line.trim().split(/\s{2,}/);
+  const trimmed = line.trim();
+  const wideSplit = trimmed.split(/\s{2,}/);
+  if (wideSplit.length > 1) return wideSplit;
+  const trailingPriceMatch = trimmed.match(/^(.+?)\s+([￥¥$₩]?\s*\d{3,6}(?:[,.]\d{3})?(?:\s*(?:cny|rmb|원))?)$/i);
+  if (trailingPriceMatch) return [trailingPriceMatch[1].trim(), trailingPriceMatch[2].trim()];
+  return [trimmed];
+}
+
+function extendColumnsForOverflowRows(columns, rows) {
+  if (!Array.isArray(columns) || !Array.isArray(rows) || !rows.length) return false;
+  const maxCellCount = Math.max(columns.length, ...rows.map((row) => row.length));
+  if (maxCellCount <= columns.length) return false;
+  const extraCount = maxCellCount - columns.length;
+  const lastColumn = columns[columns.length - 1] || "";
+  const extraColumns = Array.from({ length: extraCount }, (_, index) => (index === 0 ? "备注" : `备注${index + 1}`));
+  if (isSalePriceColumnName(lastColumn)) {
+    columns.splice(Math.max(0, columns.length - 1), 0, ...extraColumns);
+  } else {
+    columns.push(...extraColumns);
+  }
+  return true;
+}
+
+function looksLikeTicketDataCells(cells = []) {
+  const values = cells.map((cell) => String(cell || "").trim()).filter(Boolean);
+  if (values.length < 2) return false;
+  if (looksLikeRecognizedTableHeader(values.join("\t"))) return false;
+  const dateLike = values.filter(isLikelyDateValue).length;
+  const priceLike = values.filter((value) => isLikelySalePriceValue(value, { minPrice: 100 })).length;
+  const compositeLike = values.filter((value) => parseCompositeSeatInfo(value)).length;
+  const zoneLike = values.filter((value) => extractZoneTokenFromText(value)).length;
+  return priceLike >= 1 && (dateLike >= 1 || compositeLike >= 1 || zoneLike >= 1);
+}
+
+function inferColumnsForHeaderlessRows(rows = []) {
+  const maxCellCount = Math.max(0, ...rows.map((row) => row.length));
+  if (!maxCellCount) return [];
+  const columns = Array.from({ length: maxCellCount }, (_, index) => `第${index + 1}列`);
+  const priceIndex = columns.length - 1;
+  columns[priceIndex] = "售价";
+  if (columns.length === 2) {
+    columns[0] = "位置";
+    return columns;
+  }
+  const sampleValues = (columnIndex) => rows.map((row) => row[columnIndex]).filter((value) => String(value || "").trim());
+  for (let index = 0; index < columns.length - 1; index += 1) {
+    const values = sampleValues(index);
+    if (!values.length) continue;
+    if (values.some(isLikelyDateValue)) columns[index] = "日期";
+    else if (values.some((value) => extractZoneTokenFromText(value))) columns[index] = "区域";
+    else if (values.some((value) => parseCompositeSeatInfo(value))) columns[index] = "位置";
+  }
+  return columns;
 }
 
 function parseTableText(text) {
@@ -451,22 +634,676 @@ function parseTableText(text) {
     .map((line) => line.trim())
     .filter(Boolean);
   if (lines.length < 2) return null;
-  const columns = splitTableLine(lines[0]).map((cell) => cell.trim()).filter(Boolean);
+  const firstCells = splitTableLine(lines[0]).map((cell) => cell.trim());
+  const firstLineIsData = looksLikeTicketDataCells(firstCells);
   const rows = lines
-    .slice(1)
+    .slice(firstLineIsData ? 0 : 1)
     .map((line) => splitTableLine(line).map((cell) => cell.trim()))
     .filter((row) => row.some(Boolean));
-  if (!columns.length || !rows.length) return null;
-  return { columns, rows };
+  const columns = firstLineIsData ? inferColumnsForHeaderlessRows(rows) : firstCells;
+  extendColumnsForOverflowRows(columns, rows);
+  if (!columns.some(Boolean) || !rows.length) return null;
+  return { columns, rows, headerless: firstLineIsData };
+}
+
+function parseContinuationRows(text, columns) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length || !Array.isArray(columns) || !columns.length) return [];
+  return lines
+    .filter((line) => !looksLikeRecognizedTableHeader(line))
+    .map((line) => splitTableLine(line).map((cell) => cell.trim()))
+    .filter((row) => row.filter(Boolean).length >= Math.min(2, Math.max(2, columns.length)) || looksLikeTicketDataCells(row))
+    .map((row) => {
+      const next = row.slice();
+      while (next.length < columns.length) next.push("");
+      return next;
+    });
+}
+
+function canMergeRecognizedTables(previous, next) {
+  if (!previous || !next) return false;
+  if (previous.sourcePage !== next.sourcePage) return false;
+  const compatibleColumns = areRecognizedColumnsCompatible(previous.columns, next.columns);
+  if (compatibleColumns) return true;
+  if (!next.headerless) return false;
+  if (next.rows.length > 3 && previous.columns.length !== next.columns.length) return false;
+  if (previous.columns.length === next.columns.length) return true;
+  if (next.columns.length === 2 && isSalePriceColumnName(next.columns[next.columns.length - 1])) return true;
+  return false;
+}
+
+function getRecognizedColumnField(column = "") {
+  return getDefaultFieldForHeader(column) || normalize(column);
+}
+
+function areRecognizedColumnsCompatible(left = [], right = []) {
+  if (!Array.isArray(left) || !Array.isArray(right) || !left.length || !right.length) return false;
+  if (Math.abs(left.length - right.length) > 2) return false;
+  const leftFields = left.map(getRecognizedColumnField).filter(Boolean);
+  const rightFields = right.map(getRecognizedColumnField).filter(Boolean);
+  if (!leftFields.length || !rightFields.length) return false;
+  const common = rightFields.filter((field) => leftFields.includes(field)).length;
+  const denominator = Math.max(leftFields.length, rightFields.length);
+  if (common / denominator >= 0.62) return true;
+  const leftHasPrice = left.some(isSalePriceColumnName);
+  const rightHasPrice = right.some(isSalePriceColumnName);
+  const leftHasDate = left.some((column) => getDefaultFieldForHeader(column) === "日期");
+  const rightHasDate = right.some((column) => getDefaultFieldForHeader(column) === "日期");
+  return leftHasPrice && rightHasPrice && leftHasDate === rightHasDate && common >= 2;
+}
+
+function adaptRowsToColumns(rows, columns) {
+  return rows.map((row) => {
+    if (row.length === columns.length) return row.slice();
+    if (row.length === 2 && columns.length > 2) {
+      const next = Array.from({ length: columns.length }, () => "");
+      const positionIndex = findColumnIndex(columns, ["位置", "区域", "区", "排", "座位"]);
+      const priceIndex = findColumnIndex(columns, ["售价", "价格", "price", "ask"]);
+      next[positionIndex >= 0 ? positionIndex : 0] = row[0] || "";
+      next[priceIndex >= 0 ? priceIndex : columns.length - 1] = row[1] || "";
+      return next;
+    }
+    const next = row.slice(0, columns.length);
+    while (next.length < columns.length) next.push("");
+    return next;
+  });
+}
+
+function looksLikeRecognizedTableHeader(line) {
+  const cells = splitTableLine(line).map((cell) => cell.trim()).filter(Boolean);
+  if (cells.length < 2) return false;
+  const cueCount = cells.filter((cell) =>
+    /(序号|编号|日期|演出日期|时间|票面|票价|价位|价格|售价|区域|区|位置|席位|排|行|座位|号段|数量|张数|连坐|备注|状态|date|day|price|ask|block|section|row|seat|qty|status|구역|열|좌석|가격|매수)/i.test(cell),
+  ).length;
+  if (cueCount < 2) return false;
+  const valueLikeCount = cells.filter((cell) => isLikelyDateValue(cell) || isLikelySalePriceValue(cell) || parseCompositeSeatInfo(cell)).length;
+  return valueLikeCount < cells.length - 1;
+}
+
+function splitRecognizedTableSections(block) {
+  const lines = String(block || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return [block];
+  const sections = [];
+  let current = [];
+  lines.forEach((line) => {
+    if (looksLikeRecognizedTableHeader(line) && current.length >= 2) {
+      sections.push(current.join("\n"));
+      current = [line];
+      return;
+    }
+    current.push(line);
+  });
+  if (current.length) sections.push(current.join("\n"));
+  return sections.length ? sections : [block];
+}
+
+function extractSourcePageFromBlock(block) {
+  const lines = String(block || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const markerIndex = lines.findIndex((line) => /^-{2,}\s*PDF\s*第\s*(\d+)\s*页\s*-{2,}$/i.test(line));
+  if (markerIndex < 0) return { text: block, sourcePage: null };
+  const pageMatch = lines[markerIndex].match(/第\s*(\d+)\s*页/i);
+  const sourcePage = Number(pageMatch?.[1] || 0) || null;
+  lines.splice(markerIndex, 1);
+  return { text: lines.join("\n"), sourcePage };
+}
+
+function splitRecognizedPageBlocks(text) {
+  const blocks = [];
+  let currentSourcePage = null;
+  let currentLines = [];
+  String(text || "")
+    .split(/\r?\n/)
+    .forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const pageMatch = trimmed.match(/^-{2,}\s*PDF\s*第\s*(\d+)\s*页\s*-{2,}$/i);
+      if (pageMatch) {
+        if (currentLines.length) {
+          blocks.push({ text: currentLines.join("\n"), sourcePage: currentSourcePage });
+          currentLines = [];
+        }
+        currentSourcePage = Number(pageMatch[1] || 0) || null;
+        return;
+      }
+      currentLines.push(trimmed);
+    });
+  if (currentLines.length) blocks.push({ text: currentLines.join("\n"), sourcePage: currentSourcePage });
+  return blocks;
 }
 
 function splitRecognizedTables(text) {
-  const blocks = text
-    .split(/\n\s*\n/)
-    .map((block) => block.trim())
-    .filter(Boolean);
-  const parsedBlocks = blocks.map(parseTableText).filter(Boolean);
+  const parsedBlocks = [];
+  splitRecognizedPageBlocks(text).forEach((source) => {
+      splitRecognizedTableSections(source.text).forEach((section) => {
+        const parsed = parseTableText(section);
+        const sourcePage = source.sourcePage || null;
+        const firstLine = String(section || "")
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)[0];
+        const hasHeader = looksLikeRecognizedTableHeader(firstLine || "");
+        const previous = parsedBlocks[parsedBlocks.length - 1];
+        if (parsed && hasHeader) {
+          const nextTable = { ...parsed, sourcePage };
+          if (canMergeRecognizedTables(previous, nextTable)) {
+            previous.rows.push(...adaptRowsToColumns(nextTable.rows, previous.columns));
+            extendColumnsForOverflowRows(previous.columns, previous.rows);
+            return;
+          }
+          parsedBlocks.push(nextTable);
+          return;
+        }
+        if (previous && previous.sourcePage === sourcePage) {
+          const continuationRows = parseContinuationRows(section, previous.columns);
+          if (continuationRows.length) {
+            previous.rows.push(...continuationRows);
+            extendColumnsForOverflowRows(previous.columns, previous.rows);
+            return;
+          }
+        }
+        if (parsed) {
+          const nextTable = { ...parsed, sourcePage };
+          if (canMergeRecognizedTables(previous, nextTable)) {
+            previous.rows.push(...adaptRowsToColumns(nextTable.rows, previous.columns));
+            extendColumnsForOverflowRows(previous.columns, previous.rows);
+            return;
+          }
+          parsedBlocks.push(nextTable);
+        }
+      });
+    });
+  const pagePartCounts = {};
+  parsedBlocks.forEach((table) => {
+    const pageKey = String(table.sourcePage || "single");
+    pagePartCounts[pageKey] = (pagePartCounts[pageKey] || 0) + 1;
+    table.sourcePart = pagePartCounts[pageKey];
+  });
   return parsedBlocks.length ? parsedBlocks : [];
+}
+
+const FIELD_MAPPING_OPTIONS = [
+  { value: "", label: "忽略" },
+  { value: "序号", label: "序号" },
+  { value: "日期", label: "日期" },
+  { value: "票面", label: "票面" },
+  { value: "区域", label: "区域" },
+  { value: "排", label: "排数" },
+  { value: "座位号", label: "座位号" },
+  { value: "数量", label: "数量" },
+  { value: "售价", label: "售价" },
+  { value: "备注", label: "备注" },
+  { value: "状态", label: "状态" },
+];
+
+function isSpreadsheetFile(file) {
+  const name = String(file?.name || "").toLowerCase();
+  return /\.(csv|tsv|txt|xlsx)$/.test(name) || /spreadsheet|csv|tab-separated/i.test(file?.type || "");
+}
+
+function getFieldMappingSignature(headers = []) {
+  return headers.map((header) => normalize(header || "空列")).join("|");
+}
+
+function hasHeaderHint(header = "", names = []) {
+  const text = normalize(header);
+  return names.some((name) => text.includes(normalize(name)));
+}
+
+function getColumnValuesFromRows(rows = [], index) {
+  return rows.map((row) => String(row[index] || "").trim()).filter(Boolean);
+}
+
+function valueRatio(values = [], predicate) {
+  if (!values.length) return 0;
+  return values.filter(predicate).length / values.length;
+}
+
+function isLikelyDateValue(value) {
+  const text = String(value || "").trim();
+  return Boolean(
+    /^\d{1,2}[./-]\d{1,2}$/.test(text) ||
+      /^\d{4}[./-]\d{1,2}[./-]\d{1,2}$/.test(text) ||
+      /^\d{8}$/.test(text) ||
+      isLikelyCompactMonthDayDateValue(text) ||
+      /^\d{1,2}\s*月\s*\d{1,2}\s*日?$/.test(text),
+  );
+}
+
+function isLikelyCompactMonthDayDateValue(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{2})(\d{2})$/);
+  if (!match) return false;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+function isLikelyDayOnlyDateValue(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{1,2}$/.test(text)) return false;
+  const day = Number(text);
+  return day >= 1 && day <= 31;
+}
+
+function isLikelyDateColumnValue(value) {
+  return isLikelyDateValue(value) || isLikelyDayOnlyDateValue(value);
+}
+
+function isEmailDeliveryValue(value) {
+  return /(电子邮件|邮箱|email|e-mail|mailbox|mail address)/i.test(String(value || ""));
+}
+
+function isShippingDeliveryValue(value) {
+  return /(邮寄票|邮寄|快递|物流|配送|送达|送下|转寄|轉寄|寄送|发货|到付|纸质票|實體票|实体票|shipping|ship|courier|delivery|택배|배송|배달)/i.test(String(value || ""));
+}
+
+function isLikelyRemarkValue(value) {
+  const text = String(value || "").trim();
+  return Boolean(
+    text &&
+      /连|视阻|rv|restricted|自取|邮寄票|邮寄|寄送|转寄|轉寄|转赠|配送|送达|送下|配合|面交|过户|靠过道|靠過道|过道|過道|电子票|纸质票|实体票|實體票|快递|物流|酒店|地址|卡|权益|备注|说明|实际|避雷|可拆|不可拆|包含|배송|배달|택배|양도|전달|수령|현장|직거래|비고|메모|참고/i.test(
+        text,
+      ),
+  );
+}
+
+function isLogisticsOrRemarkValue(value) {
+  const text = String(value || "").trim();
+  if (!text || isSoldText(text, { strict: true })) return false;
+  return /(配送|送达|送下|配合|可协助|转寄|轉寄|转赠|转客|转让|自取|面交|过户|电子票|纸质票|实体票|實體票|快递|物流|邮寄票|邮寄|寄送|酒店|地址|取票|交付|发货|到付|面交|delivery|transfer|pickup|shipping|ship|courier|배송|배달|택배|양도|전달|수령|현장|직거래)/i.test(
+    text,
+  );
+}
+
+function isDeliveryColumnName(column = "") {
+  return /(交付|取票|配送|送达|送下|转寄|轉寄|转赠|自取|面交|过户|物流|快递|邮寄票|邮寄|寄送|发货|delivery|transfer|pickup|shipping|ship|courier|배송|배달|택배|양도|전달|수령|현장|직거래)/i.test(
+    String(column || ""),
+  );
+}
+
+function isRemarkColumnName(column = "") {
+  return /(备注|说明|remark|note|标记|交付|取票|配送|送达|送下|转寄|轉寄|转赠|自取|面交|过户|物流|快递|邮寄票|邮寄|寄送|发货|delivery|transfer|pickup|shipping|ship|courier|비고|메모|참고|배송|배달|택배|양도|전달|수령|현장|직거래)/i.test(
+    String(column || ""),
+  );
+}
+
+function isLikelyStatusValue(value) {
+  return isSoldText(value, { strict: true }) || /未售|可售|在售|available/i.test(String(value || ""));
+}
+
+function isBusinessStatusRemarkValue(value) {
+  const text = String(value || "").trim();
+  if (!text || isSoldText(text, { strict: true })) return false;
+  return isLogisticsOrRemarkValue(text);
+}
+
+function getLockedFieldForHeader(header = "", values = [], options = {}) {
+  const text = String(header || "");
+  const normalizedHeader = normalize(text);
+  const businessRemarkRatio = valueRatio(values, isBusinessStatusRemarkValue);
+  const saleRatio = valueRatio(values, (value) => isLikelySalePriceValue(value, { minPrice: isSalePriceColumnName(text) ? 100 : 1000 }));
+  if (/^(no|no\.|num|number|id|序号|编号|编号\.?)$/i.test(text.trim()) || ["no", "num", "number", "id", "序号", "编号"].includes(normalizedHeader)) {
+    return "序号";
+  }
+  if (isDeliveryColumnName(text) || isRemarkColumnName(text)) return "备注";
+  if (hasHeaderHint(text, ["状态", "售卖状态", "销售状态", "status", "是否售出"])) return "状态";
+  if (isSalePriceColumnName(text)) {
+    if (options.hasExplicitSaleHeader && isGenericPriceColumnName(text)) return "票面";
+    return "售价";
+  }
+  if (isQuantityColumnName(text) && saleRatio < 0.35 && businessRemarkRatio < 0.35) return "数量";
+  if (hasHeaderHint(text, ["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"])) return "日期";
+  if (hasHeaderHint(text, ["票面号段", "门票号段", "座位号段", "座位号", "座号", "号数", "大小号", "号段", "号码", "seat", "번호", "좌석번호"])) {
+    return "座位号";
+  }
+  if (hasHeaderHint(text, ["票面排数", "门票排数", "座位排数", "票面位置", "门票位置", "座位位置", "排数", "排", "行数", "行", "row", "열"])) return "排";
+  if (hasHeaderHint(text, ["区域", "票面区域", "场区", "block", "section", "구역", "구"]) && saleRatio < 0.35) return "区域";
+  return "";
+}
+
+function getSmartFieldMapping(headers = [], rows = [], template = null) {
+  const fields = ["序号", "日期", "票面", "区域", "排", "座位号", "数量", "售价", "备注", "状态"];
+  const hasExplicitSaleHeader = headers.some((header) => isExplicitSalePriceColumnName(header));
+  const usedIndexes = new Set();
+  const lockedIndexes = new Set();
+  const mapping = headers.map(() => "");
+  const scored = headers.map((header, index) => {
+    const values = getColumnValuesFromRows(rows, index);
+    const saleHeader = isSalePriceColumnName(header);
+    const saleValues = valueRatio(values, (value) => {
+      return isLikelySalePriceValue(value, { minPrice: saleHeader ? 100 : 1000 });
+    });
+    const smallZoneValues = valueRatio(values, (value) => isLikelyZoneCode(value));
+    const businessRemarkValues = valueRatio(values, isBusinessStatusRemarkValue);
+    const countValues = valueRatio(values, isLikelySeatCountValue);
+    const scores = {
+      序号: (hasHeaderHint(header, ["序号", "编号", "no", "num", "number", "id"]) ? 80 : 0) + valueRatio(values, (value) => /^\d+$/.test(value)) * 10,
+      日期: (hasHeaderHint(header, ["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"]) ? 90 : 0) + valueRatio(values, isLikelyDateValue) * 80,
+      票面:
+        (hasHeaderHint(header, ["票面", "票价", "价位", "面值", "席位", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"]) ? 85 : 0) +
+        valueRatio(values, (value) => {
+          const number = extractNumber(value);
+          return number !== null && number >= 100 && number < 1000;
+        }) *
+          35,
+      区域:
+        (hasHeaderHint(header, ["区域", "票面区域", "场区", "区", "位置", "block", "section", "구역", "구"]) ? 95 : 0) +
+        smallZoneValues * 90 -
+        saleValues * 55,
+      排:
+        (hasHeaderHint(header, ["票面排数", "门票排数", "座位排数", "票面位置", "门票位置", "座位位置", "排数", "排", "行数", "行", "row", "열"]) ? 90 : 0) +
+        valueRatio(values, isLikelySeatRowValue) * 80 -
+        smallZoneValues * 20,
+      座位号:
+        (hasHeaderHint(header, ["座位图", "座席图", "seatmap"]) ? -120 : 0) +
+        (hasHeaderHint(header, ["票面号段", "门票号段", "座位号段", "座位号", "座位", "座号", "号数", "大小号", "号段", "号码", "号", "seat", "번호", "좌석번호"]) ? 90 : 0) +
+        valueRatio(values, isLikelySeatNumberValue) * 65,
+      数量:
+        (hasHeaderHint(header, ["数量", "张数", "连坐", "连坐数量", "count", "qty", "매수", "수량", "장수", "연석"]) ? 90 : 0) +
+        countValues * 60 -
+        saleValues * 70 -
+        businessRemarkValues * 120,
+      售价:
+        (hasHeaderHint(header, ["售价", "价格", "单价", "报价", "金额", "售價", "price", "ask"]) ? 100 : 0) +
+        saleValues * 110 -
+        smallZoneValues * 45 -
+        businessRemarkValues * 75 -
+        countValues * 35,
+      备注:
+        (hasHeaderHint(header, ["备注", "说明", "remark", "note", "标记", "交付", "取票", "配送", "邮寄", "邮寄票", "快递", "物流", "纸质票", "实体票", "转寄", "转赠", "自取", "面交", "过户", "delivery", "shipping", "ship", "courier", "transfer", "pickup", "비고", "메모", "참고", "배송", "배달", "택배", "양도", "전달", "수령", "현장"]) ? 90 : 0) +
+        valueRatio(values, isLikelyRemarkValue) * 65 +
+        businessRemarkValues * 100,
+      状态:
+        (hasHeaderHint(header, ["状态", "售卖状态", "销售状态", "status", "是否售出"]) ? 80 : 0) +
+        valueRatio(values, isLikelyStatusValue) * 95 -
+        valueRatio(values, isBusinessStatusRemarkValue) * 90,
+    };
+    return { header, index, scores };
+  });
+
+  headers.forEach((header, index) => {
+    const lockedField = getLockedFieldForHeader(header, getColumnValuesFromRows(rows, index), { hasExplicitSaleHeader });
+    if (!lockedField || usedIndexes.has(index)) return;
+    mapping[index] = lockedField;
+    usedIndexes.add(index);
+    lockedIndexes.add(index);
+  });
+
+  fields.forEach((field) => {
+    const best = scored
+      .filter((item) => !usedIndexes.has(item.index))
+      .map((item) => ({ ...item, score: item.scores[field] || 0 }))
+      .filter((item) => item.score >= 50)
+      .sort((a, b) => b.score - a.score)[0];
+    if (!best) return;
+    mapping[best.index] = field;
+    usedIndexes.add(best.index);
+  });
+
+  if (template?.mapping?.length === headers.length) {
+    template.mapping.forEach((field, index) => {
+      if (!field || !FIELD_MAPPING_OPTIONS.some((option) => option.value === field)) return;
+      if (lockedIndexes.has(index)) return;
+      const values = getColumnValuesFromRows(rows, index);
+      const looksLikeZone = valueRatio(values, isLikelyZoneCode) >= 0.5;
+      const looksLikeHighPrice = valueRatio(values, (value) => {
+        const number = extractNumber(value);
+        return number !== null && number >= 1000;
+      }) >= 0.5;
+      if (field === "售价" && looksLikeZone && !looksLikeHighPrice) return;
+      if (field === "区域" && looksLikeHighPrice && !looksLikeZone) return;
+      mapping[index] = field;
+    });
+  }
+
+  const deduped = headers.map(() => "");
+  fields.forEach((field) => {
+    const candidates = mapping
+      .map((mappedField, index) => ({ field: mappedField, index, score: (scored[index]?.scores[field] || 0) + (lockedIndexes.has(index) ? 10000 : 0) }))
+      .filter((item) => item.field === field)
+      .sort((a, b) => b.score - a.score);
+    if (candidates[0]) deduped[candidates[0].index] = field;
+  });
+  return deduped;
+}
+
+function getDefaultFieldForHeader(header = "") {
+  const text = normalize(header);
+  if (!text) return "";
+  if (/座位图|座席图|seatmap/.test(text)) return "";
+  if (["序号", "编号", "no", "num", "number", "id"].some((name) => text.includes(normalize(name)))) return "序号";
+  if (["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"].some((name) => text.includes(normalize(name)))) return "日期";
+  if (/票面(排数|位置)|门票(排数|位置)|座位(排数|位置)/.test(text)) return "排";
+  if (/票面号段|门票号段|座位号段|号段|号码/.test(text)) return "座位号";
+  if (["区域", "区", "位置", "block", "section", "구역", "구"].some((name) => text.includes(normalize(name)))) return "区域";
+  if (["票面", "票价", "价位", "面值", "席位", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"].some((name) => text.includes(normalize(name)))) return "票面";
+  if (["排数", "排", "行数", "行", "row", "열"].some((name) => text.includes(normalize(name)))) return "排";
+  if (["座位号", "座位", "座号", "号数", "大小号", "号", "seat", "번호", "좌석번호"].some((name) => text.includes(normalize(name)))) return "座位号";
+  if (["数量", "张数", "连坐", "count", "qty", "매수", "수량", "장수", "연석"].some((name) => text.includes(normalize(name)))) return "数量";
+  if (["售价", "价格", "单价", "报价", "金额", "price", "ask"].some((name) => text.includes(normalize(name)))) return "售价";
+  if (["备注", "说明", "remark", "note", "标记", "交付", "取票", "配送", "邮寄", "邮寄票", "快递", "物流", "纸质票", "实体票", "转寄", "转赠", "自取", "面交", "过户", "delivery", "shipping", "ship", "courier", "transfer", "pickup", "비고", "메모", "참고", "배송", "배달", "택배", "양도", "전달", "수령", "현장"].some((name) => text.includes(normalize(name)))) return "备注";
+  if (["状态", "售卖状态", "销售状态", "status", "是否售出"].some((name) => text.includes(normalize(name)))) return "状态";
+  return "";
+}
+
+function normalizeSpreadsheetRows(rows = []) {
+  const nonEmptyRows = rows.filter((row) => Array.isArray(row) && row.some((cell) => String(cell || "").trim()));
+  if (!nonEmptyRows.length) return null;
+  const headers = nonEmptyRows[0].map((cell, index) => String(cell || "").trim() || `第${index + 1}列`);
+  const dataRows = nonEmptyRows
+    .slice(1)
+    .map((row) => headers.map((_, index) => String(row[index] || "").trim()))
+    .filter((row) => row.some(Boolean));
+  if (!headers.length || !dataRows.length) return null;
+  return { headers, rows: dataRows };
+}
+
+function findFieldMappingTemplate(headers) {
+  const signature = getFieldMappingSignature(headers);
+  return fieldMappingTemplates.find((template) => template.signature === signature) || null;
+}
+
+function getInitialFieldMapping(headers, rows = []) {
+  const template = findFieldMappingTemplate(headers);
+  return getSmartFieldMapping(headers, rows, template);
+}
+
+function parseDelimitedSpreadsheetText(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
+  const delimiter = lines.join("\n").includes("\t") ? "\t" : ",";
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"') {
+      if (quoted && next === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === delimiter && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
+}
+
+async function readSpreadsheetRows(file, dataUrl) {
+  const name = String(file.name || "").toLowerCase();
+  if (/\.(csv|tsv|txt)$/.test(name)) {
+    const text = await file.text();
+    return parseDelimitedSpreadsheetText(text);
+  }
+  const response = await fetch("/api/spreadsheet/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file: dataUrl, fileName: file.name }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.message || payload.error || "Excel 表格读取失败。");
+  return payload.rows || [];
+}
+
+function startFieldMappingPreview({ headers, rows, tables = null, sourceName, sourceUrl, sourceType }) {
+  const mapping = getInitialFieldMapping(headers, rows);
+  const template = findFieldMappingTemplate(headers);
+  fieldMappingDraft = {
+    id: `mapping-${Date.now()}`,
+    sourceName,
+    sourceUrl,
+    sourceType,
+    headers,
+    rows,
+    tables: Array.isArray(tables) && tables.length ? tables : [{ columns: headers, rows }],
+    mapping,
+    signature: getFieldMappingSignature(headers),
+    matchedTemplateName: template?.name || "",
+  };
+  renderFieldMappingPreview();
+  saveAppState();
+}
+
+function renderFieldMappingPreview() {
+  if (!fieldMappingPanel || !fieldMappingTable) return;
+  if (!fieldMappingDraft) {
+    fieldMappingPanel.classList.add("hidden");
+    fieldMappingTable.innerHTML = "";
+    return;
+  }
+  fieldMappingPanel.classList.remove("hidden");
+  fieldMappingTitle.textContent = fieldMappingDraft.sourceName || "字段映射预览";
+  const rows = fieldMappingDraft.rows || [];
+  const tableCount = Array.isArray(fieldMappingDraft.tables) ? fieldMappingDraft.tables.length : 1;
+  fieldMappingSummary.textContent = `${tableCount > 1 ? `共 ${tableCount} 张表，` : ""}当前预览 ${rows.length} 行数据中的前 ${Math.min(3, rows.length)} 行。`;
+  fieldMappingStatus.textContent = fieldMappingDraft.matchedTemplateName
+    ? `已自动套用模板：${fieldMappingDraft.matchedTemplateName}。你仍可以改下拉菜单后再确认导入。`
+    : "没有匹配到旧模板，请选择每一列含义；确认导入后会记住这套表头。";
+  const previewRows = rows.slice(0, 3);
+  fieldMappingTable.innerHTML = `
+    <div class="mapping-grid" style="--mapping-columns:${fieldMappingDraft.headers.length}">
+      ${fieldMappingDraft.headers
+        .map(
+          (header, index) => `
+            <div class="mapping-cell mapping-head">
+              <strong>${escapeHtml(header || `第${index + 1}列`)}</strong>
+              <select data-field-mapping-index="${index}">
+                ${FIELD_MAPPING_OPTIONS.map(
+                  (option) => `<option value="${escapeHtml(option.value)}" ${fieldMappingDraft.mapping[index] === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`,
+                ).join("")}
+              </select>
+            </div>
+          `,
+        )
+        .join("")}
+      ${previewRows
+        .flatMap((row) =>
+          fieldMappingDraft.headers.map(
+            (_, index) => `<div class="mapping-cell">${escapeHtml(row[index] || "") || "<span>空</span>"}</div>`,
+          ),
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function saveFieldMappingTemplate(draft) {
+  const signature = draft.signature || getFieldMappingSignature(draft.headers);
+  const template = {
+    signature,
+    name: draft.sourceName || `字段模板 ${fieldMappingTemplates.length + 1}`,
+    headers: [...draft.headers],
+    mapping: [...draft.mapping],
+    updatedAt: Date.now(),
+  };
+  const existingIndex = fieldMappingTemplates.findIndex((item) => item.signature === signature);
+  if (existingIndex >= 0) {
+    fieldMappingTemplates[existingIndex] = template;
+  } else {
+    fieldMappingTemplates.unshift(template);
+  }
+}
+
+function createMappedTableFromDraft(draft, sourceTable = null) {
+  const selected = draft.mapping.map((field, index) => ({ field, index })).filter((item) => item.field);
+  const columns = [...new Set(selected.map((item) => item.field))];
+  const sourceColumns = sourceTable?.columns || draft.headers || [];
+  const sourceRows = sourceTable?.rows || draft.rows || [];
+  const rows = sourceRows
+    .map((row) =>
+      columns.map((column) => {
+        const source = selected.find((item) => item.field === column);
+        return source ? row[source.index] || "" : "";
+      }),
+    )
+    .filter((row) => row.some(Boolean));
+  return {
+    columns,
+    rows,
+    originalColumns: [...sourceColumns],
+    originalRows: sourceRows.map((row) => sourceColumns.map((_, index) => row[index] || "")),
+  };
+}
+
+function confirmFieldMappingImport() {
+  if (!fieldMappingDraft) {
+    showToast("没有待确认的字段映射。", "error");
+    return;
+  }
+  const requiredFields = ["区域", "售价"];
+  const missingFields = requiredFields.filter((field) => !fieldMappingDraft.mapping.includes(field));
+  if (missingFields.length) {
+    showToast(`请至少映射：${missingFields.join("、")}。`, "error");
+    return;
+  }
+  const mappedTables = (fieldMappingDraft.tables || [{ columns: fieldMappingDraft.headers, rows: fieldMappingDraft.rows }])
+    .map((table) => ({ ...createMappedTableFromDraft(fieldMappingDraft, table), sourcePage: table.sourcePage, sourcePart: table.sourcePart }))
+    .filter((table) => table.rows.length);
+  if (!mappedTables.length) {
+    showToast("映射后没有可导入的数据。", "error");
+    return;
+  }
+  saveFieldMappingTemplate(fieldMappingDraft);
+  const rawTables = createUploadedTables(mappedTables);
+  const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
+  const tables = rawTables.filter((table) => table.rows.length);
+  pendingTables.unshift(...tables);
+  selectedPendingTableId = tables[0]?.id || selectedPendingTableId;
+  fieldMappingDraft = null;
+  renderFieldMappingPreview();
+  setUploadStatus(`已按字段映射生成 ${tables.length} 张待确认表${removedSoldRows ? `，已跳过 ${removedSoldRows} 条已售票` : ""}。`, "success");
+  showToast("字段映射已保存，表格已进入待确认。", "success");
+  saveAppState();
+  renderUploadRecords();
+  renderReviewPanel();
+  renderPublishedTables();
+  renderAdminEvent();
+  uploadRecords.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function detectPdfPageCount(file) {
@@ -484,29 +1321,99 @@ function stopTicketOcrPolling() {
   activeTicketOcrJobId = null;
 }
 
+function buildFailedOcrReport(result = lastTicketOcrJobSnapshot) {
+  if (!result) return "";
+  const errors = result.errors || [];
+  const failedPages = result.failedPages || errors.map((item) => item.page);
+  return [
+    `文件：${result.fileName || uploadedSource?.name || "未知文件"}`,
+    `任务：${result.id || activeTicketOcrJobId || "未知任务"}`,
+    `总页数：${result.totalPages || result.pagesQueued || "未知"}`,
+    `已处理：${result.pagesProcessed || 0}`,
+    `成功页：${result.pagesSucceeded || 0}`,
+    `失败页：${result.pagesFailed || failedPages.length || 0}`,
+    failedPages.length ? `失败页码：${failedPages.join("、")}` : "失败页码：无",
+    "",
+    "失败原因：",
+    ...(errors.length ? errors.map((item) => `PDF 第 ${item.page} 页：${item.message || "识别接口未返回可用表格内容"}`) : ["无"]),
+    "",
+    "已识别内容：",
+    result.partialText || result.text || uploadTableText.value || "暂无",
+  ].join("\n");
+}
+
+function renderFailedOcrPanel(result = null) {
+  if (result) lastTicketOcrJobSnapshot = result;
+  const snapshot = result || lastTicketOcrJobSnapshot;
+  const errors = snapshot?.errors || [];
+  const failedPages = snapshot?.failedPages || errors.map((item) => item.page);
+  const hasFailed = failedPages.length > 0;
+  failedOcrPanel.classList.toggle("hidden", !snapshot || !hasFailed);
+  if (!snapshot || !hasFailed) {
+    failedOcrSummary.textContent = "暂无失败页";
+    failedOcrList.innerHTML = "";
+    failedOcrData.value = "";
+    return;
+  }
+
+  failedOcrSummary.textContent = `${snapshot.fileName || "当前 PDF"} · ${failedPages.length} 页失败`;
+  failedOcrList.innerHTML = errors
+    .map(
+      (item) => `
+        <div class="failed-ocr-item">
+          <strong>PDF 第 ${item.page} 页</strong>
+          <span>${escapeHtml(item.message || "识别接口未返回可用表格内容")}</span>
+        </div>
+      `,
+    )
+    .join("");
+  failedOcrData.value = buildFailedOcrReport(snapshot);
+  retryFailedOcrButton.disabled = snapshot.status === "running" || snapshot.status === "queued";
+}
+
 async function pollTicketOcrJob(jobId) {
   const response = await fetch(`/api/tables/recognize/job?id=${encodeURIComponent(jobId)}`);
   const result = await response.json();
   if (!response.ok) throw new Error(result.message || result.error || "批量识别任务查询失败。");
+  renderFailedOcrPanel(result);
   const total = result.pagesQueued || result.totalPages || 0;
   const processed = result.pagesProcessed || 0;
   const success = result.pagesSucceeded || 0;
   const failed = result.pagesFailed || 0;
   const progressText = total ? `${processed}/${total}` : `${processed}`;
+  const partialText = result.partialText || result.text || "";
+  if (partialText && partialText.length >= uploadTableText.value.length) {
+    uploadTableText.value = partialText;
+  }
   pdfDetectionStatus.textContent = result.message || `正在批量识别 ${progressText} 页。`;
-  setUploadStatus(`批量识别进度：${progressText} 页，已读到 ${success} 页内容${failed ? `，失败 ${failed} 页` : ""}。`, "loading");
+  const failedDetail = failed && result.failedPages?.length ? `，失败页：${result.failedPages.slice(0, 24).join("、")}${result.failedPages.length > 24 ? "..." : ""}` : "";
+  setUploadStatus(`批量识别进度：${progressText} 页，已读到 ${success} 页内容${failed ? `，失败 ${failed} 页` : ""}${failedDetail}。`, "loading");
 
   if (result.status === "done") {
     stopTicketOcrPolling();
-    uploadTableText.value = result.text || "";
+    activeTicketOcrJobId = result.id || jobId;
+    uploadTableText.value = result.text || result.partialText || "";
     pdfDetectionStatus.textContent = `${result.message} 已自动填入下方表格内容；请检查后生成待确认表。`;
-    setUploadStatus("批量 PDF 表格已识别，请检查内容后生成待确认表。", "success");
+    setUploadStatus(
+      failed
+        ? `批量 PDF 已完成，成功 ${success} 页，失败 ${failed} 页。可先生成待确认表，再单独补扫失败页。`
+        : "批量 PDF 表格已识别，请检查内容后生成待确认表。",
+      failed ? "idle" : "success",
+    );
     showToast("批量识别完成。", "success");
     return;
   }
 
   if (result.status === "error") {
     stopTicketOcrPolling();
+    activeTicketOcrJobId = result.id || jobId;
+    if (partialText) {
+      uploadTableText.value = partialText;
+      pdfDetectionStatus.textContent = `${result.message || "批量识别中断"} 已保留已识别页面内容，可先生成待确认表。`;
+      setUploadStatus(`批量识别中断，但已保留 ${success} 页内容。失败 ${failed} 页可稍后补扫。`, "error");
+      showToast("已保留部分识别结果。", "error");
+      return;
+    }
     throw new Error(result.message || "批量识别没有读到可用表格内容。");
   }
 
@@ -524,18 +1431,21 @@ async function recognizeTicketSource(file, detectedTables) {
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   if (!isPdf) return;
   stopTicketOcrPolling();
+  lastTicketOcrJobSnapshot = null;
+  renderFailedOcrPanel(null);
   const dataUrl = await readFileAsDataUrl(file);
-  const maxPages = Math.min(Math.max(detectedTables || 1, 1), 100);
-  setUploadStatus(`正在创建批量识别任务，预计处理 ${maxPages} 页...`, "loading");
-  pdfDetectionStatus.textContent = `PDF 约 ${detectedTables} 页，正在创建批量 OCR 任务。`;
+  const estimatedPages = Math.max(detectedTables || 1, 1);
+  setUploadStatus(`正在创建批量识别任务，预计处理整份 PDF（约 ${estimatedPages} 页）...`, "loading");
+  pdfDetectionStatus.textContent = `PDF 约 ${estimatedPages} 页，正在创建完整批量 OCR 任务。`;
   const response = await fetch("/api/tables/recognize/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file: dataUrl, fileName: file.name, detectedPages: detectedTables, maxPages }),
+    body: JSON.stringify({ file: dataUrl, fileName: file.name, detectedPages: detectedTables }),
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.message || result.error || "PDF 批量识别任务创建失败。");
   activeTicketOcrJobId = result.id;
+  renderFailedOcrPanel(result);
   pdfDetectionStatus.textContent = result.message || "批量识别任务已开始。";
   setUploadStatus("批量识别任务已开始，可以先等进度跑完。", "loading");
   showToast("批量识别已开始。", "success");
@@ -622,15 +1532,89 @@ function getBuiltInSeatmapTemplates() {
 }
 
 function getAllSeatmapTemplates() {
-  return [...getBuiltInSeatmapTemplates(), ...seatmapTemplates];
+  return [...getBuiltInSeatmapTemplates(), ...externalSeatmapTemplates, ...seatmapTemplates];
 }
 
 function getTemplateZonesForSize(template, targetSize = template.size) {
   return createTemplateZones(
-    template.zones.map((zone) => ({ id: zone.id, label: zone.label, points: zone.polygon })),
+    template.zones.map((zone) => ({ id: zone.id, label: zone.label, aliases: zone.aliases, points: zone.polygon })),
     template.size,
     targetSize,
   );
+}
+
+function normalizeExternalSeatmapTemplate(rawTemplate) {
+  if (!rawTemplate || typeof rawTemplate !== "object") return null;
+  const size = rawTemplate.size || {};
+  const width = Number(size.width);
+  const height = Number(size.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  const zones = Array.isArray(rawTemplate.zones)
+    ? rawTemplate.zones
+        .map((zone) => {
+          const polygon = Array.isArray(zone?.polygon) ? zone.polygon : Array.isArray(zone?.points) ? zone.points : [];
+          const normalizedPolygon = polygon
+            .map((point) => (Array.isArray(point) ? [Number(point[0]), Number(point[1])] : null))
+            .filter((point) => point && Number.isFinite(point[0]) && Number.isFinite(point[1]));
+          const label = String(zone?.label || zone?.id || "").trim();
+          if (!label || normalizedPolygon.length < 3) return null;
+          return {
+            id: String(zone.id || label),
+            label,
+            aliases: Array.isArray(zone.aliases) ? zone.aliases.map(String) : [label],
+            polygon: normalizedPolygon,
+            source: "template-file",
+          };
+        })
+        .filter(Boolean)
+    : [];
+  if (!zones.length) return null;
+  const name = String(rawTemplate.name || rawTemplate.eventName || rawTemplate.fileName || "座位图模板").trim();
+  return {
+    id: String(rawTemplate.id || `template-file-${slugify(name)}`),
+    name,
+    fileName: rawTemplate.fileName || rawTemplate.seatmapFileName || "",
+    eventName: rawTemplate.eventName || "",
+    seatmapImage: rawTemplate.seatmapImage || rawTemplate.image || "",
+    seatmapFileName: rawTemplate.seatmapFileName || rawTemplate.fileName || "",
+    size: { width, height },
+    zones,
+    fingerprint: rawTemplate.fingerprint || "",
+    keywords: Array.isArray(rawTemplate.keywords) ? rawTemplate.keywords.map(String) : [],
+    builtIn: true,
+    external: true,
+    createdAt: rawTemplate.createdAt || 0,
+  };
+}
+
+async function loadExternalSeatmapTemplates() {
+  try {
+    const response = await fetch("/api/seatmap/templates");
+    if (!response.ok) throw new Error("模板文件读取失败");
+    const result = await response.json();
+    externalSeatmapTemplates = (Array.isArray(result.templates) ? result.templates : []).map(normalizeExternalSeatmapTemplate).filter(Boolean);
+    if (!externalSeatmapTemplates.length) {
+      const fallbackFiles = ["bigbang-goyang.json", "bigbang-singapore.json", "itzy-venetian.json", "nct-dream-10th-fm.json"];
+      const fallbackTemplates = await Promise.all(
+        fallbackFiles.map((fileName) =>
+          fetch(`/seatmap-templates/${fileName}`)
+            .then((templateResponse) => (templateResponse.ok ? templateResponse.json() : null))
+            .catch(() => null),
+        ),
+      );
+      externalSeatmapTemplates = fallbackTemplates.map(normalizeExternalSeatmapTemplate).filter(Boolean);
+    }
+    const repaired = events.reduce((count, event) => count + (repairKnownEventTemplateMismatch(event) ? 1 : 0), 0);
+    const synced = events.reduce((count, event) => count + (syncBuiltInSeatmapTemplate(event) || syncKnownExternalSeatmapTemplate(event) ? 1 : 0), 0);
+    if (synced || repaired) saveAppState();
+    renderAdminEvent();
+    render();
+  } catch (error) {
+    console.warn("Seatmap template files unavailable", error);
+    if (templateLibrarySummary) {
+      templateLibrarySummary.textContent = "模板文件夹暂时读取失败，已保留内置模板和自建模板。";
+    }
+  }
 }
 
 function getHexDistance(a, b) {
@@ -643,6 +1627,17 @@ function getHexDistance(a, b) {
   return distance;
 }
 
+const GENERIC_TEMPLATE_KEYWORDS = new Set(["bigbang", "itzy", "tws", "twice", "concert", "tour", "world tour", "座位图", "seatmap"]);
+const DISABLED_AUTO_SEATMAP_TEMPLATE_IDS = new Set(["builtin-nct-dream-10th-fm"]);
+
+function isGenericTemplateKeyword(keyword) {
+  return GENERIC_TEMPLATE_KEYWORDS.has(normalizeTemplateName(keyword));
+}
+
+function isSeatmapTemplateAutoDisabled(templateId) {
+  return DISABLED_AUTO_SEATMAP_TEMPLATE_IDS.has(String(templateId || ""));
+}
+
 function getTemplateMatchScore(template, source) {
   const templateName = normalizeTemplateName(`${template.name} ${template.fileName} ${template.eventName || ""}`);
   const sourceName = normalizeTemplateName(`${source.fileName || ""} ${currentEvent?.name || ""} ${currentEvent?.seatmapTitle || ""}`);
@@ -650,16 +1645,23 @@ function getTemplateMatchScore(template, source) {
   const templateRatio = template.size.width / template.size.height;
   const sourceRatio = size.width / size.height;
   const ratioPenalty = Math.abs(templateRatio - sourceRatio) * 100;
-  const keywordHit = (template.keywords || []).some((keyword) => sourceName.includes(normalizeTemplateName(keyword)));
+  const keywordHit = (template.keywords || []).some((keyword) => {
+    if (isGenericTemplateKeyword(keyword)) return false;
+    return sourceName.includes(normalizeTemplateName(keyword));
+  });
   const nameHit = sourceName && templateName && (sourceName.includes(templateName) || templateName.includes(sourceName));
-  const fingerprintDistance = template.builtIn ? Infinity : getHexDistance(template.fingerprint, source.fingerprint);
+  const fingerprintDistance = template.fingerprint && source.fingerprint ? getHexDistance(template.fingerprint, source.fingerprint) : Infinity;
   if (fingerprintDistance <= 8) return { template, score: fingerprintDistance + ratioPenalty, reason: "图片指纹匹配" };
   if (keywordHit || nameHit) return { template, score: 20 + ratioPenalty + (template.builtIn ? -8 : 0), reason: "名称匹配" };
+  if (template.builtIn && Math.abs(templateRatio - sourceRatio) <= 0.012) {
+    return { template, score: 52 + ratioPenalty, reason: "图片比例匹配" };
+  }
   return null;
 }
 
 function findBestSeatmapTemplate(source = {}) {
   const matches = getAllSeatmapTemplates()
+    .filter((template) => !isSeatmapTemplateAutoDisabled(template.id))
     .map((template) => getTemplateMatchScore(template, source))
     .filter(Boolean)
     .sort((a, b) => a.score - b.score);
@@ -690,12 +1692,13 @@ function applySeatmapTemplate(template, reason = "模板") {
   }
   currentEvent.zones = getTemplateZonesForSize(template, currentEvent.seatmapSize);
   currentEvent.seatmapTemplateId = template.id;
+  resetSeatmapTestStatus(`${reason}套用后需要逐区测试`);
   selectedDateId = null;
   selectedZone = null;
   hoveredZone = null;
   const imageText = templateImage ? "座位图和热区" : "热区";
   zoneMarkingStatus.textContent = `${reason}已套用：${template.name}，已带入${imageText}，共 ${currentEvent.zones.length} 个精准热区。`;
-  seatmapStatus.textContent = `已套用模板：${template.name}。当前演出已拥有座位图，客人前台可以直接查看/点击，票源表格后面再上传。`;
+  seatmapStatus.textContent = `已套用模板：${template.name}。发布票源前必须前台逐区测试通过。`;
   saveAppState();
   renderAdminEvent();
   render();
@@ -749,21 +1752,26 @@ function renderSeatmapTemplates() {
   if (!templateLibrarySummary || !seatmapTemplateList) return;
   const templates = getAllSeatmapTemplates();
   const userTemplateCount = seatmapTemplates.length;
+  const fileTemplateCount = externalSeatmapTemplates.length;
+  const templateNames = templates.map((template) => template.name).slice(0, 3).join("、");
+  const extraTemplateCount = Math.max(0, templates.length - 3);
   templateLibrarySummary.textContent = templates.length
-    ? `已有 ${templates.length} 个模板（自建 ${userTemplateCount} 个），模板会同时带入座位图和精准热区。`
+    ? `已有 ${templates.length} 个模板：${templateNames}${extraTemplateCount ? ` 等 ${templates.length} 个` : ""}（模板文件 ${fileTemplateCount} 个，自建 ${userTemplateCount} 个）。`
     : "保存座位图和精准热区后，下次同款演出可一键套用。";
   if (toggleTemplateLibraryButton) {
-    toggleTemplateLibraryButton.textContent = templateLibraryOpen ? "收起模板大全" : "模板大全";
+    toggleTemplateLibraryButton.textContent = templateLibraryOpen ? "收起模板大全" : `模板大全 ${templates.length} 个`;
   }
   seatmapTemplateList.hidden = !templateLibraryOpen;
   seatmapTemplateList.classList.toggle("collapsed", !templateLibraryOpen);
   seatmapTemplateList.innerHTML = templates
     .map(
-      (template) => `
+      (template) => {
+        const sourceText = template.external ? " · 模板文件" : template.builtIn ? " · 内置" : "";
+        return `
         <div class="template-item ${template.id === currentEvent.seatmapTemplateId ? "active" : ""}">
           <span class="template-item-main">
             <b>${escapeHtml(template.name)}</b>
-            <small>${getTemplateSeatmapImage(template) ? "含座位图" : "仅热区"} · ${template.size.width}x${template.size.height} · ${template.zones.length} 个热区${template.builtIn ? " · 内置" : ""}</small>
+            <small>${getTemplateSeatmapImage(template) ? "含座位图" : "仅热区"} · ${template.size.width}x${template.size.height} · ${template.zones.length} 个热区${sourceText}</small>
           </span>
           <span class="template-item-actions">
             <button class="small-button ghost" type="button" data-apply-template="${template.id}">套用</button>
@@ -777,7 +1785,8 @@ function renderSeatmapTemplates() {
             }
           </span>
         </div>
-      `,
+      `;
+      },
     )
     .join("");
 }
@@ -796,17 +1805,2428 @@ function createPlaceholderSeatmap(name) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+function uniqueCleanValues(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function splitLocationParts(location = "") {
+  const parts = String(location)
+    .split(/[·|｜@]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return {
+    city: parts[0] || "",
+    venue: parts.slice(1).join(" · ") || "",
+  };
+}
+
+function getEventArtist(event) {
+  if (event.artist) return event.artist;
+  const { city } = splitLocationParts(event.location);
+  if (city && event.name.endsWith(city)) return event.name.slice(0, -city.length).trim();
+  return event.name;
+}
+
+function getEventCity(event) {
+  return event.city || splitLocationParts(event.location).city || "";
+}
+
+function getEventVenue(event) {
+  return event.venueLocal || event.venue || splitLocationParts(event.location).venue || "";
+}
+
+function mergeEventDraftHistory(seed = eventDraftHistory) {
+  eventDraftHistory = {
+    artists: uniqueCleanValues([...(seed.artists || []), ...events.map(getEventArtist)]),
+    cities: uniqueCleanValues([...(seed.cities || []), ...events.map(getEventCity)]),
+    venues: uniqueCleanValues([...(seed.venues || []), ...events.map(getEventVenue)]),
+  };
+}
+
+function renderEventDraftHistory() {
+  mergeEventDraftHistory();
+  eventArtistHistory.innerHTML = eventDraftHistory.artists.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+  eventCityHistory.innerHTML = eventDraftHistory.cities.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+  eventVenueHistory.innerHTML = eventDraftHistory.venues.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+}
+
+function findQuantityColumnIndex(columns = []) {
+  return columns.findIndex((column) => isQuantityColumnName(column));
+}
+
+function isFaceValueColumnName(column = "") {
+  const text = normalize(column);
+  if (/票面(位置|排数|排|号段|号码|座位|座号)|门票(位置|排数|排|号段|号码)|座位图|座席图|seat\s*map|seatmap/i.test(String(column || ""))) return false;
+  return ["票面", "票价", "价位", "面值", "席位", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"].some((name) =>
+    text.includes(normalize(name)),
+  );
+}
+
+function findFaceValueColumnIndexes(columns = []) {
+  return columns.map((column, index) => (isFaceValueColumnName(column) ? index : -1)).filter((index) => index >= 0);
+}
+
+function getFirstFaceValue(table, row) {
+  const indexes = findFaceValueColumnIndexes(table?.columns || []);
+  const index = indexes.find((item) => String(row?.[item] || "").trim());
+  return index >= 0 ? row[index] : "";
+}
+
+function isGenericFaceValue(value) {
+  const text = normalize(value);
+  if (!text) return false;
+  return /^(floor|standing|stand|vip|vipseat|vipstanding|内场|內場|看台|看臺|座席|席位|配送|配达|配達|转寄|轉寄|电子票|電子票|纸质票|紙質票)$/.test(text);
+}
+
+function isSalePriceColumnName(column = "") {
+  const text = normalize(column);
+  if (!text || isFaceValueColumnName(column) || isInternalColorColumn(column)) return false;
+  if (["售", "售价", "售價", "单", "單", "单价", "單價", "价", "價格", "价格", "报价", "報價", "金额", "金額"].includes(text)) return true;
+  return /(售价|售價|单价|單價|价格|價格|报价|報價|金额|金額|售\/张|售\/張|price|ask|가격|금액)/i.test(text);
+}
+
+function isExplicitSalePriceColumnName(column = "") {
+  const text = normalize(column);
+  if (!text || isFaceValueColumnName(column) || isInternalColorColumn(column)) return false;
+  if (["售", "售价", "售價", "报价", "報價", "卖价", "賣價", "出价", "出價", "ask"].includes(text)) return true;
+  return /(售价|售價|售出价|售出價|出售价|出售價|销售价|銷售价|卖价|賣價|报价|報價|售\/张|售\/張|ask|saleprice|sellprice|sellingprice)/i.test(
+    column,
+  );
+}
+
+function isGenericPriceColumnName(column = "") {
+  const text = normalize(column);
+  if (!isSalePriceColumnName(column) || isExplicitSalePriceColumnName(column)) return false;
+  return ["单", "單", "单价", "單價", "价", "價格", "价格", "金额", "金額", "price", "가격", "금액"].includes(text) ||
+    /(单价|單價|价格|價格|金额|金額|price|가격|금액)/i.test(column);
+}
+
+function isQuantityColumnName(column = "") {
+  const text = normalize(column);
+  return ["数量", "张数", "張數", "连坐", "連坐", "连坐数量", "count", "qty", "매수", "수량", "장수", "연석"].some((name) =>
+    text.includes(normalize(name)),
+  );
+}
+
+function isSeatPositionColumnName(column = "") {
+  return /(票面|门票|座位|座席)?(位置|排数|排|号段|号码|座位号|座号)|seat\s*(position|row|number)|seatmap|座位图|座席图/i.test(String(column || ""));
+}
+
+function isSeatLocationColumnName(column = "") {
+  const text = normalize(column);
+  if (!text) return false;
+  if (/座位图|座席图|seatmap|map/.test(text)) return false;
+  return /(位置|席位|座位位置|座席位置|票面位置|门票位置|location|seatposition|구역|구|열|좌석)/i.test(String(column || "")) || /^位置$/.test(text);
+}
+
+function isProtectedNonPriceColumnName(column = "") {
+  const text = normalize(column);
+  if (!text) return false;
+  if (isSalePriceColumnName(column)) return false;
+  return (
+    isQuantityColumnName(column) ||
+    isDeliveryColumnName(column) ||
+    isSeatPositionColumnName(column) ||
+    /^(序号|编号|no|num|id)$/.test(text) ||
+    /(日期|演出日期|时间|date|day|일자|날짜|시간|区域|区|位置|구역|block|section|zone|area|排|排数|行|行数|row|열|座位号|座位|座号|号段|号码|大小号|seat|number|번호|좌석번호|备注|remark|note|说明|비고|메모|참고|状态|status|售卖状态|销售状态|是否售出|底色|颜色)/i.test(
+      column,
+    )
+  );
+}
+
+function extractSalePriceText(value, { minPrice = 1000 } = {}) {
+  const raw = String(value || "").trim();
+  if (!raw || isSoldText(raw, { strict: true }) || isLikelyDateValue(raw) || isLikelyRowColorValue(raw)) return "";
+  const minDigits = Number(minPrice) < 1000 ? 3 : 4;
+  const pricePattern = new RegExp(`[￥¥$€£₩]?\\s*\\d{1,3}(?:[,，]\\d{3})+(?:\\.\\d+)?|[￥¥$€£₩]?\\s*\\d{${minDigits},7}(?:\\.\\d+)?`, "g");
+  const matches = raw.match(pricePattern) || [];
+  const price = matches.find((match) => {
+    const number = extractNumber(match);
+    return number !== null && number >= minPrice;
+  });
+  return price ? price.replace(/\s+/g, "") : "";
+}
+
+function isLikelySalePriceValue(value, options = {}) {
+  const text = String(value || "").trim();
+  if (!text || isSoldText(text, { strict: true })) return false;
+  if (isLikelyDateValue(text)) return false;
+  const minPrice = Number(options.minPrice || 1000);
+  const priceText = extractSalePriceText(text, { minPrice });
+  const number = extractNumber(priceText);
+  return number !== null && number >= minPrice;
+}
+
+function isSalePriceCandidateValue(value) {
+  const text = String(value || "").trim();
+  if (!text || isSoldText(text, { strict: true }) || isLikelyDateValue(text) || isLikelyRowColorValue(text)) return false;
+  const priceText = extractSalePriceText(text, { minPrice: 100 });
+  const number = extractNumber(priceText);
+  return number !== null && number >= 100;
+}
+
+function isLikelySeatCountValue(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text || isSoldText(text, { strict: true }) || isLikelyRowColorValue(text)) return false;
+  if (/[￥¥$€£₩]/.test(text) || /[,，]/.test(text)) return false;
+  if (/^\d+$/.test(text)) return Number(text) > 0 && Number(text) <= 20;
+  if (/^\d+\s*(张|连)$/.test(text)) return true;
+  if (/^[一二三四五六七八九十]\s*(张|连)?$/.test(text)) return true;
+  if (/^(单|单张|一张|两张|二连|三连|四连|五连|隔一连|可拆|连坐)$/i.test(text)) return true;
+  if (/^\d+\s*\+\s*\d+$/.test(text)) return true;
+  return false;
+}
+
+function isLikelySeatRowValue(value) {
+  const text = String(value || "").trim();
+  if (!text || isSoldText(text, { strict: true }) || isLikelyRowColorValue(text)) return false;
+  if (isLikelySalePriceValue(text)) return false;
+  if (extractSeatRowFromText(text)) return true;
+  if (/^(ga|floor|standing|内场)$/i.test(text)) return true;
+  if (/^[a-z]$/i.test(text)) return true;
+  if (/^[a-z]\s*[（(].+[）)]$/i.test(text)) return true;
+  if (/^[pqkmhfedcbas]\s*排?$/i.test(text)) return true;
+  if (/^\d{1,2}\s*(排|row)?$/i.test(text)) return true;
+  if (/^\d{1,2}\s*排?\s*(?:实际)?第?\d{1,2}\s*排?$/.test(text)) return true;
+  return false;
+}
+
+function isLikelySeatNumberValue(value) {
+  const text = String(value || "").trim();
+  if (!text || isSoldText(text, { strict: true }) || isLikelyRowColorValue(text)) return false;
+  if (extractSeatNumberFromText(text)) return true;
+  if (/^\d{1,4}$/.test(text)) return true;
+  if (/^\d{1,4}\s*[-~到至]\s*\d{1,4}(?:号)?$/.test(text)) return true;
+  if (/^\d+x$/i.test(text)) return true;
+  if (/^\d*x\s*号$/i.test(text)) return true;
+  if (/^\d+x\s*[（(].+[）)]$/i.test(text)) return true;
+  if (/^x$/i.test(text)) return true;
+  if (/^x\s*号$/i.test(text)) return true;
+  if (/^x\s*[（(].+[）)]$/i.test(text)) return true;
+  return false;
+}
+
+function isLikelyZoneCode(value) {
+  const composite = parseCompositeSeatInfo(value);
+  if (composite?.zone) return true;
+  const text = cleanZoneToken(value);
+  if (!text || isSoldText(text, { strict: true }) || isLikelyRowColorValue(text)) return false;
+  if (/^\d{1,2}$/.test(text)) return false;
+  if (/^\d{3}[a-z]?$/i.test(text)) return true;
+  if (/^[a-z]{1,3}\d+[a-z]?$/i.test(text)) return true;
+  if (/^[a-z]\d$/i.test(text)) return true;
+  if (/^(fe|fw|floor|standing|vip|pb\d+|pc\d+|pd\d+|pe\d+|pen[a-z]\d*|r\d+|z\d+|e\d+|b\d+)$/i.test(text)) return true;
+  return false;
+}
+
+function isLikelyRowColorValue(value) {
+  return Boolean(normalizeRowColorLabel(value));
+}
+
+function getColumnFilledValues(table, columnIndex) {
+  return (table.rows || []).map((row) => row[columnIndex]).filter((value) => String(value || "").trim());
+}
+
+function columnRatio(table, columnIndex, predicate) {
+  const values = getColumnFilledValues(table, columnIndex);
+  if (!values.length) return 0;
+  return values.filter(predicate).length / values.length;
+}
+
+function isLikelySerialValue(value) {
+  const text = String(value || "").trim();
+  if (!text || isSoldText(text, { strict: true }) || isLikelyRowColorValue(text)) return false;
+  return /^(序号|编号|no\.?|new|day\d+[-_])?\s*[\w-]*\d+$/i.test(text) && !isLikelyDateValue(text) && !isLikelySalePriceValue(text);
+}
+
+function isLikelyRemarkOnlyColumnValue(value) {
+  const text = String(value || "").trim();
+  return Boolean(text && isLikelyRemarkValue(text) && !isLikelyZoneCode(text) && !isLikelySeatRowValue(text) && !isLikelySeatNumberValue(text));
+}
+
+function columnLooksLike(table, columnIndex, predicate, threshold = 0.45) {
+  return columnRatio(table, columnIndex, predicate) >= threshold;
+}
+
+function cloneRows(rows = []) {
+  return (rows || []).map((row) => [...(row || [])]);
+}
+
+function ensureOriginalTableSnapshot(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return table;
+  if (!Array.isArray(table.originalColumns)) {
+    table.originalColumns = [...table.columns];
+  }
+  if (!Array.isArray(table.originalRows) || table.originalRows.length !== table.rows.length) {
+    table.originalRows = cloneRows(table.rows);
+  }
+  return table;
+}
+
+function syncOriginalRowValue(table, rowIndex, columnIndex, value, { appendMissing = false } = {}) {
+  ensureOriginalTableSnapshot(table);
+  if (!table?.originalRows?.[rowIndex] || !table.columns?.[columnIndex]) return;
+  const columnName = table.columns[columnIndex];
+  if (isInternalColorColumn(columnName)) return;
+  let originalIndex = -1;
+  if (table.originalColumns[columnIndex] && normalize(table.originalColumns[columnIndex]) === normalize(columnName)) {
+    originalIndex = columnIndex;
+  } else {
+    originalIndex = table.originalColumns.findIndex((column) => normalize(column) === normalize(columnName));
+  }
+  if (originalIndex < 0 && appendMissing) {
+    table.originalColumns.push(columnName);
+    originalIndex = table.originalColumns.length - 1;
+    table.originalRows.forEach((row) => {
+      while (row.length < table.originalColumns.length) row.push("");
+    });
+  }
+  if (originalIndex < 0) return;
+  while (table.originalRows[rowIndex].length < table.originalColumns.length) table.originalRows[rowIndex].push("");
+  table.originalRows[rowIndex][originalIndex] = value;
+}
+
+function syncOriginalRowValueByPosition(table, rowIndex, columnIndex, value, { appendMissing = false } = {}) {
+  ensureOriginalTableSnapshot(table);
+  if (!table?.originalRows?.[rowIndex] || !table.columns?.[columnIndex]) return;
+  const columnName = table.columns[columnIndex];
+  if (isInternalColorColumn(columnName)) return;
+  if (table.originalColumns[columnIndex] && !isInternalColorColumn(table.originalColumns[columnIndex])) {
+    while (table.originalRows[rowIndex].length < table.originalColumns.length) table.originalRows[rowIndex].push("");
+    table.originalRows[rowIndex][columnIndex] = value;
+    return;
+  }
+  syncOriginalRowValue(table, rowIndex, columnIndex, value, { appendMissing });
+}
+
+function syncOriginalRowFromCurrentRow(table, rowIndex, row) {
+  if (!table || !row) return;
+  (table.columns || []).forEach((column, columnIndex) => {
+    if (isInternalColorColumn(column)) return;
+    syncOriginalRowValueByPosition(table, rowIndex, columnIndex, row[columnIndex] || "", { appendMissing: true });
+  });
+}
+
+function setSemanticColumnName(table, columnIndex, columnName) {
+  if (columnIndex < 0 || !table?.columns || columnIndex >= table.columns.length || table.columns[columnIndex] === columnName) return false;
+  ensureOriginalTableSnapshot(table);
+  table.columns[columnIndex] = columnName;
+  return true;
+}
+
+function mergeDuplicateColumnsByName(table, names = ["备注", "售价"]) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  let changed = false;
+  const targets = new Set(names.map((name) => normalize(name)));
+  for (let index = 0; index < table.columns.length; index += 1) {
+    const target = normalize(table.columns[index]);
+    if (!targets.has(target)) continue;
+    let duplicateIndex = table.columns.findIndex((column, itemIndex) => itemIndex > index && normalize(column) === target);
+    while (duplicateIndex > index) {
+      let duplicateHasValue = false;
+      table.rows.forEach((row) => {
+        while (row.length < table.columns.length) row.push("");
+        const duplicateValue = String(row[duplicateIndex] || "").trim();
+        if (!duplicateValue) return;
+        duplicateHasValue = true;
+        const keepValue = String(row[index] || "").trim();
+        if (!keepValue) {
+          row[index] = duplicateValue;
+        } else if (target === normalize("备注") && !normalize(keepValue).includes(normalize(duplicateValue))) {
+          row[index] = `${keepValue} ${duplicateValue}`.trim();
+        }
+        row[duplicateIndex] = "";
+      });
+      const canRemove = !duplicateHasValue || table.rows.every((row) => !String(row[duplicateIndex] || "").trim());
+      if (!canRemove) break;
+      table.columns.splice(duplicateIndex, 1);
+      table.rows.forEach((row) => row.splice(duplicateIndex, 1));
+      changed = true;
+      duplicateIndex = table.columns.findIndex((column, itemIndex) => itemIndex > index && normalize(column) === target);
+    }
+  }
+  return changed;
+}
+
+function repairDuplicateDateColumns(table) {
+  const dateIndexes = findColumnIndexes(table.columns || [], ["日期", "演出日期", "date", "day", "일자"]);
+  if (dateIndexes.length <= 1) return false;
+  let changed = false;
+  dateIndexes.forEach((index) => {
+    const dateRatio = columnRatio(table, index, isLikelyDateValue);
+    if (dateRatio < 0.35 && columnLooksLike(table, index, isLikelySerialValue, 0.35)) {
+      changed = setSemanticColumnName(table, index, "序号") || changed;
+    }
+  });
+  return changed;
+}
+
+function findLikelyDateColumnIndex(table) {
+  const columns = table.columns || [];
+  const rows = table.rows || [];
+  const candidates = columns
+    .map((column, index) => {
+      const values = getColumnFilledValues(table, index);
+      const header = normalize(column);
+      const hasDateHeader = /日期|演出日期|时间|date|day|일자/.test(header);
+      const excludedHeader = /序号|编号|no|num|区域|区|位置|排|行|座位|号|数量|张数|连坐|售价|价格|金额|price|状态/.test(header);
+      const fullDateRatio = valueRatio(values, isLikelyDateValue);
+      const dayOnlyRatio = valueRatio(values, isLikelyDayOnlyDateValue);
+      const uniqueCount = new Set(values.map((value) => String(value || "").trim()).filter(Boolean)).size;
+      const repeatedDayColumn =
+        rows.length >= 4 &&
+        dayOnlyRatio >= 0.7 &&
+        uniqueCount > 0 &&
+        uniqueCount <= Math.max(2, Math.ceil(values.length * 0.35)) &&
+        !excludedHeader;
+      const score = (hasDateHeader ? 120 : 0) + fullDateRatio * 90 + (repeatedDayColumn ? 70 : 0);
+      return { index, score };
+    })
+    .filter((item) => item.score >= 70)
+    .sort((a, b) => b.score - a.score);
+  return candidates[0]?.index ?? -1;
+}
+
+function repairSemanticColumnRoles(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  let changed = repairDuplicateDateColumns(table);
+
+  const columns = table.columns;
+  const ratios = columns.map((column, index) => ({
+    index,
+    column,
+    date: columnRatio(table, index, isLikelyDateColumnValue),
+    zone: columnRatio(table, index, isLikelyZoneCode),
+    eventZone: columnRatio(table, index, (value) => currentEvent?.zones?.some((zone) => zoneTokenMatches(value, zone))),
+    row: columnRatio(table, index, isLikelySeatRowValue),
+    seat: columnRatio(table, index, isLikelySeatNumberValue),
+    composite: columnRatio(table, index, (value) => Boolean(parseCompositeSeatInfo(value))),
+    price: columnRatio(table, index, (value) => isLikelySalePriceValue(value, { minPrice: isSalePriceColumnName(column) ? 100 : 1000 })),
+    count: columnRatio(table, index, isLikelySeatCountValue),
+    serial: columnRatio(table, index, isLikelySerialValue),
+    remark: columnRatio(table, index, isLikelyRemarkOnlyColumnValue),
+    businessRemark: columnRatio(table, index, isBusinessStatusRemarkValue),
+  }));
+
+  ratios.forEach((item) => {
+    const header = normalize(item.column);
+    if (["no", "num", "number", "id", "序号", "编号"].includes(header)) {
+      changed = setSemanticColumnName(table, item.index, "序号") || changed;
+      return;
+    }
+    if (item.serial >= 0.5 && /(日期|date|day|일자)/i.test(header) && item.date < 0.3) {
+      changed = setSemanticColumnName(table, item.index, "序号") || changed;
+    }
+  });
+
+  if (!findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]).length) {
+    const likelyDateIndex = findLikelyDateColumnIndex(table);
+    if (likelyDateIndex >= 0) {
+      changed = setSemanticColumnName(table, likelyDateIndex, "日期") || changed;
+    }
+  }
+
+  ratios.forEach((item) => {
+    if (item.businessRemark >= 0.35 || (isDeliveryColumnName(item.column) && item.remark >= 0.2)) {
+      changed = setSemanticColumnName(table, item.index, "备注") || changed;
+    }
+  });
+
+  const priceIndexes = findSalePriceColumnIndexes(columns);
+  const priceLikeIndexes = ratios
+    .filter((item) => item.price >= 0.45 && !isFaceValueColumnName(item.column) && !isProtectedNonPriceColumnName(item.column))
+    .map((item) => item.index);
+  const bestPriceIndex = priceLikeIndexes[priceLikeIndexes.length - 1] ?? -1;
+  if (bestPriceIndex >= 0 && (!priceIndexes.length || !priceIndexes.some((index) => ratios[index]?.price >= 0.35))) {
+    changed = setSemanticColumnName(table, bestPriceIndex, "售价") || changed;
+  }
+
+  const faceIndexes = findFaceValueColumnIndexes(columns);
+  const strongSeparateZoneIndex = ratios.find(
+    (item) =>
+      !faceIndexes.includes(item.index) &&
+      /(区域|区|區|block|section|zone|area|구역|구)/i.test(item.column) &&
+      (item.eventZone >= 0.2 || item.zone >= 0.35 || item.composite >= 0.2) &&
+      item.price < 0.25,
+  )?.index;
+  faceIndexes.forEach((index) => {
+    const item = ratios[index];
+    const values = getColumnFilledValues(table, index);
+    const genericFaceRatio = valueRatio(values, isGenericFaceValue);
+    if (strongSeparateZoneIndex >= 0 && genericFaceRatio >= 0.35) return;
+    if (genericFaceRatio >= 0.5 && item?.eventZone < 0.2 && item?.composite < 0.35) return;
+    if ((item?.eventZone >= 0.3 || item?.zone >= 0.45 || item?.composite >= 0.35) && item.price < 0.2) {
+      changed = setSemanticColumnName(table, index, "区域") || changed;
+    }
+  });
+
+  const zoneIndexes = findColumnIndexes(columns, ["区域", "区", "block", "section", "구역"]);
+  zoneIndexes.forEach((index) => {
+    const item = ratios[index];
+    if (!item) return;
+    if (item.price >= 0.65 && item.zone < 0.2 && isSalePriceColumnName(item.column)) {
+      changed = setSemanticColumnName(table, index, "售价") || changed;
+      return;
+    }
+    if (item.row >= 0.45 && item.zone < 0.25) {
+      const previousZone = ratios
+        .slice(0, index)
+        .reverse()
+        .find((candidate) => candidate.zone >= 0.45 && candidate.price < 0.25);
+      if (previousZone) {
+        changed = setSemanticColumnName(table, previousZone.index, "区域") || changed;
+        changed = setSemanticColumnName(table, index, "排") || changed;
+      }
+    }
+  });
+
+  const rowIndexes = findColumnIndexes(columns, ["排", "排数", "行", "行数", "row", "位置"]);
+  rowIndexes.forEach((index) => {
+    const item = ratios[index];
+    if (!item) return;
+    if (item.businessRemark >= 0.35) {
+      changed = setSemanticColumnName(table, index, "备注") || changed;
+      return;
+    }
+    if ((item.zone >= 0.45 || item.composite >= 0.35) && item.row < 0.35) {
+      changed = setSemanticColumnName(table, index, "区域") || changed;
+    } else if (item.seat >= 0.45 && item.row < 0.35) {
+      changed = setSemanticColumnName(table, index, "座位号") || changed;
+    }
+  });
+
+  const quantityIndexes = findColumnIndexes(columns, ["数量", "张数", "连坐", "连坐数量", "count", "qty", "매수"]);
+  quantityIndexes.forEach((index) => {
+    const item = ratios[index];
+    if (!item) return;
+    if (item.businessRemark >= 0.35) {
+      changed = setSemanticColumnName(table, index, "备注") || changed;
+    } else if (item.price >= 0.55 && item.count < 0.35 && !isFaceValueColumnName(item.column)) {
+      changed = setSemanticColumnName(table, index, "售价") || changed;
+    } else if (item.seat >= 0.45 && item.count < 0.35) {
+      changed = setSemanticColumnName(table, index, "座位号") || changed;
+    } else if (item.row >= 0.45 && item.count < 0.35) {
+      changed = setSemanticColumnName(table, index, "排") || changed;
+    }
+  });
+
+  const statusIndexes = findColumnIndexes(columns, ["状态", "售卖状态", "销售状态", "status", "是否售出"]);
+  statusIndexes.forEach((index) => {
+    const item = ratios[index];
+    if (!item) return;
+    if (item.businessRemark >= 0.35 && columnRatio(table, index, (value) => isSoldText(value, { strict: true })) < 0.25) {
+      changed = setSemanticColumnName(table, index, "备注") || changed;
+    }
+  });
+
+  const seatIndexes = findSeatNumberColumnIndexes(columns);
+  seatIndexes.forEach((index) => {
+    const item = ratios[index];
+    if (!item) return;
+    const strongSeatHeader = /票面号段|门票号段|座位号段|座位号|座号|号数|大小号|号段|号码|seat|number|no|번호|좌석번호/i.test(
+      item.column,
+    );
+    if (item.price >= 0.65 && item.seat < 0.25 && isSalePriceColumnName(item.column)) {
+      changed = setSemanticColumnName(table, index, "售价") || changed;
+    } else if (!strongSeatHeader && item.row >= 0.5 && item.seat < 0.35) {
+      changed = setSemanticColumnName(table, index, "排") || changed;
+    }
+  });
+
+  ratios.forEach((item) => {
+    if (item.remark >= 0.55 && !/(备注|remark|note|说明)/i.test(item.column)) {
+      changed = setSemanticColumnName(table, item.index, "备注") || changed;
+    }
+  });
+
+  return changed;
+}
+
+function findMisreadSalePriceColumnIndex(table) {
+  const columns = table.columns || [];
+  const candidates = columns
+    .map((column, index) => ({ column, index }))
+    .filter(({ column }) => !isFaceValueColumnName(column))
+    .filter(({ column }) => !isProtectedNonPriceColumnName(column))
+    .filter(({ column }) => !["日期", "区域", "排", "行", "座位", "号数", "编号", "序号"].some((name) => normalize(column).includes(normalize(name))))
+    .map((item) => ({
+      ...item,
+      ratio: columnRatio(table, item.index, (value) => isLikelySalePriceValue(value, { minPrice: isSalePriceColumnName(item.column) ? 100 : 1000 })),
+    }))
+    .filter((item) => item.ratio >= (isSalePriceColumnName(item.column) ? 0.35 : 0.75));
+  if (!candidates.length) return -1;
+  const preferred = candidates.find((item) => isSalePriceColumnName(item.column) || /售价|价格|单价|报价|金额|price/i.test(item.column));
+  if (preferred) return preferred.index;
+  return candidates[candidates.length - 1]?.index ?? -1;
+}
+
+function getDirectSalePriceFromRow(table, row) {
+  return (
+    findPreferredSalePriceColumnIndexes(table.columns || [])
+      .map((index) => extractSalePriceText(row[index], { minPrice: 100 }))
+      .find(Boolean) || ""
+  );
+}
+
+function getSalePriceCandidateFromRow(table, row, { afterIndex = -1, excludeIndexes = new Set() } = {}) {
+  const columns = table.columns || [];
+  const candidates = row
+    .map((value, index) => ({ value: String(value || "").trim(), index, column: columns[index] || "" }))
+    .filter(({ value, index, column }) => {
+      if (!value || excludeIndexes.has(index) || isInternalColorColumn(column) || isLikelyRowColorValue(value)) return false;
+      if (!isSalePriceCandidateValue(value)) return false;
+      const protectedColumn = isProtectedNonPriceColumnName(column);
+      if (protectedColumn && !isSalePriceColumnName(column) && !isRemarkColumnName(column) && !isDeliveryColumnName(column)) return false;
+      return true;
+    })
+    .map((item) => {
+      const price = extractSalePriceText(item.value, { minPrice: 100 });
+      const number = extractNumber(price);
+      const hasCurrency = /[￥¥$€£₩]/.test(item.value);
+      const saleHeader = isSalePriceColumnName(item.column) || /售价|售價|价格|價格|单价|單價|报价|報價|金额|金額|price|ask/i.test(item.column);
+      const remarkHeader = isRemarkColumnName(item.column) || isDeliveryColumnName(item.column);
+      let score = 0;
+      if (saleHeader) score += 130;
+      if (hasCurrency) score += 55;
+      if (remarkHeader) score += 35;
+      if (item.index > afterIndex) score += 30;
+      if (item.index >= Math.max(0, row.length - 3)) score += 16;
+      if (item.index === row.length - 1) score += 35;
+      if (number >= 1000) score += 18;
+      if (number >= 10000) score += 4;
+      if (!hasCurrency && number < 1000 && !saleHeader) score -= 70;
+      if (isLikelyRemarkValue(item.value) && !hasCurrency) score -= 25;
+      return { ...item, price, number, score };
+    })
+    .filter((item) => item.score >= 20)
+    .sort((a, b) => b.score - a.score || b.index - a.index);
+  return candidates[0] || null;
+}
+
+function moveValueIntoRemarkColumn(table, row, value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  const remarkIndex = ensureNamedColumn(table, "备注", ["备注", "remark", "note", "说明"]);
+  const existing = String(row[remarkIndex] || "").trim();
+  if (!existing) {
+    row[remarkIndex] = text;
+    return true;
+  }
+  if (!normalize(existing).includes(normalize(text))) {
+    row[remarkIndex] = `${existing} ${text}`.trim();
+    return true;
+  }
+  return false;
+}
+
+function shouldClearMovedPriceSource(table, sourceIndex, priceIndex) {
+  if (sourceIndex < 0 || sourceIndex === priceIndex) return false;
+  const column = table.columns?.[sourceIndex] || "";
+  if (isSalePriceColumnName(column) || isFaceValueColumnName(column)) return false;
+  if (isRemarkColumnName(column) || isDeliveryColumnName(column)) return true;
+  return !isProtectedNonPriceColumnName(column);
+}
+
+function repairShiftedSalePriceAndRemark(table, row) {
+  if (!table || !Array.isArray(row)) return false;
+  let changed = false;
+  let priceIndex = findSalePriceColumnIndex(table.columns);
+  const directPrice = priceIndex >= 0 ? extractSalePriceText(row[priceIndex], { minPrice: 100 }) : "";
+  const priceCellText = priceIndex >= 0 ? String(row[priceIndex] || "").trim() : "";
+  const priceCellIsRemark = Boolean(priceCellText && !directPrice && (isLikelyRemarkValue(priceCellText) || isLogisticsOrRemarkValue(priceCellText)));
+  const excluded = new Set(priceIndex >= 0 ? [priceIndex] : []);
+  const candidate = getSalePriceCandidateFromRow(table, row, { afterIndex: priceIndex, excludeIndexes: excluded });
+
+  if (priceCellIsRemark && candidate) {
+    if (shouldClearMovedPriceSource(table, candidate.index, priceIndex)) {
+      row[candidate.index] = "";
+      changed = true;
+    }
+    row[priceIndex] = candidate.price;
+    changed = true;
+    if (moveValueIntoRemarkColumn(table, row, priceCellText)) changed = true;
+    return changed;
+  }
+
+  if (!directPrice && candidate) {
+    priceIndex = ensureSalePriceColumn(table);
+    if (
+      priceCellText &&
+      !isLikelySalePriceValue(priceCellText, { minPrice: 100 }) &&
+      !isSoldText(priceCellText, { strict: true }) &&
+      !isLikelyDateValue(priceCellText)
+    ) {
+      if (moveValueIntoRemarkColumn(table, row, priceCellText)) changed = true;
+    }
+    if (row[priceIndex] !== candidate.price) {
+      row[priceIndex] = candidate.price;
+      changed = true;
+    }
+    if (shouldClearMovedPriceSource(table, candidate.index, priceIndex)) {
+      row[candidate.index] = "";
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function cleanZoneToken(value) {
+  const text = String(value || "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/[（）()【】\[\]]/g, "")
+    .replace(/^(?:区域|区号|分区|場區|场区|구역|구|section|block|area|zone)\s*[:：-]?/i, "")
+    .replace(/\s*(?:区域|区|區|구역|구|座区|席区|座|席|section|block|area|zone)$/i, "")
+    .replace(/\s+/g, "")
+    .replace(/[‐-‒–—―]+/g, "")
+    .trim();
+  if (/^I{2,}(\d+[A-Z]?)$/i.test(text)) return text.replace(/^I+/i, "I");
+  return text;
+}
+
+function normalizeExtractedZoneToken(value, sourceText = "") {
+  let token = cleanZoneToken(value);
+  if (!token) return "";
+  const source = normalizeSeatText(sourceText || value);
+
+  const gluedNumberRow = token.match(/^(\d{2,4})([A-Z])$/i);
+  if (gluedNumberRow && new RegExp(`${gluedNumberRow[1]}\\s*${gluedNumberRow[2]}\\s*(?:排|row|열)`, "i").test(source)) {
+    token = gluedNumberRow[1];
+  }
+
+  const gluedLetterRow = token.match(/^([A-Z]\d+)([A-Z])$/i);
+  if (gluedLetterRow && new RegExp(`${gluedLetterRow[1]}\\s*${gluedLetterRow[2]}\\s*(?:排|row|열)`, "i").test(source)) {
+    token = gluedLetterRow[1].toUpperCase();
+  }
+
+  if (/^I{2,}(\d+[A-Z]?)$/i.test(token)) token = token.replace(/^I+/i, "I");
+  return token.toUpperCase();
+}
+
+function zoneTokenSpecificityScore(value) {
+  const token = cleanZoneToken(value);
+  if (!token) return 0;
+  let score = token.length;
+  if (/\d/.test(token)) score += 8;
+  if (/^(PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I)\d/i.test(token)) score += 4;
+  if (/^[A-Z]$/i.test(token)) score -= 6;
+  if (/^\d{1,2}$/.test(token)) score -= 10;
+  return score;
+}
+
+function chooseBetterZoneToken(...values) {
+  return values
+    .map((value) => normalizeExtractedZoneToken(value))
+    .filter(Boolean)
+    .sort((a, b) => zoneTokenSpecificityScore(b) - zoneTokenSpecificityScore(a))[0] || "";
+}
+
+function extractZoneTokenFromText(value) {
+  const text = normalizeSeatText(value);
+  if (!text || isSoldText(text, { strict: true }) || isLikelySalePriceValue(text)) return "";
+  const compactText = text.replace(/\s+/g, "");
+  const rowAttachedZone =
+    compactText.match(/((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})\d+[A-Z]?|\d{2,4}[A-Z]?)(?=(?:区|區|구역|구)?(?:[A-Z]|\d{1,3}|[一二三四五六七八九十]+)?(?:排|row|열))/i) ||
+    compactText.match(/(?:看台|看臺|内场|內場|场内|場內|floor|层|층)((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})?\d{1,4}[A-Z]?|[A-Z]\d?|FE|FW)(?=(?:[A-Z]|\d{1,3}|[一二三四五六七八九十]+)?(?:排|row|열|区|區))/i);
+  const explicitZone =
+    rowAttachedZone ||
+    compactText.match(/((?:I{1,3}|[A-Z]{1,4})\d+[A-Z]?|\d{2,4}[A-Z]?|[A-Z]{1,4})\s*(?:区|區|구역|구|section|block|area|zone)/i) ||
+    compactText.match(/(?:区|區|구역|구|section|block|area|zone)\s*((?:I{1,3}|[A-Z]{1,4})\d+[A-Z]?|\d{2,4}[A-Z]?|[A-Z]{1,4})/i);
+  const venueZone =
+    explicitZone ||
+    compactText.match(/(?:看台|看臺|内场|內場|场内|場內|floor|层|층)((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})?\d{1,4}[A-Z]?|[A-Z]\d?|FE|FW)(?=$|[^A-Z0-9]|(?:区|區|排|row|side))/i);
+  const englishZone =
+    venueZone ||
+    text.match(/(?:^|[^A-Z0-9])(?:\d+\s*F\s*)?(?:side|section|block|area|zone)\s*([A-Z]{0,3}\d{1,4}[A-Z]?|[A-Z]\d?|FE|FW)(?=$|[^A-Z0-9])/i) ||
+    text.match(/(?:^|[^A-Z0-9])([A-Z]{0,3}\d{2,4}[A-Z]?|[A-Z]\d?)\s*side\b/i);
+  const token = normalizeExtractedZoneToken(englishZone?.[1] || "", text);
+  if (!token || isLikelyDateValue(token) || isLikelySalePriceValue(token)) return "";
+  if (/^\d{1,2}$/.test(token) || /^2F|3F$/i.test(token)) return "";
+  return token;
+}
+
+function normalizeSeatText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/([A-Za-z0-9]+)\s*구역/g, "$1区")
+    .replace(/([A-Za-z0-9]+)\s*구(?=$|\s|[A-Za-z0-9])/g, "$1区")
+    .replace(/([A-Za-z0-9]+)\s*열/g, "$1排")
+    .replace(/([A-Za-z0-9]+)\s*호/g, "$1号")
+    .replace(/[‐‑‒–—―～~]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeSeatRange(start, end, suffix = "") {
+  const left = String(start || "").trim().toUpperCase();
+  const right = String(end || "").trim().toUpperCase();
+  const unit = suffix ? suffix.replace(/row|열/i, "排") : "";
+  return `${left}-${right}${unit}`;
+}
+
+function extractSeatRowFromText(value, { allowBareRange = false, preferActual = true } = {}) {
+  const text = normalizeSeatText(value);
+  if (!text || isSoldText(text, { strict: true }) || isLikelySalePriceValue(text)) return "";
+  const actualRange = text.match(/实际\s*(?:第)?\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*[-到至]\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)/i);
+  if (preferActual && actualRange) return `实际${normalizeSeatRange(actualRange[1], actualRange[2], "排")}`;
+  const repeatedUnitRange = text.match(/([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)\s*[-到至]\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)/i);
+  if (repeatedUnitRange) return normalizeSeatRange(repeatedUnitRange[1], repeatedUnitRange[2], "排");
+  const rowRange = text.match(/([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*[-到至]\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(排|row|열)/i);
+  if (rowRange) return normalizeSeatRange(rowRange[1], rowRange[2], rowRange[3]);
+  const rowLabelBefore = text.match(/(?:^|[^A-Z0-9])(?:row|열)\s*([A-Z]|\d{1,3}|[一二三四五六七八九十]+)(?:$|[^A-Z0-9])/i);
+  if (rowLabelBefore) return `${String(rowLabelBefore[1]).trim().toUpperCase()}排`;
+  const sideRow = text.match(/(?:^|[^A-Z0-9-])(?:side|사이드)?\s*([A-Z]|\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)(?:$|[^A-Z0-9])/i);
+  if (sideRow) return `${String(sideRow[1]).trim().toUpperCase()}排`;
+  if (allowBareRange) {
+    const bareRange = text.match(/^([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*[-到至]\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)$/i);
+    if (bareRange) return normalizeSeatRange(bareRange[1], bareRange[2], "");
+  }
+  const actualSingle = text.match(/实际\s*(?:第)?\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)/i);
+  if (preferActual && actualSingle) return `实际${String(actualSingle[1]).trim().toUpperCase()}排`;
+  const rowWithSeatTail = text.match(/(?:^|[^A-Z0-9])([A-Z]|\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)\s*(?=\d*X\b|X\b|\d{1,4}\s*(?:号|號)\b|\d{1,4}\s*[-到至]\s*\d{1,4}|$)/i);
+  if (rowWithSeatTail) return `${String(rowWithSeatTail[1]).trim().toUpperCase()}排`;
+  const rowSingle = text.match(/(?:^|[^A-Z0-9])([A-Z]|\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)(?:$|[^A-Z0-9])/i);
+  if (rowSingle) return `${String(rowSingle[1]).trim().toUpperCase()}排`;
+  if (actualRange) return `实际${normalizeSeatRange(actualRange[1], actualRange[2], "排")}`;
+  if (actualSingle) return `实际${String(actualSingle[1]).trim().toUpperCase()}排`;
+  return "";
+}
+
+function extractSeatNumberFromText(value, { allowBareRange = false } = {}) {
+  const text = normalizeSeatText(value);
+  if (!text || isSoldText(text, { strict: true }) || isLikelySalePriceValue(text)) return "";
+  const seatAfterEnglishRow = text.match(/(?:row|열)\s*(?:[A-Z]|\d{1,3}|[一二三四五六七八九十]+)\s*[.。,:：-]*\s*(-?\s*[0-9]*X|X|\d{1,4}\s*[-到至~—]\s*\d{1,4}\s*(?:号|號)?|\d{1,4}\s*(?:号|號))/i);
+  if (seatAfterEnglishRow) {
+    const token = seatAfterEnglishRow[1].replace(/^[\s-]+/, "").replace(/\s+/g, "").toUpperCase();
+    const range = token.match(/^([A-Z]?\d{1,4}|X)[-到至~—]+([A-Z]?\d{1,4}|X)(号|號)?$/i);
+    if (range) return normalizeSeatRange(range[1], range[2], range[3] ? "号" : "");
+    return token;
+  }
+  const seatAfterRow = text.match(/(?:排|row|열)\s*[.。,:：-]*\s*(-?\s*[0-9]*X|X|\d{1,4}\s*[-到至~—]\s*\d{1,4}\s*(?:号|號)?|\d{1,4}\s*(?:号|號))/i);
+  if (seatAfterRow) {
+    const token = seatAfterRow[1].replace(/^[\s-]+/, "").replace(/\s+/g, "").toUpperCase();
+    const range = token.match(/^([A-Z]?\d{1,4}|X)[-到至~—]+([A-Z]?\d{1,4}|X)(号|號)?$/i);
+    if (range) return normalizeSeatRange(range[1], range[2], range[3] ? "号" : "");
+    return token;
+  }
+  if (/(?:排|row|열)/i.test(text) && !/(?:号|號|座位|seat|no\.?|number)/i.test(text)) return "";
+  const hasSeatLabel = /(?:座位号?|座号|号段|号码|座位|seat|no\.?|number)/i.test(text);
+  const labelledRange = text.match(/^(?:(?:座位号?|座号|号段|号码|座位|seat|no\.?|number)\s*[:：]?\s*)?([A-Z]?\d{1,4}|X)\s*[-到至]\s*([A-Z]?\d{1,4}|X)\s*(号|號)?$/i);
+  if (labelledRange && (hasSeatLabel || labelledRange[3] || allowBareRange)) {
+    return normalizeSeatRange(labelledRange[1], labelledRange[2], labelledRange[3] ? "号" : "");
+  }
+  const xRange = text.match(/^(?:X|x)\s*[（(]\s*(\d{1,4}\s*[-到至]\s*\d{1,4})\s*[）)]$/);
+  if (xRange) return `X(${xRange[1].replace(/\s+/g, "")})`;
+  const xValue = text.match(/^(\d*X)\s*(号|號)?(?:\s*[（(].+[）)])?$/i);
+  if (xValue) return text.replace(/\s+/g, "").toUpperCase();
+  const single = text.match(/^(?:(?:座位号?|座号|号段|号码|座位|seat|no\.?|number)\s*[:：]?\s*)?(\d{1,4}X?|X)\s*(号|號)?$/i);
+  if (single && (hasSeatLabel || single[2])) return `${single[1].toUpperCase()}${single[2] ? "号" : ""}`;
+  if (allowBareRange) {
+    const bareRange = text.match(/^([A-Z]?\d{1,4}|X)\s*[-到至]\s*([A-Z]?\d{1,4}|X)$/i);
+    if (bareRange) return normalizeSeatRange(bareRange[1], bareRange[2], "");
+  }
+  return "";
+}
+
+function isSeatRowColumnName(column = "") {
+  const text = normalize(column);
+  if (!text) return false;
+  if (/票面排数|门票排数|座位排数|票面位置|门票位置|座位位置|座位图位置|座席图位置/.test(text)) {
+    return true;
+  }
+  if (/座位|座号|号数|号段|大小号|数量|张数|售价|价格|金额|区域|区|票面|价位|面值/.test(text)) {
+    return false;
+  }
+  return /排|行数|行|row|열|位置/.test(text);
+}
+
+function isSeatNumberColumnName(column = "") {
+  const text = normalize(column);
+  if (!text || /序号|编号|日期|价格|售价|金额|数量|张数|座位图|座席图|seatmap/.test(text)) return false;
+  return /座位号|座位|座号|号数|大小号|号段|号码|seat|number|no|번호|좌석번호/.test(text);
+}
+
+function isBetterSeatRowCandidate(candidate, current) {
+  const next = String(candidate || "").trim();
+  const previous = String(current || "").trim();
+  if (!next) return false;
+  if (!previous || isLikelySalePriceValue(previous) || isLikelySeatNumberValue(previous)) return true;
+  if (/[-到至]/.test(next) && !/[-到至]/.test(previous)) return true;
+  if (/实际/.test(next) && /[-到至]/.test(previous)) return false;
+  if (/实际/.test(next) && !isLikelySeatRowValue(previous)) return true;
+  return false;
+}
+
+function isBetterSeatNumberCandidate(candidate, current) {
+  const next = String(candidate || "").trim();
+  const previous = String(current || "").trim();
+  if (!next) return false;
+  if (!previous || isLikelySalePriceValue(previous) || isLikelySeatRowValue(previous)) return true;
+  if (/[-到至]/.test(next) && !/[-到至]/.test(previous)) return true;
+  return false;
+}
+
+function removeFirstSeatRowPhrase(text) {
+  return normalizeSeatText(text)
+    .replace(/实际\s*(?:第)?\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*[-到至]\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)/i, " ")
+    .replace(/([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)\s*[-到至]\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)/i, " ")
+    .replace(/([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*[-到至]\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)/i, " ")
+    .replace(/(?:^|[^A-Z0-9])(?:row|열)\s*([A-Z]|\d{1,3}|[一二三四五六七八九十]+)(?:$|[^A-Z0-9])/i, " ")
+    .replace(/实际\s*(?:第)?\s*([A-Z]?\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)/i, " ")
+    .replace(/(?:^|[^A-Z0-9])([A-Z]|\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)\s*(?=\d*X\b|X\b|\d{1,4}\s*(?:号|號)\b|\d{1,4}\s*[-到至]\s*\d{1,4}|$)/i, " ")
+    .replace(/(?:^|[^A-Z0-9])([A-Z]|\d{1,3}|[一二三四五六七八九十]+)\s*(?:排|row|열)(?:$|[^A-Z0-9])/i, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractDateFromCompositeSeatText(value) {
+  const text = String(value || "").normalize("NFKC").trim();
+  if (!text) return "";
+  const compact = text.match(/(?:^|[^\d])(20\d{2})(\d{2})(\d{2})(?=$|[^\d])/);
+  if (compact) return `${compact[1]}.${Number(compact[2])}.${Number(compact[3])}`;
+  const full = text.match(/(?:^|[^\d])(20\d{2})[./\-年](\d{1,2})[./\-月](\d{1,2})\s*(?:日|号)?(?=$|[^\d])/);
+  if (full) return `${full[1]}.${Number(full[2])}.${Number(full[3])}`;
+  const monthDay = text.match(/(?:^|[^\d])(\d{1,2})[./\-月](\d{1,2})\s*(?:日|号)?(?!\s*(?:排|row|열))(?=$|[^\d])/i);
+  if (monthDay) return `${Number(monthDay[1])}.${Number(monthDay[2])}`;
+  return "";
+}
+
+function extractCompositeSeatNote(text) {
+  const source = String(text || "").trim();
+  const notes = [
+    ...source.matchAll(/(?:有)?同排|同一排|连坐|連坐|视阻|視阻|遮挡|遮擋|靠过道|靠過道|过道|過道|可拆|不可拆|实际\s*(?:第)?\s*[A-Z]?\d{1,3}\s*(?:[-到至]\s*[A-Z]?\d{1,3})?\s*(?:排|row|열)/gi),
+  ].map((match) => match[0].trim());
+  return uniqueCleanValues(notes).join(" ");
+}
+
+function normalizeCompositeSeatValue(value) {
+  return normalizeSeatText(value)
+    .replace(/\bSide\b/gi, " Side ")
+    .replace(/\bRow\b/gi, " Row ")
+    .replace(/\s*([.。,:：])\s*/g, "$1 ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseEnglishCompositeSeatInfo(value) {
+  const text = normalizeCompositeSeatValue(value);
+  if (!/(?:side|row)/i.test(text)) return null;
+  const match =
+    text.match(
+      /(?:^|\s)(?:\d+\s*F\s*[- ]*)?(?:Side\s*)?([A-Z]{0,3}\d{2,4}[A-Z]?|[A-Z]\d?)(?:\s*Side)?[.。,\s-]+(?:Row\s*)?([A-Z]|\d{1,3})(?:\s*Row)?[.。,\s-]*((?:\d+\s*)?X|\d{1,4}\s*[-到至]\s*\d{1,4}|\d{1,4}\s*(?:号|號))?/i,
+    ) ||
+    text.match(
+      /(?:^|\s)(?:\d+\s*F\s*)?([A-Z]{0,3}\d{2,4}[A-Z]?|[A-Z]\d?)\s*Side[.。,\s-]+([A-Z]|\d{1,3})\s*Row[.。,\s-]*((?:\d+\s*)?X|\d{1,4}\s*[-到至]\s*\d{1,4}|\d{1,4}\s*(?:号|號))?/i,
+    );
+  if (!match) return null;
+  const zone = normalizeExtractedZoneToken(match[1], text);
+  if (!zone || !isLikelyZoneCode(zone)) return null;
+  const row = `${String(match[2] || "").trim().toUpperCase()}排`;
+  const seat = String(match[3] || "").replace(/\s+/g, "").toUpperCase();
+  return { zone, row, seat };
+}
+
+function parseCompactCompositeSeatInfo(value) {
+  const text = normalizeCompositeSeatValue(value);
+  const match = text.match(
+    /((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})\d+[A-Z]?|\d{2,4}[A-Z]?|FE|FW)\s*(?:区|區)?\s*([A-Z]?\d{1,3}(?:\s*[-到至]\s*[A-Z]?\d{1,3})?|[A-Z]|[一二三四五六七八九十]+(?:\s*[-到至]\s*[A-Z]?\d{1,3})?)\s*(?:排|row|열)\s*((?:\d+\s*)?X|\d{1,4}\s*[-到至]\s*\d{1,4}\s*(?:号|號)?|\d{1,4}\s*(?:号|號)?)?/i,
+  );
+  if (!match) return null;
+  const zone = normalizeExtractedZoneToken(match[1], text);
+  if (!zone || !isLikelyZoneCode(zone)) return null;
+  const row = extractSeatRowFromText(match[0], { preferActual: false }) || `${String(match[2] || "").trim().toUpperCase()}排`;
+  const tail = text.slice((match.index || 0) + match[0].length);
+  const tailSeat = tail.match(/((?:\d+\s*)?X|\d{1,4}\s*[-到至]\s*\d{1,4}\s*(?:号|號)?|\d{1,4}\s*(?:号|號))/i)?.[1] || "";
+  const seat = String(match[3] || tailSeat || "").replace(/\s+/g, "").toUpperCase();
+  return { zone, row, seat };
+}
+
+function parseCompositeSeatInfo(value) {
+  const text = normalizeCompositeSeatValue(value);
+  if (!text) return null;
+  const date = extractDateFromCompositeSeatText(text);
+  const withoutDate = text
+    .replace(/(?:^|[^\d])20\d{6}(?=$|[^\d])/, " ")
+    .replace(/(?:^|[^\d])20\d{2}[./\-年]\d{1,2}[./\-月]\d{1,2}\s*(?:日|号)?(?=$|[^\d])/, " ")
+    .replace(/(?:^|[^\d])\d{1,2}[./\-月]\d{1,2}\s*(?:日|号)?(?=$|[^\d])/, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parsedLocation = parseEnglishCompositeSeatInfo(withoutDate) || parseCompactCompositeSeatInfo(withoutDate);
+  if (parsedLocation?.zone) {
+    return {
+      date,
+      zone: parsedLocation.zone,
+      row: parsedLocation.row || "",
+      seat: parsedLocation.seat || "",
+      note: extractCompositeSeatNote(text),
+    };
+  }
+  const compactLocation = date
+    ? withoutDate.match(
+        /(?:^|\s)(\d{2,4}[A-Z]?|[A-Z]{1,4}\d+[A-Z]?|[A-Z]\d?)(?:\s+|[.。,:：-]+)([A-Z]|\d{1,3})(?:\s+|[.。,:：-]+)(\d*X|X|\d{1,4}\s*[-到至~—]\s*\d{1,4}\s*(?:号|號)?|\d{1,4}\s*(?:号|號)?)(?:$|\s)/i,
+      )
+    : null;
+  if (compactLocation) {
+    return {
+      date,
+      zone: cleanZoneToken(compactLocation[1]),
+      row: `${String(compactLocation[2]).trim().toUpperCase()}排`,
+      seat: String(compactLocation[3]).replace(/\s+/g, "").toUpperCase(),
+      note: extractCompositeSeatNote(text),
+    };
+  }
+  const zoneFromText = extractZoneTokenFromText(text);
+  const zoneMatch =
+    text.match(/((?:I{1,3}|[A-Z]{1,4})\d+[A-Z]?|\d{2,4}[A-Z]?|[A-Z]{1,4}|[一二三四五六七八九十]+)\s*(?:区|區|구역|구|section|block|area|zone)/i) ||
+    text.match(/((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})\d+[A-Z]?|FE|FW)(?=\s*(?:side|row|排|열|区|區|구|$))/i) ||
+    text.match(/((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})\d+[A-Z]?|FE|FW)\b/i);
+  if (!zoneMatch && !zoneFromText) return null;
+  let zone = chooseBetterZoneToken(zoneMatch?.[1], zoneFromText);
+  const afterZone = zoneMatch ? text.slice(zoneMatch.index + zoneMatch[0].length).trim() : text;
+  const zoneRepeatedWithRow = afterZone.match(/^([A-Z])\s*(\d+[A-Z]?)\s*(?:排|row|열)/i);
+  if (/^[A-Z]$/i.test(zone) && zoneRepeatedWithRow && zoneRepeatedWithRow[1].toUpperCase() === zone.toUpperCase()) {
+    zone = `${zoneRepeatedWithRow[1].toUpperCase()}${zoneRepeatedWithRow[2].toUpperCase()}`;
+  }
+  const row = extractSeatRowFromText(afterZone, { preferActual: false }) || extractSeatRowFromText(text, { preferActual: false });
+  const seatCandidate = removeFirstSeatRowPhrase(afterZone);
+  const seat =
+    extractSeatNumberFromText(afterZone, { allowBareRange: true }) ||
+    extractSeatNumberFromText(seatCandidate, { allowBareRange: true }) ||
+    "";
+  const note = extractCompositeSeatNote(text);
+  if (!zone || (!row && !seat && !date)) return null;
+  return { date, zone, row, seat, note };
+}
+
+function getZoneTokenFromCell(value) {
+  const parsed = parseCompositeSeatInfo(value);
+  return parsed?.zone || extractZoneTokenFromText(value) || cleanZoneToken(value);
+}
+
+function isCompositeZoneRowColumnName(column = "") {
+  const text = String(column || "");
+  const normalized = normalize(text);
+  if (!normalized) return false;
+  const hasZoneCue = /(区域|区|區|位置|席位|구역|구|block|section|zone|area)/i.test(text);
+  const hasRowCue = /(排数|排|行数|行|row|열)/i.test(text);
+  if (hasZoneCue && hasRowCue) return true;
+  return /(区域排|区排|位置排|zonerow|sectionrow|blockrow|구역열|구열)/i.test(normalized);
+}
+
+function repairCompositeSeatInfo(table, row, indexes) {
+  const { zoneIndex: sourceIndex } = indexes;
+  if (sourceIndex < 0) return false;
+  const parsed = parseCompositeSeatInfo(row[sourceIndex]);
+  if (!parsed) return false;
+  let changed = false;
+  const sourceColumn = table.columns[sourceIndex] || "";
+  const sourceIsCompositeZoneRow = isCompositeZoneRowColumnName(sourceColumn);
+  const sourceNeedsDedicatedSplit = sourceIsCompositeZoneRow || (parsed.zone && parsed.row && isSeatLocationColumnName(sourceColumn));
+  if (parsed.date) {
+    const dateIndex = ensureDateColumn(table);
+    const currentDate = String(row[dateIndex] || "").trim();
+    if (!currentDate || !isLikelyDateValue(currentDate)) {
+      row[dateIndex] = parsed.date;
+      changed = true;
+    }
+  }
+  const zoneIndex = sourceNeedsDedicatedSplit
+    ? ensureDedicatedColumn(table, "区域")
+    : /区域|区|區|位置|구역|block|section|zone|area/i.test(sourceColumn)
+      ? sourceIndex
+      : ensureNamedColumn(table, "区域", ["区域", "区", "block", "section", "구역"]);
+  if (parsed.zone && cleanZoneToken(row[zoneIndex]) !== parsed.zone) {
+    row[zoneIndex] = parsed.zone;
+    changed = true;
+  }
+  if (parsed.row) {
+    const rowIndex = sourceNeedsDedicatedSplit ? ensureDedicatedColumn(table, "排") : ensureSeatRowColumn(table);
+    const displacedRowValue = String(row[rowIndex] || "").trim();
+    const shouldReplaceRow =
+      !displacedRowValue ||
+      cleanZoneToken(displacedRowValue) === cleanZoneToken(parsed.zone) ||
+      isLikelySeatNumberValue(displacedRowValue) ||
+      isLikelySalePriceValue(displacedRowValue);
+    if (shouldReplaceRow || String(displacedRowValue).trim().toUpperCase() !== parsed.row.toUpperCase()) {
+      row[rowIndex] = parsed.row;
+      changed = true;
+    }
+    if (displacedRowValue && isLikelySeatNumberValue(displacedRowValue)) {
+      const seatIndex = ensureSeatNumberColumn(table);
+      if (!isLikelySeatNumberValue(row[seatIndex]) || isLikelySerialValue(row[seatIndex])) {
+        row[seatIndex] = displacedRowValue;
+        changed = true;
+      }
+    }
+  }
+  if (parsed.seat) {
+    const seatIndex = ensureSeatNumberColumn(table);
+    if (!isLikelySeatNumberValue(row[seatIndex])) {
+      row[seatIndex] = parsed.seat;
+      changed = true;
+    }
+  }
+  if (parsed.note) {
+    const remarkIndex = ensureNamedColumn(table, "备注", ["备注", "remark", "note", "说明"]);
+    const existingRemark = String(row[remarkIndex] || "").trim();
+    if (!existingRemark) {
+      row[remarkIndex] = parsed.note;
+      changed = true;
+    } else if (!normalize(existingRemark).includes(normalize(parsed.note))) {
+      row[remarkIndex] = `${existingRemark} ${parsed.note}`.trim();
+      changed = true;
+    }
+  }
+  if (sourceIndex !== zoneIndex && isFaceValueColumnName(sourceColumn) && String(row[sourceIndex] || "").trim()) {
+    row[sourceIndex] = "";
+    changed = true;
+  }
+  return changed;
+}
+
+function repairCompositeSeatInfoFromCandidateColumns(table, row) {
+  const columns = table.columns || [];
+  const preferredIndexes = [
+    ...findColumnIndexes(columns, ["区域", "区", "位置", "block", "section", "구역", "구"]),
+    ...findColumnIndexes(columns, ["票面", "票价", "价位", "面值", "席位", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분"]),
+  ];
+  const fallbackIndexes = row
+    .map((value, index) => ({ value, index, column: columns[index] || "" }))
+    .filter(({ value, column }) => {
+      if (!String(value || "").trim()) return false;
+      if (isInternalColorColumn(column) || isSalePriceColumnName(column) || isRemarkColumnName(column) || isQuantityColumnName(column)) return false;
+      return Boolean(parseCompositeSeatInfo(value));
+    })
+    .map(({ index }) => index);
+  const candidateIndexes = [...new Set([...preferredIndexes, ...fallbackIndexes])];
+  return candidateIndexes.some((zoneIndex) => repairCompositeSeatInfo(table, row, { zoneIndex }));
+}
+
+function repairCompositeSeatInfoFromAnyCell(table, row) {
+  const columns = table.columns || [];
+  let changed = false;
+  row.forEach((value, index) => {
+    const column = columns[index] || "";
+    if (!String(value || "").trim()) return;
+    if (isInternalColorColumn(column) || isSalePriceColumnName(column) || isQuantityColumnName(column) || isRemarkColumnName(column)) return;
+    const parsed = parseCompositeSeatInfo(value);
+    if (!parsed || !(parsed.date || parsed.zone || parsed.row || parsed.seat)) return;
+    if (repairCompositeSeatInfo(table, row, { zoneIndex: index })) changed = true;
+  });
+  return changed;
+}
+
+function repairSeparatedSeatPositionFields(table, row) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(row)) return false;
+  let changed = false;
+  const rowIndex = ensureSeatRowColumn(table);
+  const seatIndex = ensureSeatNumberColumn(table);
+  const candidates = row.map((value, index) => ({ value, index, column: table.columns[index] || "" }));
+  const rowCandidate = candidates
+    .map((item) => ({
+      ...item,
+      parsed: extractSeatRowFromText(item.value, { allowBareRange: isSeatRowColumnName(item.column) }),
+      score:
+        (isSeatRowColumnName(item.column) ? 120 : 0) +
+        (/票面排数|门票排数|座位排数|票面位置|门票位置|座位位置|座位图位置/i.test(item.column) ? 50 : 0) +
+        (/[-到至]/.test(String(item.value || "")) ? 45 : 0) +
+        (/实际/.test(String(item.value || "")) ? 8 : 0),
+    }))
+    .filter((item) => item.parsed)
+    .sort((a, b) => b.score - a.score)[0];
+  const currentRowValue = String(row[rowIndex] || "").trim();
+  const currentRowParsed = extractSeatRowFromText(currentRowValue, { allowBareRange: isSeatRowColumnName(table.columns[rowIndex]) });
+  const sourceIsRowColumn = rowCandidate?.index === rowIndex || isSeatRowColumnName(rowCandidate?.column || "");
+  const shouldUseRowCandidate =
+    rowCandidate &&
+    (sourceIsRowColumn || !currentRowParsed) &&
+    isBetterSeatRowCandidate(rowCandidate.parsed, row[rowIndex]);
+  if (shouldUseRowCandidate) {
+    row[rowIndex] = rowCandidate.parsed;
+    changed = true;
+  }
+
+  const seatCandidate = candidates
+    .map((item) => ({
+      ...item,
+      parsed: extractSeatNumberFromText(item.value, { allowBareRange: isSeatNumberColumnName(item.column) }),
+      score:
+        (isSeatNumberColumnName(item.column) ? 120 : 0) +
+        (/票面号段|门票号段|座位号段|座位号|号段|号码/i.test(item.column) ? 40 : 0) +
+        (/[-到至]/.test(String(item.value || "")) ? 35 : 0),
+    }))
+    .filter((item) => item.parsed)
+    .sort((a, b) => b.score - a.score)[0];
+  if (seatCandidate && isBetterSeatNumberCandidate(seatCandidate.parsed, row[seatIndex])) {
+    row[seatIndex] = seatCandidate.parsed;
+    changed = true;
+  }
+  return changed;
+}
+
+function getLikelyZoneFromRow(table, row) {
+  const columns = table.columns || [];
+  const preferredIndexes = findColumnIndexes(columns, ["位置", "区域", "区", "block", "section", "구역", "구"]);
+  const matchedBySeatmap = preferredIndexes.find((index) =>
+    currentEvent?.zones?.some((zone) => zoneTokenMatches(row[index], zone)),
+  );
+  if (matchedBySeatmap >= 0) return getZoneTokenFromCell(row[matchedBySeatmap]);
+
+  const compositeIndex = preferredIndexes.find((index) => parseCompositeSeatInfo(row[index])?.zone);
+  if (compositeIndex >= 0) return parseCompositeSeatInfo(row[compositeIndex])?.zone || "";
+
+  const likelyIndex = preferredIndexes.find((index) => isLikelyZoneCode(row[index]));
+  if (likelyIndex >= 0) return getZoneTokenFromCell(row[likelyIndex]);
+
+  return findLikelyZoneValueInRow(table, row);
+}
+
+function findSeatmapZoneValueInRow(table, row) {
+  const zones = currentEvent?.zones || [];
+  if (!zones.length) return "";
+  const columns = table.columns || [];
+  const ignoredIndexes = new Set([
+    ...findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]),
+    ...findSalePriceColumnIndexes(columns),
+    ...findColumnIndexes(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]),
+    ...findColumnIndexes(columns, ["备注", "remark", "note", "说明", "状态", "status"]),
+  ]);
+  const candidates = row
+    .map((value, index) => ({ value, index, token: getZoneTokenFromCell(value) }))
+    .filter(({ value, index, token }) => value && token && !ignoredIndexes.has(index))
+    .filter(({ value, token }) => isLikelyZoneCode(token) || zones.some((zone) => zoneTokenMatches(value, zone)))
+    .filter(({ value }) => zones.some((zone) => zoneTokenMatches(value, zone)));
+  const preferred = candidates.find(({ index }) => /区域|区|位置|block|section|zone|area/i.test(columns[index] || ""));
+  return getZoneTokenFromCell((preferred || candidates[0] || {}).value || "");
+}
+
+function findLikelyZoneValueInRow(table, row) {
+  const columns = table.columns || [];
+  const ignoredIndexes = new Set([
+    ...findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]),
+    ...findSalePriceColumnIndexes(columns),
+    ...findColumnIndexes(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]),
+    ...findColumnIndexes(columns, ["状态", "售卖状态", "销售状态", "status", "是否售出", "售出"]),
+  ]);
+  const candidates = row
+    .map((value, index) => ({ value, index, token: getZoneTokenFromCell(value), column: columns[index] || "" }))
+    .filter(({ value, index, token }) => value && token && !ignoredIndexes.has(index))
+    .filter(({ value, token }) => isLikelyZoneCode(token) || currentEvent?.zones?.some((zone) => zoneTokenMatches(value, zone)));
+  if (!candidates.length) return "";
+  const seatmapMatched = candidates.find(({ value }) => currentEvent?.zones?.some((zone) => zoneTokenMatches(value, zone)));
+  const headerMatched = candidates.find(({ column }) => /区域|区|位置|block|section|zone|area|仅供参考/i.test(column));
+  const strongZone = candidates.find(({ token }) => isLikelyZoneCode(token));
+  return getZoneTokenFromCell((seatmapMatched || headerMatched || strongZone || candidates[0]).value);
+}
+
+function repairZoneFromPosition(table, row) {
+  const zoneIndex = ensureDedicatedColumn(table, "区域");
+  const rowIndex = ensureSeatRowColumn(table);
+  const seatIndex = ensureSeatNumberColumn(table);
+  const currentZone = cleanZoneToken(row[zoneIndex]);
+  const bestZone = getLikelyZoneFromRow(table, row) || findSeatmapZoneValueInRow(table, row);
+  if (!bestZone || bestZone === currentZone) return false;
+  if (isLikelyZoneCode(bestZone) && (!isLikelyZoneCode(currentZone) || /^\d{1,2}$/.test(currentZone))) {
+    const displacedRow = row[zoneIndex];
+    const displacedSeat = row[rowIndex];
+    const displacedPrice = row[seatIndex];
+    row[zoneIndex] = bestZone;
+    if (isLikelySeatRowValue(displacedRow) && !isLikelyZoneCode(displacedRow)) {
+      row[rowIndex] = displacedRow;
+    }
+    if (isLikelySeatNumberValue(displacedSeat) && !isLikelySalePriceValue(displacedSeat)) {
+      row[seatIndex] = displacedSeat;
+    }
+    if (isLikelySalePriceValue(displacedPrice) && !hasTicketSalePrice({ table, row, index: -1 })) {
+      const priceIndex = ensureSalePriceColumn(table);
+      row[priceIndex] = displacedPrice;
+    }
+    return true;
+  }
+  return false;
+}
+
+function getBestSalePriceFromRow(table, row) {
+  const priceIndexes = findPreferredSalePriceColumnIndexes(table.columns || []);
+  for (const index of priceIndexes) {
+    const price = extractSalePriceText(row[index], { minPrice: 100 });
+    if (price) return price;
+  }
+
+  const zoneIndex = findColumnIndex(table.columns || [], ["区域", "区", "block", "section", "구역"]);
+  const preferredIndexes = (table.columns || [])
+    .map((column, index) => ({ column, index }))
+    .filter(({ index }) => index !== zoneIndex)
+    .filter(({ column }) => !isInternalColorColumn(column))
+    .filter(({ column }) => isSalePriceColumnName(column) || /售价|价格|单价|报价|金额|price|ask/i.test(column))
+    .map(({ index }) => index);
+  const preferredValue = preferredIndexes.map((index) => extractSalePriceText(row[index], { minPrice: 100 })).find(Boolean);
+  if (preferredValue) return preferredValue;
+
+  const tailValues = row
+    .map((value, index) => ({ value, column: table.columns[index] || "", index }))
+    .filter(({ column, value }) => !isInternalColorColumn(column) && !isLikelyRowColorValue(value))
+    .filter(({ column }) => !isQuantityColumnName(column))
+    .filter(({ column }) => {
+      if (isSalePriceColumnName(column)) return true;
+      if (isFaceValueColumnName(column) || isProtectedNonPriceColumnName(column)) return false;
+      if (isRemarkColumnName(column) || isDeliveryColumnName(column)) return false;
+      return true;
+    })
+    .map(({ value, column, index }) => ({ value, column, index }))
+    .reverse();
+  return (
+    tailValues
+      .map(({ value, column, index }) => {
+        const minPrice = isSalePriceColumnName(column) ? 100 : 1000;
+        return extractSalePriceText(value, { minPrice });
+      })
+      .find(Boolean) ||
+    getSalePriceCandidateFromRow(table, row)?.price ||
+    ""
+  );
+}
+
+function findFallbackSalePriceFromAnyCell(table, row) {
+  const columns = table.columns || [];
+  const ignoredIndexes = new Set([
+    ...findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]),
+    ...findColumnIndexes(columns, ["序号", "编号", "no", "id"]),
+    ...findColumnIndexes(columns, ["区域", "区", "block", "section", "구역"]),
+    ...findSeatRowColumnIndexes(columns),
+    ...findSeatNumberColumnIndexes(columns),
+    ...findColumnIndexes(columns, ["数量", "张数", "连坐", "qty", "count", "매수", "수량"]),
+  ]);
+  const candidates = row
+    .map((value, index) => ({ value: String(value || "").trim(), index, column: columns[index] || "" }))
+    .filter(({ value, index, column }) => {
+      if (!value || ignoredIndexes.has(index) || isInternalColorColumn(column) || isLikelyRowColorValue(value)) return false;
+      if (isSoldText(value, { strict: true }) || isLikelyDateValue(value)) return false;
+      return Boolean(extractSalePriceText(value, { minPrice: 100 }));
+    })
+    .map((item) => {
+      const price = extractSalePriceText(item.value, { minPrice: 100 });
+      const number = extractNumber(price);
+      const hasCurrency = /[￥¥$€£₩]/.test(item.value);
+      const saleHeader = isSalePriceColumnName(item.column);
+      const tail = item.index >= Math.max(0, row.length - 3);
+      let score = 0;
+      if (saleHeader) score += 120;
+      if (hasCurrency) score += 70;
+      if (tail) score += 45;
+      if (number >= 1000) score += 35;
+      if (number >= 10000) score += 8;
+      if (isRemarkColumnName(item.column) || isDeliveryColumnName(item.column)) score += 20;
+      if (number < 1000 && !hasCurrency && !saleHeader) score -= 35;
+      return { ...item, price, score };
+    })
+    .filter((item) => item.score >= 35)
+    .sort((a, b) => b.score - a.score || b.index - a.index);
+  return candidates[0] || null;
+}
+
+function repairSalePriceAndQuantity(table, row) {
+  let changed = false;
+  if (repairShiftedSalePriceAndRemark(table, row)) {
+    changed = true;
+  }
+  const bestPrice = getBestSalePriceFromRow(table, row);
+  if (bestPrice && !getDirectSalePriceFromRow(table, row)) {
+    const priceIndex = ensureSalePriceColumn(table);
+    if (row[priceIndex] !== bestPrice) {
+      row[priceIndex] = bestPrice;
+      changed = true;
+    }
+  }
+
+  if (!hasTicketSalePrice({ table, row, index: -1 })) {
+    const fallbackPrice = findFallbackSalePriceFromAnyCell(table, row);
+    if (fallbackPrice?.price) {
+      const priceIndex = ensureSalePriceColumn(table);
+      row[priceIndex] = fallbackPrice.price;
+      if (shouldClearMovedPriceSource(table, fallbackPrice.index, priceIndex)) row[fallbackPrice.index] = "";
+      changed = true;
+    }
+  }
+
+  const quantityIndex = findQuantityColumnIndex(table.columns);
+  if (quantityIndex >= 0) {
+    const quantityValue = String(row[quantityIndex] || "").trim();
+    const quantityNumber = extractNumber(quantityValue);
+    if (isLikelySalePriceValue(quantityValue, { minPrice: 100 }) && hasTicketSalePrice({ table, row, index: -1 })) {
+      row[quantityIndex] = "";
+      changed = true;
+    } else if (quantityValue && !isLikelySeatCountValue(quantityValue)) {
+      if (quantityNumber && quantityNumber > 20) {
+        if (!hasTicketSalePrice({ table, row, index: -1 })) {
+          const priceIndex = ensureSalePriceColumn(table);
+          const movedPrice = extractSalePriceText(quantityValue, { minPrice: 100 }) || quantityValue;
+          if (row[priceIndex] !== movedPrice) {
+            row[priceIndex] = movedPrice;
+            changed = true;
+          }
+        }
+        row[quantityIndex] = "";
+        changed = true;
+      }
+    }
+  }
+
+  const rowIndex = findSeatRowColumnIndexes(table.columns)[0] ?? -1;
+  if (rowIndex >= 0 && isLikelySalePriceValue(row[rowIndex]) && hasTicketSalePrice({ table, row, index: -1 })) {
+    row[rowIndex] = "";
+    changed = true;
+  }
+  const seatIndex = findSeatNumberColumnIndexes(table.columns)[0] ?? -1;
+  if (seatIndex >= 0 && isLikelySalePriceValue(row[seatIndex]) && hasTicketSalePrice({ table, row, index: -1 })) {
+    row[seatIndex] = "";
+    changed = true;
+  }
+  return changed;
+}
+
+function repairMergedContextValues(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  let changed = false;
+  const dateIndex = findColumnIndex(table.columns, ["日期", "演出日期", "date", "day", "일자"]);
+  const zoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
+  const rowIndex = ensureSeatRowColumn(table);
+  const seatIndex = ensureSeatNumberColumn(table);
+  let lastDate = "";
+  let lastZone = "";
+
+  table.rows.forEach((row, index) => {
+    while (row.length < table.columns.length) row.push("");
+    const rowValue = String(row[rowIndex] || "").trim();
+    const seatValue = String(row[seatIndex] || "").trim();
+    const hasInheritedTicketContent =
+      isLikelySeatRowValue(rowValue) ||
+      isLikelySeatNumberValue(seatValue) ||
+      hasTicketSalePrice({ table, row, index: -1 });
+    if (dateIndex >= 0) {
+      const currentDate = String(row[dateIndex] || "").trim();
+      if (currentDate && isLikelyDateColumnValue(currentDate)) {
+        lastDate = currentDate;
+      } else if (lastDate && !table.userEditedRows?.[index]) {
+        const dateCellLooksLikePosition =
+          currentDate &&
+          (Boolean(parseCompositeSeatInfo(currentDate)) ||
+            isLikelyZoneCode(currentDate) ||
+            isLikelySeatRowValue(currentDate) ||
+            isLikelySeatNumberValue(currentDate));
+        if (!currentDate || (dateCellLooksLikePosition && hasInheritedTicketContent)) {
+          row[dateIndex] = lastDate;
+          changed = true;
+        }
+      }
+    }
+
+    if (zoneIndex < 0) return;
+    const currentZone = cleanZoneToken(row[zoneIndex]);
+    if (isLikelyZoneCode(currentZone)) {
+      lastZone = currentZone;
+      return;
+    }
+
+    if (table.userEditedRows?.[index]) return;
+
+    if (lastZone && currentZone && isLikelySeatRowValue(currentZone)) {
+      if (!rowValue || !isLikelySeatRowValue(rowValue) || isLikelySalePriceValue(rowValue)) {
+        row[rowIndex] = row[zoneIndex];
+        changed = true;
+      }
+      row[zoneIndex] = lastZone;
+      changed = true;
+      return;
+    }
+
+    if (lastZone && !currentZone && hasInheritedTicketContent) {
+      row[zoneIndex] = lastZone;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function normalizePendingTableColumns(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return table;
+  extendColumnsForOverflowRows(table.columns, table.rows);
+  ensureOriginalTableSnapshot(table);
+  let changed = false;
+  table.rows.forEach((row) => {
+    while (row.length < table.columns.length) {
+      row.push("");
+      changed = true;
+    }
+  });
+
+  if (repairSemanticColumnRoles(table)) {
+    changed = true;
+  }
+
+  let priceIndex = findSalePriceColumnIndex(table.columns);
+  const misreadPriceIndex = findMisreadSalePriceColumnIndex(table);
+  if (priceIndex < 0 && misreadPriceIndex >= 0) {
+    table.columns[misreadPriceIndex] = "售价";
+    priceIndex = misreadPriceIndex;
+    changed = true;
+  }
+
+  let colorIndex = getRowColorColumnIndex(table);
+  const colorCandidateIndex = table.columns.findIndex(
+    (column, index) => index !== priceIndex && isInternalColorColumn(column) && columnRatio(table, index, isLikelyRowColorValue) >= 0.6,
+  );
+  if (colorIndex < 0 && colorCandidateIndex >= 0) {
+    table.columns[colorCandidateIndex] = "行底色";
+    colorIndex = colorCandidateIndex;
+    changed = true;
+  }
+
+  let quantityIndex = findQuantityColumnIndex(table.columns);
+  table.rows.forEach((row, rowIndex) => {
+    const manuallyEdited = Boolean(table.userEditedRows?.[rowIndex]);
+    if (!manuallyEdited && moveBusinessStatusMarkersToRemark(table, row)) {
+      changed = true;
+    }
+
+    if (!manuallyEdited) {
+      const repairedComposite = repairCompositeSeatInfoFromCandidateColumns(table, row);
+      const repairedCompositeAnyCell = repairCompositeSeatInfoFromAnyCell(table, row);
+      const repairedSeparatedPosition = repairSeparatedSeatPositionFields(table, row);
+      const repairedZone = repairZoneFromPosition(table, row);
+      if (repairedComposite || repairedCompositeAnyCell || repairedSeparatedPosition || repairedZone) {
+        changed = true;
+        quantityIndex = findQuantityColumnIndex(table.columns);
+        priceIndex = findSalePriceColumnIndex(table.columns);
+      }
+    }
+
+    if (!manuallyEdited && repairSalePriceAndQuantity(table, row)) {
+      changed = true;
+      quantityIndex = findQuantityColumnIndex(table.columns);
+      priceIndex = findSalePriceColumnIndex(table.columns);
+    }
+
+    const priceMissing = priceIndex < 0 || !hasTicketSalePrice({ table, row, index: -1 });
+    if (!manuallyEdited && priceMissing && colorIndex >= 0 && isLikelySalePriceValue(row[colorIndex], { minPrice: 100 })) {
+      const movedPrice = row[colorIndex];
+      if (quantityIndex >= 0 && isLikelyRowColorValue(row[quantityIndex])) {
+        if (row[colorIndex] !== row[quantityIndex]) {
+          row[colorIndex] = row[quantityIndex];
+          changed = true;
+        }
+        if (row[quantityIndex] !== "") {
+          row[quantityIndex] = "";
+          changed = true;
+        }
+      }
+      priceIndex = ensureSalePriceColumn(table);
+      if (row[priceIndex] !== movedPrice) {
+        row[priceIndex] = movedPrice;
+        changed = true;
+      }
+      quantityIndex = findQuantityColumnIndex(table.columns);
+    }
+
+    if (
+      !manuallyEdited &&
+      priceIndex >= 0 &&
+      !hasTicketSalePrice({ table, row, index: -1 }) &&
+      quantityIndex >= 0 &&
+      isLikelySalePriceValue(row[quantityIndex], { minPrice: 100 })
+    ) {
+      if (row[priceIndex] !== row[quantityIndex]) {
+        row[priceIndex] = row[quantityIndex];
+        changed = true;
+      }
+    }
+
+  });
+
+  if (repairMergedContextValues(table)) {
+    changed = true;
+    table.rows.forEach((row, rowIndex) => {
+      if (table.userEditedRows?.[rowIndex]) return;
+      if (repairSalePriceAndQuantity(table, row)) changed = true;
+    });
+  }
+
+  if (mergeDuplicateColumnsByName(table)) {
+    changed = true;
+  }
+
+  table.autoRepairedColumns = Boolean(table.autoRepairedColumns || changed);
+  table._columnRepairChanged = changed;
+  return table;
+}
+
+function ensureDefaultQuantityColumn(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return -1;
+  let quantityIndex = findQuantityColumnIndex(table.columns);
+  if (quantityIndex < 0) {
+    return -1;
+  }
+  table.rows.forEach((row) => {
+    while (row.length < table.columns.length) row.push("");
+    if (!String(row[quantityIndex] || "").trim()) row[quantityIndex] = "1";
+  });
+  return quantityIndex;
+}
+
+function normalizeRowColorLabel(value) {
+  const raw = normalize(value);
+  if (!raw || /^[￥¥$,\d.]+$/.test(raw)) return "";
+  const text = raw
+    .replace(/\s+/g, "")
+    .replace(/底色|背景色|行色|色/g, "")
+    .replace(/浅|淡|深|亮|明显/g, "");
+  if (!text || /^(无|空|默认|透明|unknown|不确定|无法判断|看不清|na|n\/a|-|\/)$/.test(text)) return "";
+  if (/white|白|灰白|米白/.test(text)) return "白底";
+  if (/pink|粉/.test(text)) return "粉底";
+  if (/red|红/.test(text)) return "红底";
+  if (/yellow|黄|橙黄/.test(text)) return "黄底";
+  if (/orange|橙/.test(text)) return "橙底";
+  if (/green|绿/.test(text)) return "绿底";
+  if (/gray|grey|灰/.test(text)) return "灰底";
+  if (/blue|蓝/.test(text)) return "蓝底";
+  if (/purple|violet|紫/.test(text)) return "紫底";
+  if (/black|黑/.test(text)) return "黑底";
+  if (/cyan|青|湖蓝|天蓝/.test(text)) return "青底";
+  return "";
+}
+
+function getRowColorColumnIndex(table) {
+  return findColumnIndex(table.columns || [], ["行底色", "底色", "背景色", "颜色标记", "颜色", "row color", "background"]);
+}
+
+function ensureRowColorColumn(table) {
+  let colorIndex = getRowColorColumnIndex(table);
+  if (colorIndex >= 0) return colorIndex;
+  table.columns.push("行底色");
+  colorIndex = table.columns.length - 1;
+  table.rows.forEach((row) => {
+    while (row.length < table.columns.length) row.push("");
+  });
+  return colorIndex;
+}
+
+function isVisualRowColorSource(table) {
+  return table?.rowColorSource === "opencv" || table?.rowColorSource === "ai_row_color";
+}
+
+function getRowColorEngineName(table) {
+  return table?.rowColorSource === "ai_row_color" ? "AI" : "OpenCV";
+}
+
+function hasTrustedRowColorSource(table) {
+  return (
+    isVisualRowColorSource(table) &&
+    Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
+    (table.rowColorReliable === true || table.rowColorConfirmed === true)
+  );
+}
+
+function hasOpenCvRowColorPreview(table) {
+  return (
+    isVisualRowColorSource(table) &&
+    Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
+    Array.isArray(table.rowColorRows) &&
+    table.rowColorRows.length > 0
+  );
+}
+
+function getOpenCvRawRowColorLabel(table, rowIndex) {
+  const item = table?.rowColorRows?.[rowIndex];
+  if (item?.userCleared) return "";
+  return getOpenCvItemRawColorLabel(item);
+}
+
+function getOpenCvItemRawColorLabel(item) {
+  return normalizeRowColorLabel(item?.label) || normalizeRowColorLabel(item?.rawLabel);
+}
+
+function getOpenCvItemDecisionColorLabel(item) {
+  const label = getOpenCvItemRawColorLabel(item);
+  if (!label) return "";
+  const confidence = Number(item?.confidence || 0);
+  if (item?.source === "ai_row_color") {
+    if (isAvailableRowColorLabel(label)) return confidence >= 0.55 ? "白底" : "";
+    return confidence >= 0.72 ? label : "";
+  }
+  const coloredRatio = Number(item?.coloredRatio || 0);
+  const whiteRatio = Number(item?.whiteRatio || 0);
+  const coverageRatio = Number(item?.coverageRatio || 0);
+
+  if (isAvailableRowColorLabel(label)) {
+    const looksWhite = whiteRatio >= 0.3 && (coloredRatio <= 0.36 || coloredRatio <= whiteRatio * 1.25);
+    const explicitlyWhite = confidence >= 0.52 && coloredRatio <= 0.42 && coverageRatio <= 0.68;
+    return looksWhite || explicitlyWhite ? "白底" : "";
+  }
+
+  const whiteLooksDominant =
+    whiteRatio >= 0.28 &&
+    (coloredRatio <= 0.42 || coloredRatio <= whiteRatio * 1.35) &&
+    coverageRatio <= 0.72;
+  if (whiteLooksDominant) return "";
+
+  const strongByModel = item?.strong === true && confidence >= 0.5 && coloredRatio >= 0.42 && coverageRatio >= 0.38;
+  const strongByRatios =
+    confidence >= 0.56 &&
+    coloredRatio >= 0.48 &&
+    coverageRatio >= 0.42 &&
+    (whiteRatio <= 0.24 || coloredRatio >= whiteRatio * 1.7);
+  return strongByModel || strongByRatios ? label : "";
+}
+
+function isStrongOpenCvNonWhiteColorItem(item) {
+  const label = getOpenCvItemRawColorLabel(item);
+  if (!label || isAvailableRowColorLabel(label) || item?.userCleared) return false;
+  const decisionLabel = getOpenCvItemDecisionColorLabel(item);
+  if (decisionLabel && !isAvailableRowColorLabel(decisionLabel)) return true;
+  const confidence = Number(item?.confidence || 0);
+  const coloredRatio = Number(item?.coloredRatio || 0);
+  const whiteRatio = Number(item?.whiteRatio || 0);
+  const coverageRatio = Number(item?.coverageRatio || 0);
+  return (
+    item?.strong === true &&
+    confidence >= 0.68 &&
+    coloredRatio >= 0.55 &&
+    coverageRatio >= 0.6 &&
+    (whiteRatio <= 0.2 || coloredRatio >= whiteRatio * 2.4)
+  );
+}
+
+function getTrustedOpenCvRowColorLabel(table, rowIndex) {
+  const item = table?.rowColorRows?.[rowIndex];
+  if (item?.userCleared) return "";
+  return getOpenCvItemDecisionColorLabel(item);
+}
+
+function getDecisionOpenCvRowColorLabel(table, rowIndex) {
+  const item = table?.rowColorRows?.[rowIndex];
+  if (item?.userCleared) return "";
+  return getOpenCvItemDecisionColorLabel(item);
+}
+
+function getAutoOpenCvRowColorLabel(table, rowIndex) {
+  const decisionLabel = getDecisionOpenCvRowColorLabel(table, rowIndex);
+  if (decisionLabel) return decisionLabel;
+  if (!hasTrustedRowColorSource(table)) return "";
+  const item = table?.rowColorRows?.[rowIndex];
+  if (item?.userCleared) return "";
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return rawLabel;
+  const confidence = Number(item?.confidence || 0);
+  const coloredRatio = Number(item?.coloredRatio || 0);
+  const whiteRatio = Number(item?.whiteRatio || 0);
+  const coverageRatio = Number(item?.coverageRatio || 0);
+  const fullRowEnough =
+    confidence >= 0.72 &&
+    (coloredRatio >= 0.34 || coverageRatio >= 0.5) &&
+    (whiteRatio <= 0.28 || coloredRatio >= whiteRatio * 1.55);
+  return fullRowEnough ? rawLabel : "";
+}
+
+function hasActionableOpenCvColorSource(table) {
+  if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
+  if (table.rowColorRows.length !== table.rows.length) return false;
+  if (table.rowColorReliable === true || table.rowColorConfirmed === true) {
+    return hasOpenCvWhiteAndColoredConflict(table) || hasOpenCvRawColorDifference(table);
+  }
+  return hasOpenCvRawWhiteAndColoredConflict(table);
+}
+
+function isStrictRowColorActionable(table, rowIndex) {
+  if (!hasActionableOpenCvColorSource(table)) return false;
+  if (table.rowColorRows.length !== table.rows.length) return false;
+  const item = table.rowColorRows[rowIndex];
+  if (!item || item.userCleared) return false;
+  if (item.source === "ai_row_color") {
+    return false;
+  }
+  const label = getDecisionOpenCvRowColorLabel(table, rowIndex);
+  if (!label || isAvailableRowColorLabel(label)) return false;
+  const confidence = Number(item.confidence || 0);
+  const coloredRatio = Number(item.coloredRatio || 0);
+  const whiteRatio = Number(item.whiteRatio || 0);
+  const coverageRatio = Number(item.coverageRatio || 0);
+  return (
+    item.strong === true &&
+    confidence >= 0.68 &&
+    coloredRatio >= 0.58 &&
+    coverageRatio >= 0.72 &&
+    (whiteRatio <= 0.16 || coloredRatio >= whiteRatio * 2.8)
+  );
+}
+
+function getStrictWhiteOnlyOpenCvRowColorLabel(table, rowIndex) {
+  const autoLabel = getAutoOpenCvRowColorLabel(table, rowIndex);
+  if (autoLabel) return autoLabel;
+  if (!hasOpenCvRawColorDifference(table)) return "";
+  const rawLabel = getOpenCvRawRowColorLabel(table, rowIndex);
+  if (!rawLabel) return "";
+  return rawLabel;
+}
+
+function getOpenCvNonSoldColorLabels(table) {
+  if (!hasOpenCvRowColorPreview(table)) return [];
+  const nonSoldRows = table.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => !isSoldTicket({ table, row, index }));
+  const labels = nonSoldRows.map(({ index }) => getAutoOpenCvRowColorLabel(table, index)).filter(Boolean);
+  const hasNonWhiteColor = labels.some((label) => label && !isAvailableRowColorLabel(label));
+  const hasNeutralCandidate = nonSoldRows.some(({ index }) => {
+    const decisionLabel = getAutoOpenCvRowColorLabel(table, index);
+    const rawLabel = getOpenCvRawRowColorLabel(table, index);
+    return !decisionLabel && (!rawLabel || isAvailableRowColorLabel(rawLabel));
+  });
+  if (hasNonWhiteColor && hasNeutralCandidate) labels.push("白底");
+  return uniqueCleanValues(labels);
+}
+
+function hasOpenCvWhiteAndColoredConflict(table) {
+  const labels = getOpenCvNonSoldColorLabels(table);
+  return labels.some(isAvailableRowColorLabel) && labels.some((label) => label && !isAvailableRowColorLabel(label));
+}
+
+function getOpenCvRawNonSoldColorLabels(table) {
+  if (!hasOpenCvRowColorPreview(table)) return [];
+  const labels = (table.rows || [])
+    .map((row, index) => {
+      if (isSoldTicket({ table, row, index })) return "";
+      return getOpenCvItemRawColorLabel(table.rowColorRows?.[index]);
+    })
+    .filter(Boolean);
+  const hasNeutralCandidate = (table.rows || []).some((row, index) => {
+    if (isSoldTicket({ table, row, index })) return false;
+    const rawLabel = getOpenCvItemRawColorLabel(table.rowColorRows?.[index]);
+    const decisionLabel = getDecisionOpenCvRowColorLabel(table, index);
+    return !rawLabel || isAvailableRowColorLabel(rawLabel) || isAvailableRowColorLabel(decisionLabel);
+  });
+  return uniqueCleanValues([...labels, ...(hasNeutralCandidate ? ["白底"] : [])]);
+}
+
+function hasOpenCvRawColorDifference(table) {
+  const labels = getOpenCvRawNonSoldColorLabels(table);
+  return labels.some(isAvailableRowColorLabel) && labels.some((label) => label && !isAvailableRowColorLabel(label));
+}
+
+function hasOpenCvRawWhiteAndColoredConflict(table) {
+  if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || table.rowColorRows.length !== table.rows.length) return false;
+  const labels = table.rows
+    .map((row, index) => {
+      if (isSoldTicket({ table, row, index })) return "";
+      return getOpenCvItemRawColorLabel(table.rowColorRows?.[index]) || getDecisionOpenCvRowColorLabel(table, index);
+    })
+    .filter(Boolean);
+  return labels.some(isAvailableRowColorLabel) && labels.some((label) => label && !isAvailableRowColorLabel(label));
+}
+
+function hasStrongOpenCvWhiteAndColoredConflict(table) {
+  if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || table.rowColorRows.length !== table.rows.length) return false;
+  let hasWhite = false;
+  let hasStrongNonWhite = false;
+  table.rows.forEach((row, index) => {
+    if (isSoldTicket({ table, row, index })) return;
+    const item = table.rowColorRows?.[index];
+    const label = getOpenCvItemDecisionColorLabel(item);
+    if (label && isAvailableRowColorLabel(label)) hasWhite = true;
+    if (label && !isAvailableRowColorLabel(label)) hasStrongNonWhite = true;
+    if (!label && isStrongOpenCvNonWhiteColorItem(item)) hasStrongNonWhite = true;
+  });
+  return hasWhite && hasStrongNonWhite;
+}
+
+function getWhiteVsColoredConflictLabel(table, rowIndex) {
+  if (!hasOpenCvRowColorPreview(table) || !(hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table))) return "";
+  const item = table.rowColorRows?.[rowIndex];
+  if (item?.userCleared) return "";
+  const decisionLabel = getOpenCvItemDecisionColorLabel(item);
+  if (decisionLabel) return decisionLabel;
+  if (isStrongOpenCvNonWhiteColorItem(item)) return getOpenCvItemRawColorLabel(item);
+  return "";
+}
+
+function getOpenCvColorDecisionText(table, rowIndex) {
+  const action = table?.rowColorRows?.[rowIndex]?.action || "";
+  if (action === "skip") return "AI 判断不发布";
+  if (action === "publish") return "AI 判断发布";
+  if (action === "uncertain") return "AI 不确定";
+  const label = getOpenCvRawRowColorLabel(table, rowIndex);
+  if (!label) return "未识别";
+  if (isSoldTicket({ table, row: table.rows[rowIndex], index: rowIndex })) return "文字已售";
+  if ((hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table)) && !isAvailableRowColorLabel(label)) return "自动下架";
+  if ((hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table)) && isAvailableRowColorLabel(label)) return "自动保留";
+  if (!getAutoOpenCvRowColorLabel(table, rowIndex)) return "不确定，不使用";
+  return "不因颜色下架";
+}
+
+function applyAiRowColorActionDecision(table) {
+  if (!table || table.rowColorSource !== "ai_row_color" || !Array.isArray(table.rowColorRows)) return 0;
+  table.publishRows = table.publishRows || {};
+  table.rowColorConfirmed = true;
+  table.rowColorAutoApplied = true;
+
+  let skipCount = 0;
+  let publishCount = 0;
+  let uncertainCount = 0;
+  table.rows.forEach((row, index) => {
+    const item = table.rowColorRows[index] || {};
+    const action = item.action || "";
+    const ticket = { table, row, index };
+    const manuallySet = table.userEditedRows?.[index] === true;
+    if (manuallySet) return;
+    if (isSoldTicket(ticket)) {
+      table.publishRows[index] = false;
+      return;
+    }
+    if (isStrictRowColorActionable(table, index)) {
+      table.publishRows[index] = false;
+      skipCount += 1;
+      return;
+    }
+    if (action === "publish" && Number(item.confidence || 0) >= 0.55) {
+      table.publishRows[index] = hasTicketSalePrice(ticket);
+      publishCount += 1;
+      return;
+    }
+    uncertainCount += 1;
+  });
+
+  table.showOpenCvColorPreview = false;
+  table.rowColorAutoSkipCount = skipCount;
+  table.rowColorMessage = `AI 已逐行判断并严格应用：发布 ${publishCount} 条，整行标色下架 ${skipCount} 条，不确定 ${uncertainCount} 条。`;
+  return skipCount;
+}
+
+function applyOpenCvWhiteVsColoredAutoDecision(table) {
+  if (!table || !hasOpenCvRowColorPreview(table)) return 0;
+  if (table.rowColorSource === "ai_row_color") return applyAiRowColorActionDecision(table);
+  const hasWhiteVsColoredConflict = hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table);
+  if (!hasActionableOpenCvColorSource(table) && !hasWhiteVsColoredConflict) return 0;
+
+  table.publishRows = table.publishRows || {};
+  table.rowColorConfirmed = true;
+  table.rowColorAutoApplied = true;
+
+  let colorSkipCount = 0;
+  let whiteKeepCount = 0;
+  table.rows.forEach((row, index) => {
+    const label = getStrictWhiteOnlyOpenCvRowColorLabel(table, index);
+    const conflictLabel = getWhiteVsColoredConflictLabel(table, index);
+
+    const ticket = { table, row, index };
+    const manuallySet = table.publishRows[index] !== undefined && table.userEditedRows?.[index] === true;
+    const manuallyRestored = manuallySet && table.publishRows[index] === true && table.rowColorRows?.[index]?.userCleared;
+    if (manuallyRestored) return;
+    if (isSoldTicket(ticket) || isStrictRowColorActionable(table, index)) {
+      if (!isSoldTicket(ticket) && isStrictRowColorActionable(table, index)) colorSkipCount += 1;
+      table.publishRows[index] = false;
+      return;
+    }
+    if (hasWhiteVsColoredConflict && conflictLabel && !isAvailableRowColorLabel(conflictLabel) && !manuallySet) {
+      table.publishRows[index] = false;
+      colorSkipCount += 1;
+      return;
+    }
+    if (hasWhiteVsColoredConflict && isAvailableRowColorLabel(conflictLabel) && !manuallySet) {
+      whiteKeepCount += 1;
+      table.publishRows[index] = isCustomerPublishableTicket(ticket);
+      return;
+    }
+    if (hasWhiteVsColoredConflict && label && !isAvailableRowColorLabel(label) && !manuallySet) {
+      table.publishRows[index] = false;
+      colorSkipCount += 1;
+      return;
+    }
+    if (isAvailableRowColorLabel(label) && !manuallySet) {
+      whiteKeepCount += 1;
+      table.publishRows[index] = isCustomerPublishableTicket(ticket);
+    } else if (isAvailableRowColorLabel(label)) {
+      whiteKeepCount += 1;
+    }
+  });
+
+  table.showOpenCvColorPreview = false;
+  table.rowColorAutoSkipCount = colorSkipCount;
+  table.rowColorMessage = `${getRowColorEngineName(table)} 已自动应用颜色规则：白底保留${whiteKeepCount ? ` ${whiteKeepCount} 条` : ""}，非白底自动下架 ${colorSkipCount} 条。`;
+  return colorSkipCount;
+}
+
+function getLastOcrColorAnalysisForPage(page) {
+  if (!page) return null;
+  const analyses = lastTicketOcrJobSnapshot?.rowColorAnalyses || {};
+  return analyses[String(page)] || analyses[page] || null;
+}
+
+function scoreOpenCvColorSliceForTable(table, rows, startIndex, expectedStart) {
+  let score = -Math.abs(startIndex - expectedStart) * 0.45;
+  table.rows.forEach((row, index) => {
+    const item = rows[startIndex + index];
+    if (!item) {
+      score -= 6;
+      return;
+    }
+    const label = getOpenCvItemDecisionColorLabel(item);
+    const rawLabel = getOpenCvItemRawColorLabel(item);
+    const ticket = { table, row, index };
+    const soldByText = isSoldTicket(ticket);
+    const white = isAvailableRowColorLabel(label) || (!label && isAvailableRowColorLabel(rawLabel));
+    const colored = label && !isAvailableRowColorLabel(label);
+    if (soldByText) {
+      if (colored) score += 6;
+      else if (white) score -= 1.5;
+      else score += 0.6;
+    } else if (white) {
+      score += 4;
+    } else if (colored) {
+      score -= 0.4;
+    } else {
+      score += 1.2;
+    }
+  });
+  return score;
+}
+
+function getAlignedOpenCvRowsForTable(table, availableRows, startIndex) {
+  const length = table?.rows?.length || 0;
+  if (!length || !availableRows.length) return { rows: [], startIndex };
+  if (availableRows.length === length) return { rows: availableRows.slice(0, length), startIndex: 0 };
+  const maxStart = Math.max(0, availableRows.length - length);
+  const expectedStart = Math.min(Math.max(0, startIndex), maxStart);
+  const searchStart = Math.max(0, expectedStart - 3);
+  const searchEnd = Math.min(maxStart, expectedStart + 3);
+  let bestStart = expectedStart;
+  let bestScore = -Infinity;
+  for (let candidateStart = searchStart; candidateStart <= searchEnd; candidateStart += 1) {
+    const score = scoreOpenCvColorSliceForTable(table, availableRows, candidateStart, expectedStart);
+    if (score > bestScore) {
+      bestScore = score;
+      bestStart = candidateStart;
+    }
+  }
+  return {
+    rows: availableRows.slice(bestStart, bestStart + length),
+    startIndex: bestStart,
+  };
+}
+
+function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
+  if (!table || !Array.isArray(table.rows)) return 0;
+  table.rowColorSource = "none";
+  table.rowColorReliable = false;
+  table.rowColorConfirmed = false;
+  table.rowColorAutoApplied = false;
+  table.rowColorAutoSkipCount = 0;
+  table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
+  table.rowColorMessage = "";
+  table.rowColorRows = [];
+
+  if (!analysis || (analysis.source !== "opencv" && analysis.source !== "ai_row_color")) return 0;
+  table.rowColorSource = analysis.source;
+  table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
+  table.rowColorSelectionMode = analysis.selectionMode || "";
+  table.rowColorContiguous = analysis.contiguous === true;
+  table.rowColorMaxGap = Number(analysis.maxRowGap || 0);
+  const availableRows = Array.isArray(analysis.rows) ? analysis.rows : [];
+  const aligned =
+    analysis.source === "ai_row_color"
+      ? {
+          rows: table.rows.map(
+            (_, index) =>
+              availableRows.find((row) => Number(row?.index) === index) || {
+                index,
+                label: "",
+                rawLabel: "",
+                confidence: 0,
+                reason: "AI 未返回这一行，保留人工确认。",
+              },
+          ),
+          startIndex: 0,
+        }
+      : getAlignedOpenCvRowsForTable(table, availableRows, startIndex);
+  const assignedRows = aligned.rows;
+  table.rowColorAlignedStart = aligned.startIndex;
+  table.rowColorRows = assignedRows.map((row) => ({
+    source: analysis.source,
+    label: row?.label || "",
+    rawLabel: row?.rawLabel || "",
+    confidence: row?.confidence || 0,
+    coloredRatio: row?.coloredRatio || 0,
+    whiteRatio: row?.whiteRatio || 0,
+    coverageRatio: row?.coverageRatio || 0,
+    strong: row?.strong === true,
+    action: row?.action || "",
+    reason: row?.reason || "",
+    sourceIndex: row?.index ?? "",
+    y: row?.y ?? "",
+  }));
+
+  const exactRowCount = assignedRows.length === table.rows.length;
+  const labels = table.rowColorRows.map((row, index) => getDecisionOpenCvRowColorLabel(table, index)).filter(Boolean);
+  const allConfident = assignedRows.every((row) => Number(row?.confidence || 0) >= 0.42);
+  table.rowColorReliable = Boolean(analysis.reliable && exactRowCount && allConfident);
+  const hasColorConflict = hasOpenCvWhiteAndColoredConflict(table);
+  const autoSkipCount = applyOpenCvWhiteVsColoredAutoDecision(table);
+  const engineName = getRowColorEngineName(table);
+  if (autoSkipCount) {
+    table.rowColorMessage = `${engineName} 已逐行应用颜色规则：非白底自动下架 ${autoSkipCount} 条，白底保留。`;
+  } else if (table.rowColorReliable) {
+    table.rowColorMessage = `${engineName} 已匹配 ${table.rows.length} 行底色`;
+  } else if (hasColorConflict) {
+    table.rowColorMessage =
+      analysis.error || `${engineName} 行底色未能可靠对齐：识别 ${assignedRows.length}/${table.rows.length} 行${table.rowColorSelectionMode ? `，模式 ${table.rowColorSelectionMode}` : ""}`;
+  } else {
+    table.rowColorMessage = labels.length
+      ? `${engineName} 已识别 ${assignedRows.length}/${table.rows.length} 行底色，未发现颜色冲突`
+      : `${engineName} 未识别到会影响上架的颜色冲突`;
+  }
+  return Math.max(assignedRows.length, aligned.startIndex + assignedRows.length - startIndex);
+}
+
+function confirmOpenCvRowColorResult(table) {
+  if (!table || !hasOpenCvRowColorPreview(table)) {
+    showToast("这张表没有可确认的逐行颜色结果。", "error");
+    return;
+  }
+  pushReviewSnapshot(table, "确认使用颜色结果前");
+  let appliedCount = 0;
+  table.rows.forEach((row, index) => {
+    const label = getDecisionOpenCvRowColorLabel(table, index);
+    if (table.rowColorRows?.[index]) table.rowColorRows[index].userCleared = false;
+    if (label) appliedCount += 1;
+  });
+  table.rowColorReliable = true;
+  table.rowColorConfirmed = true;
+  table.showOpenCvColorPreview = false;
+  table.rowColorMessage = `已人工确认使用${getRowColorEngineName(table)}颜色结果：${appliedCount}/${table.rows.length} 行`;
+
+  table.publishRows = table.publishRows || {};
+  let colorSkipCount = 0;
+  table.rows.forEach((row, index) => {
+    const ticket = { table, row, index };
+    if (isUnavailableTicket(ticket)) {
+      table.publishRows[index] = false;
+      if (!isSoldTicket(ticket) && isColorMarkedSoldTicket(ticket)) colorSkipCount += 1;
+    } else if (table.publishRows[index] === undefined) {
+      table.publishRows[index] = isCustomerPublishableTicket(ticket);
+    }
+  });
+  table.aiReviewStatus = colorSkipCount
+    ? `已确认颜色结果：文字 sold 仍按原逻辑跳过；未 sold 票里检测到白底和其他底色并存，已把 ${colorSkipCount} 条非白底票设为不发布。`
+    : "已确认颜色结果：没有发现需要按颜色自动下架的未 sold 票。";
+  updatePendingTableReviewFlags(table);
+  pendingReviewFocusRowIndex = getVisibleReviewRowIndexes(table)[0] ?? null;
+  renderUploadRecords();
+  renderReviewPanel(pendingReviewFocusRowIndex);
+  scheduleAppStateSave();
+  showToast(colorSkipCount ? `已按颜色下架 ${colorSkipCount} 条。` : "已确认颜色结果。", "success");
+}
+
+function toggleOpenCvRowColorPreview(table) {
+  if (!table || !hasOpenCvRowColorPreview(table)) {
+    showToast("这张表没有逐行颜色明细。", "error");
+    return;
+  }
+  table.showOpenCvColorPreview = !table.showOpenCvColorPreview;
+  renderReviewPanel();
+}
+
+function moveBusinessColorMarkersToInternalColumn(table, row) {
+  return false;
+}
+
+function moveBusinessStatusMarkersToRemark(table, row) {
+  if (!table || !row) return false;
+  const statusIndexes = findColumnIndexes(table.columns || [], ["状态", "售卖状态", "销售状态", "status", "是否售出"]);
+  const sourceIndex = statusIndexes.find((index) => isBusinessStatusRemarkValue(row[index]));
+  if (sourceIndex < 0) return false;
+  const remarkIndex = ensureNamedColumn(table, "备注", ["备注", "remark", "note", "说明"]);
+  while (row.length < table.columns.length) row.push("");
+  const value = String(row[sourceIndex] || "").trim();
+  if (!value) return false;
+  const existingRemark = String(row[remarkIndex] || "").trim();
+  if (!existingRemark) {
+    row[remarkIndex] = value;
+  } else if (!normalize(existingRemark).includes(normalize(value))) {
+    row[remarkIndex] = `${existingRemark} ${value}`.trim();
+  }
+  row[sourceIndex] = "";
+  return true;
+}
+
+function getTicketRowColorLabels(table, options = {}) {
+  if (isVisualRowColorSource(table) && hasOpenCvRowColorPreview(table)) {
+    const labels = (table.rows || []).map((row, index) => {
+      if (options.excludeSold && isSoldTicket({ table, row, index })) return "";
+      return getAutoOpenCvRowColorLabel(table, index);
+    });
+    const filledLabels = labels.filter(Boolean);
+    if (!filledLabels.length) return [];
+    const hasBlankRows = labels.some((label) => !label);
+    return uniqueCleanValues([...filledLabels, ...(hasBlankRows ? ["白底"] : [])]);
+  }
+  const colorIndex = getRowColorColumnIndex(table);
+  if (colorIndex < 0) return [];
+  const rowsForColorCheck = (table.rows || []).filter((row, index) => {
+    if (!options.excludeSold) return true;
+    return !isSoldTicket({ table, row, index });
+  });
+  const labels = rowsForColorCheck.map((row) => normalizeRowColorLabel(row[colorIndex]));
+  const filledLabels = labels.filter(Boolean);
+  if (!filledLabels.length) return [];
+  const hasBlankRows = labels.some((label) => !label);
+  return uniqueCleanValues([...filledLabels, ...(hasBlankRows ? ["白底"] : [])]);
+}
+
+function getTicketRowColorLabel(ticket) {
+  if (isVisualRowColorSource(ticket.table) && hasOpenCvRowColorPreview(ticket.table)) {
+    return getStrictWhiteOnlyOpenCvRowColorLabel(ticket.table, ticket.index);
+  }
+  const colorIndex = getRowColorColumnIndex(ticket.table);
+  return colorIndex >= 0 ? normalizeRowColorLabel(ticket.row[colorIndex]) : "";
+}
+
+function isAvailableRowColorLabel(label) {
+  return /^白底$/.test(String(label || ""));
+}
+
+function hasWhiteOnlyRowColorRule(table) {
+  if (hasOpenCvRowColorPreview(table) && (hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table))) return true;
+  const labels = getTicketRowColorLabels(table, { excludeSold: true });
+  return labels.some(isAvailableRowColorLabel) && labels.some((label) => label && !isAvailableRowColorLabel(label));
+}
+
+function getWhiteOnlyRuleRowColorLabel(ticket) {
+  if (hasOpenCvRowColorPreview(ticket.table) && (hasOpenCvWhiteAndColoredConflict(ticket.table) || hasStrongOpenCvWhiteAndColoredConflict(ticket.table))) {
+    return getWhiteVsColoredConflictLabel(ticket.table, ticket.index) || getTicketRowColorLabel(ticket);
+  }
+  return getTicketRowColorLabel(ticket);
+}
+
+function isColorMarkedSoldTicket(ticket) {
+  if (isSoldTicket(ticket)) return false;
+  const rowColorItem = ticket.table?.rowColorRows?.[ticket.index];
+  if (rowColorItem?.action === "skip" && isStrictRowColorActionable(ticket.table, ticket.index)) return true;
+  if (rowColorItem?.action === "publish") return false;
+  if (hasWhiteOnlyRowColorRule(ticket.table)) {
+    const conflictLabel = getWhiteVsColoredConflictLabel(ticket.table, ticket.index);
+    const label = conflictLabel || getWhiteOnlyRuleRowColorLabel(ticket);
+    if (label && !isAvailableRowColorLabel(label)) return true;
+  }
+  if (!hasTrustedRowColorSource(ticket.table) && !hasActionableOpenCvColorSource(ticket.table) && !hasWhiteOnlyRowColorRule(ticket.table)) return false;
+  if (!isStrictRowColorActionable(ticket.table, ticket.index)) return false;
+  const label = getWhiteOnlyRuleRowColorLabel(ticket);
+  if (!label || isAvailableRowColorLabel(label)) return false;
+  const samples = ticket.table.colorReviewSamples || {};
+  if (Number.isInteger(samples.availableRow) && ticket.table.rows?.[samples.availableRow]) {
+    const availableLabel = getWhiteOnlyRuleRowColorLabel({ table: ticket.table, row: ticket.table.rows[samples.availableRow], index: samples.availableRow });
+    if (availableLabel && label === availableLabel) return false;
+  }
+  if (Number.isInteger(samples.soldRow) && ticket.table.rows?.[samples.soldRow]) {
+    const soldLabel = getWhiteOnlyRuleRowColorLabel({ table: ticket.table, row: ticket.table.rows[samples.soldRow], index: samples.soldRow });
+    if (soldLabel && label === soldLabel) return true;
+  }
+  const labels = getTicketRowColorLabels(ticket.table, { excludeSold: true });
+  if (labels.length <= 1) return false;
+  const hasWhiteRows = labels.some(isAvailableRowColorLabel);
+  const hasOtherColorRows = labels.some((item) => item && !isAvailableRowColorLabel(item));
+  if (!hasWhiteRows || !hasOtherColorRows) return false;
+  return !isAvailableRowColorLabel(label);
+}
+
+function hasTicketRowColorColumn(table) {
+  return getRowColorColumnIndex(table) >= 0;
+}
+
+function isInternalColorColumn(column = "") {
+  return ["行底色", "底色", "背景色", "颜色标记", "颜色", "row color", "background"].some((name) => normalize(column).includes(normalize(name)));
+}
+
+function analyzePendingTableRisk(table) {
+  normalizePendingTableColumns(table);
+  ensureDefaultQuantityColumn(table);
+  const autoColorApplied = applyOpenCvWhiteVsColoredAutoDecision(table);
+  const reasons = [];
+  const columns = table.columns || [];
+  const rows = table.rows || [];
+  const reviewRows = rows.filter((row, index) => !isUnavailableTicket({ table, row, index }));
+  const dateIndex = findColumnIndex(columns, ["日期", "演出日期", "date", "day", "일자"]);
+  const zoneIndex = findColumnIndex(columns, ["区域", "区", "block", "section", "구역"]);
+  const priceIndex = findColumnIndex(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]);
+
+  if (columns.length < 4) reasons.push("识别到的列数偏少");
+  if (rows.length < 1) reasons.push("没有识别到票源行");
+  if (dateIndex < 0) reasons.push("缺少日期列");
+  if (zoneIndex < 0) reasons.push("缺少区域列");
+  if (priceIndex < 0) reasons.push("缺少售价列");
+
+  const missingPriceRows = reviewRows.filter((row, index) => !hasTicketSalePrice({ table, row, index })).length;
+  if (missingPriceRows) reasons.push(`${missingPriceRows} 行缺少售价`);
+
+  const sparseRows = rows.filter((row) => row.filter((cell) => String(cell || "").trim()).length < Math.min(3, columns.length)).length;
+  if (rows.length && sparseRows / rows.length > 0.35) reasons.push("空缺单元格较多");
+
+  const colorCheckTable = { ...table, rows: reviewRows };
+  const rowColorLabels = hasOpenCvRowColorPreview(table) ? getTicketRowColorLabels(table, { excludeSold: true }) : getTicketRowColorLabels(colorCheckTable);
+  const rowColorEngineName = getRowColorEngineName(table);
+  if (table.rowColorSource === "opencv" && table.rowColorSelectionMode === "tail_small_table") {
+    reasons.push("旧版小表颜色识别缓存，请重新识别本页以按新规则处理红底/白底");
+  } else if (reviewRows.length && hasActionableOpenCvColorSource(table)) {
+    if (!autoColorApplied) applyOpenCvWhiteVsColoredAutoDecision(table);
+  } else if (!table.rowColorAutoApplied && reviewRows.length && isVisualRowColorSource(table) && hasOpenCvRawColorDifference(table)) {
+    reasons.push(`${rowColorEngineName} 检测到未售候选票源存在弱颜色差异，需人工确认是否为已售标色`);
+  } else if (!table.rowColorAutoApplied && reviewRows.length && hasTrustedRowColorSource(table) && rowColorLabels.length > 1) {
+    reasons.push(`${rowColorEngineName} 检测到未售候选票源颜色不一致：${rowColorLabels.join(" / ")}，需人工确认`);
+  } else if (!table.rowColorAutoApplied && reviewRows.length && isVisualRowColorSource(table) && table.rowColorReliable === false && hasOpenCvWhiteAndColoredConflict(table)) {
+    reasons.push(table.rowColorMessage || `${rowColorEngineName} 行底色未能可靠对齐，需人工确认原图颜色`);
+  } else if (reviewRows.length && !hasTrustedRowColorSource(table) && getTicketRowColorLabels(colorCheckTable).length > 1) {
+    reasons.push("AI 返回的行底色仅供参考，需人工确认原图颜色");
+  }
+
+  if (zoneIndex >= 0 && currentEvent.zones.length && reviewRows.length) {
+    const matchedRows = reviewRows.filter((row) =>
+      currentEvent.zones.some((zone) => zoneMatchesTicket({ table, row, index: -1 }, zone)),
+    ).length;
+    if (!matchedRows) reasons.push("未售候选区域内容暂未匹配当前座位图热区");
+  }
+
+  return {
+    needsManualReview: reasons.length > 0,
+    reasons,
+  };
+}
+
+function updatePendingTableReviewFlags(table) {
+  const risk = analyzePendingTableRisk(table);
+  table.needsManualReview = risk.needsManualReview;
+  table.reviewReasons = risk.reasons;
+  table.reviewFlagsVersion = REVIEW_FLAGS_VERSION;
+  return table;
+}
+
+function ensurePendingTableReviewFlags(table) {
+  if (!table) return table;
+  if (
+    table.reviewFlagsVersion === REVIEW_FLAGS_VERSION &&
+    typeof table.needsManualReview === "boolean" &&
+    Array.isArray(table.reviewReasons) &&
+    table._columnRepairChanged !== true
+  ) {
+    return table;
+  }
+  return updatePendingTableReviewFlags(table);
+}
+
+function formatStandardDateLabel(year, month, day) {
+  return `${year}年${Number(month)}月${Number(day)}日`;
+}
+
+function makeDateKeys(year, month, day) {
+  const monthNumber = Number(month);
+  const dayNumber = Number(day);
+  if (!monthNumber || !dayNumber) return [];
+  const keys = [`${monthNumber}-${dayNumber}`, `day-${dayNumber}`];
+  if (year) keys.push(`${year}-${monthNumber}-${dayNumber}`);
+  return keys;
+}
+
+function getDateKeysFromText(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+  const compactText = text.replace(/\s+/g, "");
+  const keys = [];
+  const extractedDate = extractDateFromCompositeSeatText(text);
+  if (extractedDate && extractedDate !== text) {
+    keys.push(...getDateKeysFromText(extractedDate));
+  }
+  const fullMatches = [...compactText.matchAll(/(20\d{2})(?:[.\/-]|年)(\d{1,2})(?:[.\/-]|月)(\d{1,2})(?:日|号|號)?/g)];
+  fullMatches.forEach((match) => keys.push(...makeDateKeys(match[1], match[2], match[3])));
+
+  const compactMatches = [...compactText.matchAll(/\b(20\d{2})(\d{2})(\d{2})\b/g)];
+  compactMatches.forEach((match) => keys.push(...makeDateKeys(match[1], match[2], match[3])));
+
+  const compactMonthDayMatches = [...compactText.matchAll(/\b(0[1-9]|1[0-2])([0-2]\d|3[01])\b/g)];
+  compactMonthDayMatches.forEach((match) => keys.push(...makeDateKeys("", match[1], match[2])));
+
+  const monthDayMatches = [...compactText.matchAll(/(?:^|[^\d])(\d{1,2})(?:[.\/-]|月)(\d{1,2})(?:日|号|號)?(?=$|[^\d])/g)];
+  monthDayMatches.forEach((match) => keys.push(...makeDateKeys("", match[1], match[2])));
+
+  const dayKeywordMatches = [...compactText.matchAll(/(?:^|[^\d])([0-2]?\d|3[01])(?:日|号|號|day)(?=$|[^\d])/gi)];
+  dayKeywordMatches.forEach((match) => keys.push(`day-${Number(match[1])}`));
+
+  const dayOnlyMatch = compactText.match(/^(?:day)?([1-9]|[12]\d|3[01])$/i);
+  if (dayOnlyMatch) keys.push(`day-${Number(dayOnlyMatch[1])}`);
+
+  return [...new Set(keys)];
+}
+
+function getDateKeysFromValues(values) {
+  return [...new Set(values.flatMap((value) => getDateKeysFromText(value)))];
+}
+
+function normalizeDateCellValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return extractDateFromCompositeSeatText(text) || text;
+}
+
+function getTicketDateValues(ticket) {
+  const dateIndexes = findColumnIndexes(ticket.table.columns || [], ["日期", "演出日期", "date", "day", "일자"]);
+  return dateIndexes.length ? dateIndexes.map((index) => normalizeDateCellValue(ticket.row[index])).filter(Boolean) : [];
+}
+
+function getSelectedDateDebugInfo() {
+  const date = getSelectedDate();
+  if (!date) return null;
+  return {
+    selectedDateId,
+    selectedDateLabel: date.label,
+    targetDateKeys: getDateKeysFromValues([date.id, date.label, ...(date.aliases || [])]),
+  };
+}
+
 function parseDateOptions(text) {
-  const parts = text
+  const parts = String(text || "")
     .split(/[\/,，、]/)
     .map((part) => part.trim())
     .filter(Boolean);
   const values = parts.length ? parts : ["待定"];
-  return values.map((label, index) => ({
-    id: `date-${Date.now()}-${index}`,
-    label,
-    aliases: [label, label.replace(/\s+/g, "")],
-  }));
+  return values.map((rawLabel, index) => {
+    const standardMatch = rawLabel.match(/^(\d{4})[-./年](\d{1,2})[-./月](\d{1,2})日?$/);
+    const compactMatch = rawLabel.match(/^(\d{4})(\d{2})(\d{2})$/);
+    const match = standardMatch || compactMatch;
+    if (!match) {
+      const label = rawLabel;
+      return {
+        id: `date-${Date.now()}-${index}`,
+        label,
+        aliases: [label, label.replace(/\s+/g, "")],
+      };
+    }
+    const [, year, month, day] = match;
+    const monthText = String(Number(month));
+    const dayText = String(Number(day));
+    const compact = `${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
+    const dashed = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const label = formatStandardDateLabel(year, month, day);
+    return {
+      id: compact,
+      label,
+      aliases: [
+        label,
+        dashed,
+        compact,
+        `${monthText}.${dayText}`,
+        `${monthText}月${dayText}日`,
+        `${dayText}日`,
+        `${dayText}号`,
+        `${dayText}號`,
+        `0${monthText}`.slice(-2) + "." + `0${dayText}`.slice(-2),
+      ],
+    };
+  });
 }
 
 function getImageSize(url) {
@@ -825,6 +4245,17 @@ function readFileAsDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+async function saveUploadedSourceFile(file, dataUrl) {
+  const response = await fetch("/api/source/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file: dataUrl, fileName: file.name }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.message || payload.error || "原始文件保存失败。");
+  return payload.url;
 }
 
 function getCanvasFingerprint(canvas) {
@@ -953,30 +4384,224 @@ function hydrateSeatmapTemplatesFromEvents() {
   return changed;
 }
 
+function compactLargeStateBeforeSave() {
+  if (uploadedSource?.url?.startsWith("uploads/") && uploadedSource.dataUrl) uploadedSource.dataUrl = "";
+  pendingTables.forEach((table) => {
+    if (String(table.originalImage || "").startsWith("data:") && uploadedSource?.url?.startsWith("uploads/") && table.sourceFileName === uploadedSource.name) {
+      table.originalImage = uploadedSource.url;
+    }
+  });
+}
+
+function buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource, options = {}) {
+  return {
+    events: serializableEvents,
+    currentEventId: currentEvent.id,
+    seatmapTemplates,
+    fieldMappingTemplates,
+    fieldMappingDraft,
+    eventDraftHistory,
+    pendingTables: serializablePendingTables,
+    selectedPendingTableId,
+    uploadedSource: serializableUploadedSource,
+    uploadDraft: {
+      tableTitle: uploadTableTitle.value,
+      tableText: options.omitLargeDrafts ? "" : uploadTableText.value,
+      status: options.omitLargeDrafts ? "" : uploadStatus.textContent,
+      pdfStatus: options.omitLargeDrafts ? "" : pdfDetectionStatus.textContent,
+    },
+  };
+}
+
+function makeCompactPendingTable(table) {
+  return {
+    id: table.id,
+    title: table.title,
+    originalImage: table.originalImage,
+    originalType: table.originalType,
+    sourceFileName: table.sourceFileName,
+    sourceName: table.sourceName,
+    sourcePage: table.sourcePage,
+    sourcePart: table.sourcePart,
+    eventId: table.eventId,
+    columns: Array.isArray(table.columns) ? [...table.columns] : [],
+    rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
+    publishRows: { ...(table.publishRows || {}) },
+    reviewedRows: { ...(table.reviewedRows || {}) },
+    userEditedRows: { ...(table.userEditedRows || {}) },
+    needsManualReview: Boolean(table.needsManualReview),
+    reviewReasons: Array.isArray(table.reviewReasons) ? [...table.reviewReasons] : [],
+    reviewFlagsVersion: table.reviewFlagsVersion || 0,
+  };
+}
+
 function saveAppState() {
+  compactLargeStateBeforeSave();
   const serializableEvents = events.map((event) => ({
     id: event.id,
     name: event.name,
+    artist: event.artist || getEventArtist(event),
+    city: event.city || getEventCity(event),
     location: event.location,
     dates: event.dates,
     dateOptions: event.dateOptions,
     venue: event.venue,
+    venueLocal: event.venueLocal || getEventVenue(event),
     seatmapTitle: event.seatmapTitle,
     seatmapImage: event.seatmapImage,
     seatmapFileName: event.seatmapFileName,
     seatmapSize: event.seatmapSize,
     seatmapFingerprint: event.seatmapFingerprint || "",
     seatmapTemplateId: event.seatmapTemplateId || "",
+    seatmapTestedZoneIds: Array.isArray(event.seatmapTestedZoneIds) ? [...event.seatmapTestedZoneIds] : [],
+    seatmapTestedAt: event.seatmapTestedAt || "",
+    seatmapTestRequired: event.seatmapTestRequired === true,
+    seatmapTestReason: event.seatmapTestReason || "",
     zones: event.zones,
     tables: event.tables,
   }));
+  const serializablePendingTables = pendingTables.map((table) => ({
+    ...table,
+    columns: Array.isArray(table.columns) ? [...table.columns] : [],
+    rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
+    publishRows: { ...(table.publishRows || {}) },
+    reviewedRows: { ...(table.reviewedRows || {}) },
+    userEditedRows: { ...(table.userEditedRows || {}) },
+    aiReviewDecisions: Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions.map((item) => ({ ...item })) : [],
+    colorReviewSamples: { ...(table.colorReviewSamples || {}) },
+    reviewSnapshots: Array.isArray(table.reviewSnapshots)
+      ? table.reviewSnapshots.map((snapshot) => ({
+          ...snapshot,
+          state: snapshot.state
+            ? {
+                ...snapshot.state,
+                columns: Array.isArray(snapshot.state.columns) ? [...snapshot.state.columns] : [],
+                rows: Array.isArray(snapshot.state.rows) ? snapshot.state.rows.map((row) => [...row]) : [],
+                publishRows: { ...(snapshot.state.publishRows || {}) },
+                reviewedRows: { ...(snapshot.state.reviewedRows || {}) },
+                userEditedRows: { ...(snapshot.state.userEditedRows || {}) },
+                aiReviewDecisions: Array.isArray(snapshot.state.aiReviewDecisions) ? snapshot.state.aiReviewDecisions.map((item) => ({ ...item })) : [],
+              }
+            : null,
+        }))
+      : [],
+  }));
+  const serializableUploadedSource = uploadedSource
+    ? {
+        name: uploadedSource.name,
+        type: uploadedSource.type,
+        url: uploadedSource.url || "",
+        dataUrl: String(uploadedSource.url || "").startsWith("uploads/") ? "" : uploadedSource.dataUrl || "",
+        detectedTables: uploadedSource.detectedTables || 1,
+      }
+    : null;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ events: serializableEvents, currentEventId: currentEvent.id, seatmapTemplates }));
+    mergeEventDraftHistory();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource)));
     return true;
-  } catch {
-    showToast("保存失败：图片可能太大，请换小一点的座位图。", "error");
+  } catch (error) {
+    const trimmedPendingTables = serializablePendingTables.map((table) => ({ ...table, reviewSnapshots: [] }));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSerializableAppState(serializableEvents, trimmedPendingTables, serializableUploadedSource, { omitLargeDrafts: true })));
+      pendingTables.forEach((table) => {
+        table.reviewSnapshots = [];
+      });
+      return true;
+    } catch {
+      try {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify(buildSerializableAppState(serializableEvents, pendingTables.map(makeCompactPendingTable), serializableUploadedSource, { omitLargeDrafts: true })),
+        );
+        return true;
+      } catch {
+        console.warn("App state auto-save skipped because local storage is full.");
+      }
+    }
     return false;
   }
+}
+
+let pendingAppStateSaveTimer = null;
+let appStateSaveBackoffUntil = 0;
+
+function scheduleAppStateSave(delay = 500) {
+  if (pendingAppStateSaveTimer) clearTimeout(pendingAppStateSaveTimer);
+  const wait = Math.max(delay, appStateSaveBackoffUntil - Date.now());
+  pendingAppStateSaveTimer = window.setTimeout(() => {
+    pendingAppStateSaveTimer = null;
+    const saved = saveAppState();
+    appStateSaveBackoffUntil = saved ? 0 : Date.now() + 10000;
+  }, wait);
+}
+
+function normalizeLoadedPendingTable(table) {
+  const normalizedTable = {
+    ...table,
+    columns: Array.isArray(table.columns) ? [...table.columns] : [],
+    rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
+    publishRows: { ...(table.publishRows || {}) },
+    reviewedRows: { ...(table.reviewedRows || {}) },
+    userEditedRows: { ...(table.userEditedRows || {}) },
+  };
+  if (isVisualRowColorSource(normalizedTable) && Number(normalizedTable.rowColorLogicVersion || 0) !== ROW_COLOR_LOGIC_VERSION) {
+    Object.keys(normalizedTable.publishRows || {}).forEach((rowIndex) => {
+      if (normalizedTable.userEditedRows?.[rowIndex] !== true) delete normalizedTable.publishRows[rowIndex];
+    });
+    normalizedTable.rowColorSource = "";
+    normalizedTable.rowColorReliable = false;
+    normalizedTable.rowColorConfirmed = false;
+    normalizedTable.rowColorAutoApplied = false;
+    normalizedTable.rowColorAutoSkipCount = 0;
+    normalizedTable.rowColorRows = [];
+    normalizedTable.rowColorMessage = "旧版颜色判断已停用，打开本页会重新逐行识别底色。";
+    normalizedTable._rowColorRepairing = false;
+    normalizedTable._rowColorRepairDone = false;
+    normalizedTable._rowColorRepairTried = false;
+  }
+  normalizedTable.rowColorLogicVersion = Number(normalizedTable.rowColorLogicVersion || 0);
+  return normalizedTable;
+}
+
+function mergeFragmentedPendingTables(tables = []) {
+  const sourceCounts = tables.reduce((counts, table) => {
+    const key = `${table.eventId || ""}::${table.sourceFileName || table.sourceName || ""}::${table.sourcePage || ""}`;
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  const merged = [];
+  tables.forEach((table) => {
+    const previous = merged[merged.length - 1];
+    const previousSourceName = previous ? previous.sourceFileName || previous.sourceName || "" : "";
+    const tableSourceName = table.sourceFileName || table.sourceName || "";
+    const sameSource =
+      previous &&
+      previous.eventId === table.eventId &&
+      previous.sourcePage === table.sourcePage &&
+      previousSourceName === tableSourceName;
+    const sourceKey = `${table.eventId || ""}::${table.sourceFileName || table.sourceName || ""}::${table.sourcePage || ""}`;
+    const manySamePageFragments = sameSource && Number(table.sourcePage || 0) > 0 && Number(sourceCounts[sourceKey] || 0) >= 6;
+    const tinyFragment = table.rows?.length <= 2 && table.columns?.length <= 3;
+    const headerlessFragment = tinyFragment && table.rows?.some((row) => looksLikeTicketDataCells(row));
+    if (
+      sameSource &&
+      (manySamePageFragments ||
+        ((headerlessFragment || areRecognizedColumnsCompatible(previous.columns, table.columns)) &&
+          canMergeRecognizedTables(previous, { ...table, headerless: headerlessFragment })))
+    ) {
+      const previousRowCount = previous.rows.length;
+      previous.rows.push(...adaptRowsToColumns(table.rows, previous.columns));
+      if (Array.isArray(table.originalRows)) {
+        previous.originalRows = Array.isArray(previous.originalRows) ? previous.originalRows : previous.rows.slice(0, previousRowCount).map((row) => [...row]);
+        previous.originalRows.push(...adaptRowsToColumns(table.originalRows, previous.originalColumns || previous.columns));
+      }
+      previous.title = previous.title.replace(/\s*·\s*第\s*\d+\s*块表\s*/g, "");
+      previous._columnRepairChanged = true;
+      return;
+    }
+    merged.push(table);
+  });
+  return merged;
 }
 
 function loadAppState() {
@@ -985,12 +4610,62 @@ function loadAppState() {
   try {
     const parsed = JSON.parse(saved);
     if (!Array.isArray(parsed.events) || !parsed.events.length) return;
+    eventDraftHistory = parsed.eventDraftHistory || eventDraftHistory;
     seatmapTemplates = Array.isArray(parsed.seatmapTemplates) ? parsed.seatmapTemplates : [];
-    events.splice(0, events.length, ...parsed.events);
+    fieldMappingTemplates = Array.isArray(parsed.fieldMappingTemplates) ? parsed.fieldMappingTemplates : [];
+    fieldMappingDraft = parsed.fieldMappingDraft || null;
+    const loadedPendingTables = Array.isArray(parsed.pendingTables)
+      ? mergeFragmentedPendingTables(parsed.pendingTables.map(normalizeLoadedPendingTable))
+      : [];
+    pendingTables.splice(0, pendingTables.length, ...loadedPendingTables);
+    selectedPendingTableId = parsed.selectedPendingTableId || null;
+    uploadedSource = parsed.uploadedSource || null;
+    if (uploadedSource?.dataUrl && !uploadedSource.url) uploadedSource.url = uploadedSource.dataUrl;
+    if (parsed.uploadDraft) {
+      uploadTableTitle.value = parsed.uploadDraft.tableTitle || "";
+      uploadTableText.value = parsed.uploadDraft.tableText || "";
+      uploadStatus.textContent = parsed.uploadDraft.status || uploadStatus.textContent;
+      pdfDetectionStatus.textContent = parsed.uploadDraft.pdfStatus || pdfDetectionStatus.textContent;
+      if (uploadedSource?.name) {
+        selectedSourceName.textContent = `已恢复：${getSelectedFileDisplayName(uploadedSource.name)}`;
+        selectedSourceName.title = decodePossiblyEncodedFileName(uploadedSource.name);
+      }
+    }
+    const builtInEvents = events.map((event) => ({
+      ...event,
+      dateOptions: Array.isArray(event.dateOptions) ? event.dateOptions.map((date) => ({ ...date })) : [],
+      zones: Array.isArray(event.zones) ? event.zones.map((zone) => ({ ...zone, polygon: Array.isArray(zone.polygon) ? zone.polygon.map((point) => [...point]) : [] })) : [],
+      tables: Array.isArray(event.tables)
+        ? event.tables.map((table) => ({ ...table, columns: [...table.columns], rows: table.rows.map((row) => [...row]) }))
+        : [],
+    }));
+    const templateGuideZones = seatmapTemplates.reduce((count, template) => {
+      if (!Array.isArray(template.zones)) return count;
+      const before = template.zones.length;
+      template.zones = template.zones.filter((zone) => !isGuideOnlySeatmapZone(zone));
+      return count + before - template.zones.length;
+    }, 0);
+    const savedEvents = parsed.events.map((event) => ({
+      ...event,
+      artist: event.artist || getEventArtist(event),
+      city: event.city || getEventCity(event),
+      venueLocal: event.venueLocal || getEventVenue(event),
+    }));
+    const missingBuiltInEvents = builtInEvents.filter((event) => !savedEvents.some((savedEvent) => savedEvent.id === event.id));
+    events.splice(
+      0,
+      events.length,
+      ...savedEvents,
+      ...missingBuiltInEvents,
+    );
+    const repairedTemplateMismatch = events.reduce((count, event) => count + (repairKnownEventTemplateMismatch(event) ? 1 : 0), 0);
+    const syncedBuiltIns = events.reduce((count, event) => count + (syncBuiltInSeatmapTemplate(event) ? 1 : 0), 0);
     currentEvent = events.find((event) => event.id === parsed.currentEventId) || events[0];
+    const removedSoldRows = removeSoldRowsEverywhere();
     const hydrated = hydrateSeatmapTemplatesFromEvents();
     const removed = events.reduce((count, event) => count + removeOversizedZones(event), 0);
-    if (removed || hydrated) saveAppState();
+    const removedGuides = events.reduce((count, event) => count + removeGuideOnlySeatmapZones(event), 0);
+    if (removedSoldRows || removed || removedGuides || syncedBuiltIns || templateGuideZones || hydrated || missingBuiltInEvents.length || repairedTemplateMismatch) saveAppState();
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
@@ -1001,9 +4676,30 @@ function getSelectedDate() {
 }
 
 function dateMatchesRow(row) {
+  return dateMatchesValues(row);
+}
+
+function dateMatchesTicket(ticket) {
+  const dateValues = getTicketDateValues(ticket);
+  if (dateValues.length) return dateMatchesValues(dateValues, { strict: true });
+  return dateMatchesValues(ticket.row, { strict: false });
+}
+
+function dateMatchesValues(values, { strict = false } = {}) {
   const date = getSelectedDate();
   if (!date) return false;
-  const searchable = normalize(row.join(" "));
+  const targetDateKeys = new Set(getDateKeysFromValues([date.id, date.label, ...(date.aliases || [])]));
+  const rowDateKeyGroups = values
+    .map((cell) => getDateKeysFromText(cell))
+    .filter((keys) => keys.length);
+  if (targetDateKeys.size && rowDateKeyGroups.length) {
+    if (strict) {
+      return rowDateKeyGroups.every((keys) => keys.some((key) => targetDateKeys.has(key)));
+    }
+    return rowDateKeyGroups.some((keys) => keys.some((key) => targetDateKeys.has(key)));
+  }
+  if (strict) return false;
+  const searchable = normalize(values.join(" "));
   return date.aliases.some((alias) => searchable.includes(normalize(alias)));
 }
 
@@ -1015,17 +4711,19 @@ function splitZoneValue(value) {
   return String(value || "")
     .replace(/[（）()]/g, " ")
     .split(/[\/,，、\s]+/)
-    .map((item) => item.replace(/视阻|restricted|rv/gi, "").trim())
+    .map((item) => cleanZoneToken(item.replace(/视阻|restricted|rv/gi, "")))
     .filter(Boolean);
 }
 
 function zoneTokenMatches(value, zone) {
-  const aliases = zone.aliases.map(normalize);
-  return splitZoneValue(value).some((token) => aliases.includes(normalize(token)));
+  const aliases = [zone.label, zone.id, ...(zone.aliases || [])].map(cleanZoneToken).map(normalize);
+  return splitZoneValue(value).some((token) => aliases.includes(normalize(cleanZoneToken(token))));
 }
 
 function zoneMatchesTicket(ticket, zone) {
-  const zoneIndex = findColumnIndex(ticket.table.columns, ["区域", "区", "block", "section", "구역"]);
+  const standardZone = getTicketZoneValue(ticket);
+  if (standardZone) return zoneTokenMatches(standardZone, zone);
+  const zoneIndex = findColumnIndex(ticket.table.columns, ["区域", "区", "位置", "block", "section", "구역"]);
   if (zoneIndex >= 0) return zoneTokenMatches(ticket.row[zoneIndex], zone);
   return ticket.row.some((cell) => zoneTokenMatches(cell, zone));
 }
@@ -1035,8 +4733,122 @@ function zoneMatchesRow(row, zone, table = null) {
   return row.some((cell) => zoneTokenMatches(cell, zone));
 }
 
+function isSoldText(value, { strict = false } = {}) {
+  const rawText = String(value || "").trim();
+  const hasSlashSold = /s\s*\/\s*o/i.test(rawText);
+  const text = rawText.toLowerCase().replace(/[\s/\\（）()·._-]+/g, "");
+  if (!text) return false;
+  const availablePattern = /(notsold|notforsale|unsold|available|avail|可售|在售|未售|未出|未卖|有票|有货|可出|可发布|售卖中|판매중|판매가능)/i;
+  if (availablePattern.test(text)) return false;
+  const refundPolicyPattern = /(售出|出售|售后|出后|卖出).{0,12}(不退|不换|不退换|不退款|不退票|退款|退票|取消|延期|改期|画面价|票面)/i;
+  const explicitSoldStatusPattern = /(soldout|sold|s0ld|so1d|已售出|已出售|已售罄|已售|售罄|售完|已出|已转|转出|出掉|已卖|卖掉|无了|没了|下架|疑似已售|已锁|锁票|已订|预订中|판매완료|판매완료됨|매진|팔림|완료)/i;
+  if (refundPolicyPattern.test(text) && !explicitSoldStatusPattern.test(text)) return false;
+  const explicitPattern =
+    /(soldout|sold|s0ld|so1d|已售出|已出售|已售罄|已售|售出|售罄|售完|已出|已转|转出|出掉|已卖|卖掉|无了|没了|下架|疑似已售|已锁|锁票|已订|预订中|판매완료|판매완료됨|매진|팔림|완료)/i;
+  if (strict) return hasSlashSold || explicitPattern.test(text);
+  if (hasSlashSold) return true;
+  return new RegExp(`^${explicitPattern.source}$`, "i").test(text);
+}
+
+function isSoldTicket(ticket) {
+  const statusIndex = findColumnIndex(ticket.table.columns, ["状态", "售卖状态", "销售状态", "status", "是否售出", "售出"]);
+  if (statusIndex >= 0 && isSoldText(ticket.row[statusIndex], { strict: true })) return true;
+
+  const noteIndex = findColumnIndex(ticket.table.columns, ["备注", "remark", "note", "标记", "说明"]);
+  if (noteIndex >= 0 && isSoldText(ticket.row[noteIndex], { strict: true })) return true;
+
+  const salePriceIndexes = findSalePriceColumnIndexes(ticket.table.columns || []);
+  if (salePriceIndexes.some((index) => isSoldText(ticket.row[index], { strict: true }))) return true;
+
+  return ticket.row.some((cell) => isSoldText(cell, { strict: true }));
+}
+
+function isColorHeldForReviewTicket(ticket) {
+  return !isSoldTicket(ticket) && isColorMarkedSoldTicket(ticket);
+}
+
+function isUnavailableTicket(ticket) {
+  return isSoldTicket(ticket) || isColorMarkedSoldTicket(ticket);
+}
+
+function isCustomerPublishableTicket(ticket) {
+  return !isUnavailableTicket(ticket) && hasTicketSalePrice(ticket);
+}
+
+function removeSoldRowsFromTable(table) {
+  if (!table?.rows?.length) return 0;
+  ensureOriginalTableSnapshot(table);
+  const keptRows = [];
+  const keptOriginalRows = [];
+  const nextPublishRows = {};
+  const nextReviewedRows = {};
+  const nextUserEditedRows = {};
+  const nextRowColorRows = [];
+  let removed = 0;
+  table.rows.forEach((row, rowIndex) => {
+    if (isUnavailableTicket({ table, row, index: rowIndex })) {
+      removed += 1;
+      return;
+    }
+    const nextIndex = keptRows.length;
+    keptRows.push(row);
+    if (Array.isArray(table.originalRows) && table.originalRows[rowIndex]) {
+      keptOriginalRows[nextIndex] = table.originalRows[rowIndex];
+    }
+    if (table.publishRows?.[rowIndex] !== undefined) nextPublishRows[nextIndex] = table.publishRows[rowIndex];
+    if (table.reviewedRows?.[rowIndex] !== undefined) nextReviewedRows[nextIndex] = table.reviewedRows[rowIndex];
+    if (table.userEditedRows?.[rowIndex] !== undefined) nextUserEditedRows[nextIndex] = table.userEditedRows[rowIndex];
+    if (Array.isArray(table.rowColorRows) && table.rowColorRows[rowIndex]) nextRowColorRows[nextIndex] = table.rowColorRows[rowIndex];
+  });
+  if (removed) {
+    table.rows = keptRows;
+    if (Array.isArray(table.originalRows)) table.originalRows = keptOriginalRows;
+    table.publishRows = nextPublishRows;
+    table.reviewedRows = nextReviewedRows;
+    table.userEditedRows = nextUserEditedRows;
+    if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
+    updatePendingTableReviewFlags(table);
+  }
+  return removed;
+}
+
+function removeSoldRowsEverywhere() {
+  const publishedRemoved = events.reduce(
+    (count, event) => count + event.tables.reduce((sum, table) => sum + removeSoldRowsFromTable(table), 0),
+    0,
+  );
+  const pendingRemoved = pendingTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
+  for (let index = pendingTables.length - 1; index >= 0; index -= 1) {
+    if (!pendingTables[index].rows.length) pendingTables.splice(index, 1);
+  }
+  if (selectedPendingTableId && !pendingTables.some((table) => table.id === selectedPendingTableId)) {
+    selectedPendingTableId = pendingTables.find((table) => table.eventId === currentEvent.id)?.id || null;
+  }
+  return publishedRemoved + pendingRemoved;
+}
+
+function cleanupPendingSoldRowsForCurrentEvent() {
+  let changed = false;
+  for (let index = pendingTables.length - 1; index >= 0; index -= 1) {
+    const table = pendingTables[index];
+    if (table.eventId !== currentEvent.id) continue;
+    const removed = removeSoldRowsFromTable(table);
+    if (removed) changed = true;
+    if (!table.rows.length) {
+      pendingTables.splice(index, 1);
+      changed = true;
+    }
+  }
+  if (selectedPendingTableId && !pendingTables.some((table) => table.id === selectedPendingTableId)) {
+    selectedPendingTableId = pendingTables.find((table) => table.eventId === currentEvent.id)?.id || null;
+    changed = true;
+  }
+  return changed;
+}
+
 function prepareTickets(tickets) {
-  const filtered = selectedDateId ? tickets.filter((ticket) => dateMatchesRow(ticket.row)) : tickets;
+  const availableTickets = tickets.filter((ticket) => !isUnavailableTicket(ticket));
+  const filtered = selectedDateId ? availableTickets.filter((ticket) => dateMatchesTicket(ticket)) : availableTickets;
   return sortTickets(filtered);
 }
 
@@ -1062,7 +4874,9 @@ function getSearchTickets(term) {
 function countTicketsForDate(dateId) {
   const previousDateId = selectedDateId;
   selectedDateId = dateId;
-  const count = currentEvent.tables.flatMap((table) => table.rows.map((row, index) => ({ table, row, index }))).filter((ticket) => dateMatchesRow(ticket.row)).length;
+  const count = currentEvent.tables
+    .flatMap((table) => table.rows.map((row, index) => ({ table, row, index })))
+    .filter((ticket) => !isUnavailableTicket(ticket) && dateMatchesTicket(ticket)).length;
   selectedDateId = previousDateId;
   return count;
 }
@@ -1075,9 +4889,86 @@ function selectFirstDateWithTickets() {
 
 function countZoneRowsFromTables() {
   return currentEvent.zones.reduce((total, zone) => {
-    const zoneRows = currentEvent.tables.flatMap((table) => table.rows.filter((row) => zoneMatchesRow(row, zone, table)));
+  const zoneRows = currentEvent.tables.flatMap((table) =>
+      table.rows.filter((row, index) => !isUnavailableTicket({ table, row, index }) && zoneMatchesRow(row, zone, table)),
+    );
     return total + zoneRows.length;
   }, 0);
+}
+
+function getSeatmapZoneTestKey(zone) {
+  return String(zone?.id || zone?.label || "").trim().toLowerCase();
+}
+
+function getSeatmapTestProgress(event = currentEvent) {
+  const zoneKeys = (event.zones || []).map(getSeatmapZoneTestKey).filter(Boolean);
+  const uniqueZoneKeys = [...new Set(zoneKeys)];
+  const tested = new Set(Array.isArray(event.seatmapTestedZoneIds) ? event.seatmapTestedZoneIds.map(String) : []);
+  const testedCount = uniqueZoneKeys.filter((key) => tested.has(key)).length;
+  const missingZones = (event.zones || []).filter((zone) => !tested.has(getSeatmapZoneTestKey(zone)));
+  return {
+    total: uniqueZoneKeys.length,
+    testedCount,
+    missingZones,
+    passed: uniqueZoneKeys.length > 0 && testedCount === uniqueZoneKeys.length && event.seatmapTestRequired !== true,
+  };
+}
+
+function resetSeatmapTestStatus(reason = "座位图热区已更新，需要重新测试") {
+  currentEvent.seatmapTestedZoneIds = [];
+  currentEvent.seatmapTestedAt = "";
+  currentEvent.seatmapTestRequired = true;
+  currentEvent.seatmapTestReason = reason;
+}
+
+function resetSeatmapTestStatusForEvent(event, reason = "座位图热区已更新，需要重新测试") {
+  if (!event) return;
+  event.seatmapTestedZoneIds = [];
+  event.seatmapTestedAt = "";
+  event.seatmapTestRequired = true;
+  event.seatmapTestReason = reason;
+}
+
+function markSeatmapZoneTested(zone) {
+  if (!IS_ADMIN_PAGE) return;
+  const key = getSeatmapZoneTestKey(zone);
+  if (!key) return;
+  const beforeProgress = getSeatmapTestProgress();
+  currentEvent.seatmapTestedZoneIds = Array.isArray(currentEvent.seatmapTestedZoneIds) ? currentEvent.seatmapTestedZoneIds : [];
+  const wasAlreadyTested = currentEvent.seatmapTestedZoneIds.includes(key);
+  if (!wasAlreadyTested) currentEvent.seatmapTestedZoneIds.push(key);
+  const progress = getSeatmapTestProgress();
+  if (progress.total && progress.testedCount === progress.total) {
+    currentEvent.seatmapTestRequired = false;
+    currentEvent.seatmapTestedAt = new Date().toISOString();
+    currentEvent.seatmapTestReason = "";
+    seatmapStatus.textContent = `座位图热区已逐区测试通过：${progress.testedCount}/${progress.total}。现在可以发布票源。`;
+    if (!beforeProgress.passed) showToast("座位图热区已全部测试通过。", "success");
+  } else {
+    currentEvent.seatmapTestRequired = true;
+    seatmapStatus.textContent = `座位图测试中：已测 ${progress.testedCount}/${progress.total}，剩余 ${progress.missingZones.slice(0, 6).map((item) => item.label).join("、")}${progress.missingZones.length > 6 ? "…" : ""}`;
+  }
+  scheduleAppStateSave(200);
+  renderAdminChecklist();
+}
+
+function requireSeatmapTestBeforePublish() {
+  const progress = getSeatmapTestProgress();
+  if (!currentEvent.zones.length) {
+    const message = "当前座位图没有热区，不能发布票源。请先扫描/保存热区并前台测试。";
+    setUploadStatus(message, "error");
+    showToast(message, "error");
+    return false;
+  }
+  if (!progress.passed) {
+    const missingText = progress.missingZones.slice(0, 8).map((zone) => zone.label).join("、");
+    const message = `座位图热区还没有全部经过前台点击测试：已测 ${progress.testedCount}/${progress.total}${missingText ? `，未测：${missingText}${progress.missingZones.length > 8 ? "…" : ""}` : ""}。已阻止发布票源。`;
+    setUploadStatus(message, "error");
+    showToast("请先逐区测试座位图热区。", "error");
+    openSeatmapTest();
+    return false;
+  }
+  return true;
 }
 
 function getPublishMatchMessage(scopeText, matchedRows) {
@@ -1117,7 +5008,10 @@ function findTicketByKey(key) {
 }
 
 function extractNumber(value) {
-  const match = String(value).match(/\d+/);
+  const text = String(value || "")
+    .replace(/[￥¥$€£₩,\s，]/g, "")
+    .trim();
+  const match = text.match(/\d+(?:\.\d+)?/);
   return match ? Number(match[0]) : null;
 }
 
@@ -1126,13 +5020,485 @@ function getColumnValue(ticket, names) {
   return index >= 0 ? ticket.row[index] : "";
 }
 
+function findColumnIndexes(columns = [], names = []) {
+  return columns
+    .map((column, index) => ({ column, index }))
+    .filter(({ column }) => names.some((name) => normalize(column).includes(normalize(name))))
+    .map(({ index }) => index);
+}
+
+function findSalePriceColumnIndexes(columns = []) {
+  return columns.map((column, index) => (isSalePriceColumnName(column) ? index : -1)).filter((index) => index >= 0);
+}
+
+function findPreferredSalePriceColumnIndexes(columns = []) {
+  const indexes = findSalePriceColumnIndexes(columns);
+  const explicitIndexes = indexes.filter((index) => isExplicitSalePriceColumnName(columns[index]));
+  return explicitIndexes.length ? explicitIndexes : indexes;
+}
+
+function rowHasNumericSalePrice(table, row) {
+  return findSalePriceColumnIndexes(table.columns || []).some((index) => isLikelySalePriceValue(row[index], { minPrice: 100 }));
+}
+
+function getTicketSalePriceValue(ticket) {
+  const priceIndexes = findPreferredSalePriceColumnIndexes(ticket.table.columns || []);
+  const numericIndex = priceIndexes.find((index) => extractSalePriceText(ticket.row[index], { minPrice: 100 }));
+  if (numericIndex >= 0) return extractSalePriceText(ticket.row[numericIndex], { minPrice: 100 });
+  const bestPrice = getBestSalePriceFromRow(ticket.table, ticket.row);
+  if (bestPrice) return bestPrice;
+  const index = priceIndexes[0];
+  if (index < 0) return "";
+  const value = ticket.row[index];
+  return isLikelyRowColorValue(value) || isSoldText(value, { strict: true }) || isBusinessStatusRemarkValue(value) ? "" : value;
+}
+
+function findSalePriceColumnIndex(columns = []) {
+  return findPreferredSalePriceColumnIndexes(columns)[0] ?? -1;
+}
+
+function ensureNamedColumn(table, columnName, aliases = [columnName]) {
+  let index = findColumnIndex(table.columns, aliases);
+  if (index >= 0) return index;
+  table.columns.push(columnName);
+  index = table.columns.length - 1;
+  table.rows.forEach((row) => {
+    while (row.length < table.columns.length) row.push("");
+  });
+  return index;
+}
+
+function ensureDedicatedColumn(table, columnName) {
+  const target = normalize(columnName);
+  let index = table.columns.findIndex((column) => normalize(column) === target);
+  if (index >= 0) return index;
+  table.columns.push(columnName);
+  index = table.columns.length - 1;
+  table.rows.forEach((row) => {
+    while (row.length < table.columns.length) row.push("");
+  });
+  return index;
+}
+
+function ensureSalePriceColumn(table) {
+  let priceIndex = findSalePriceColumnIndex(table.columns);
+  if (priceIndex >= 0) return priceIndex;
+  table.columns.push("售价");
+  priceIndex = table.columns.length - 1;
+  table.rows.forEach((row) => {
+    while (row.length < table.columns.length) row.push("");
+  });
+  return priceIndex;
+}
+
+function findSeatNumberColumnIndexes(columns = []) {
+  return findColumnIndexes(columns, ["票面号段", "门票号段", "座位号段", "座位号", "座位", "号数", "大小号", "号段", "号码", "座位/序号", "seat", "번호", "좌석번호"]).filter((index) => {
+    const column = String(columns[index] || "");
+    return !/座位图|座席图|seat\s*map|seatmap|map/i.test(column);
+  });
+}
+
+function findSeatRowColumnIndexes(columns = []) {
+  return findColumnIndexes(columns, ["票面排数", "门票排数", "座位排数", "票面位置", "门票位置", "座位位置", "排", "排数", "行", "行数", "row", "位置", "열"]).filter((index) => {
+    const column = String(columns[index] || "");
+    if (/票面排数|门票排数|座位排数|票面位置|门票位置|座位位置/i.test(column)) return true;
+    return !/座位号|座号|号数|号段|号码|大小号|数量|张数|售价|价格|金额|区域|区|票面号段/i.test(column);
+  });
+}
+
+function ensureSeatRowColumn(table) {
+  const existingIndex = findSeatRowColumnIndexes(table.columns || [])[0];
+  if (existingIndex >= 0) return existingIndex;
+  return ensureNamedColumn(table, "排", ["排", "排数", "行", "行数", "row"]);
+}
+
+function ensureSeatNumberColumn(table) {
+  const existingIndex = findSeatNumberColumnIndexes(table.columns || [])[0];
+  if (existingIndex >= 0) return existingIndex;
+  return ensureNamedColumn(table, "座位号", ["票面号段", "门票号段", "座位号段", "座位号", "号数", "大小号", "号段", "号码", "座位/序号", "seat", "번호", "좌석번호"]);
+}
+
+function ensureDateColumn(table) {
+  return ensureNamedColumn(table, "日期", ["日期", "演出日期", "date", "day", "일자"]);
+}
+
+function hasTicketSalePrice(ticket) {
+  const value = String(getTicketSalePriceValue(ticket) || "").trim();
+  if (!value || value === "/" || value === "-" || /^无$/i.test(value)) return false;
+  if (isSoldText(value, { strict: true })) return false;
+  return extractNumber(value) !== null;
+}
+
+function getFirstNonEmptyColumnValue(table, row, names) {
+  const indexes = findColumnIndexes(table.columns || [], names);
+  const index = indexes.find((item) => String(row[item] || "").trim());
+  return index >= 0 ? row[index] : "";
+}
+
+function findCompositeSeatInfoInTicket(ticket) {
+  if (!ticket?.table || !Array.isArray(ticket.row)) return null;
+  const columns = ticket.table.columns || [];
+  const ignoredIndexes = new Set([
+    ...findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]),
+    ...findSalePriceColumnIndexes(columns),
+    ...findColumnIndexes(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]),
+    ...findColumnIndexes(columns, ["数量", "张数", "连坐", "qty", "count", "매수", "수량"]),
+    ...findColumnIndexes(columns, ["状态", "售卖状态", "销售状态", "status", "是否售出", "售出"]),
+  ]);
+  const candidates = ticket.row
+    .map((value, index) => {
+      const column = columns[index] || "";
+      const parsed = parseCompositeSeatInfo(value);
+      if (!parsed?.zone) return null;
+      const ignoredPenalty = ignoredIndexes.has(index) && !(parsed.row || parsed.seat) ? 120 : ignoredIndexes.has(index) ? 15 : 0;
+      const score =
+        (/(位置|区域|区|區|block|section|zone|area|구역|구|seat|side|row)/i.test(column) ? 120 : 0) +
+        (currentEvent?.zones?.some((zone) => zoneTokenMatches(parsed.zone, zone)) ? 80 : 0) +
+        (parsed.row ? 35 : 0) +
+        (parsed.seat ? 20 : 0) -
+        ignoredPenalty;
+      return { parsed, score, index };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  return candidates[0]?.score > 0 ? candidates[0].parsed : null;
+}
+
+function getTicketZoneValue(ticket) {
+  const composite = findCompositeSeatInfoInTicket(ticket);
+  if (composite?.zone) return composite.zone;
+  return getLikelyZoneFromRow(ticket.table, ticket.row);
+}
+
+function getTicketRowValue(ticket) {
+  const composite = findCompositeSeatInfoInTicket(ticket);
+  if (composite?.row) return composite.row;
+  const zoneValue = cleanZoneToken(getTicketZoneValue(ticket));
+  const indexes = findSeatRowColumnIndexes(ticket.table.columns || []);
+  const ranked = indexes
+    .map((item) => {
+      const value = ticket.row[item];
+      const column = String(ticket.table.columns[item] || "");
+      const parsed = extractSeatRowFromText(value, { allowBareRange: isSeatRowColumnName(column) });
+      const text = String(value || "").trim();
+      const score =
+        (parsed ? 100 : 0) +
+        (/^排$|^排数$|^row$/i.test(column) ? 60 : 0) +
+        (/票面排数|门票排数|座位排数|票面位置|门票位置|座位位置/.test(column) ? 80 : 0) +
+        (/[-到至]/.test(text) ? 70 : 0) +
+        (/实际/.test(text) ? 8 : 0);
+      return { index: item, value, parsed, score };
+    })
+    .filter(({ value, parsed }) => {
+      const token = cleanZoneToken(value);
+      return (
+        String(value || "").trim() &&
+        token !== zoneValue &&
+        (parsed || isLikelySeatRowValue(value)) &&
+        !isLikelyZoneCode(value) &&
+        !isLikelySalePriceValue(value)
+      );
+    })
+    .sort((a, b) => b.score - a.score);
+  const index = ranked[0]?.index ?? -1;
+  if (index >= 0) return extractSeatRowFromText(ticket.row[index], { allowBareRange: isSeatRowColumnName(ticket.table.columns[index]) }) || ticket.row[index];
+  const ignoredIndexes = new Set([
+    ...findColumnIndexes(ticket.table.columns || [], ["日期", "演出日期", "date", "day", "일자"]),
+    ...findColumnIndexes(ticket.table.columns || [], ["序号", "编号", "no", "number"]),
+    ...findColumnIndexes(ticket.table.columns || [], ["数量", "张数", "连坐", "连坐数量", "count", "qty", "매수"]),
+    ...findSeatNumberColumnIndexes(ticket.table.columns || []),
+    ...findSalePriceColumnIndexes(ticket.table.columns || []),
+  ]);
+  const fallbackCandidates = ticket.row
+    .map((value, itemIndex) => ({ value, itemIndex }))
+    .filter(({ value, itemIndex }) => {
+      const token = cleanZoneToken(value);
+      return (
+        !ignoredIndexes.has(itemIndex) &&
+        token !== zoneValue &&
+        (extractSeatRowFromText(value, { allowBareRange: isSeatRowColumnName(ticket.table.columns[itemIndex]) }) || isLikelySeatRowValue(value)) &&
+        !isLikelyZoneCode(value) &&
+        !isLikelySalePriceValue(value)
+      );
+    })
+    .map((item) => ({
+      ...item,
+      score:
+        (/票面排数|门票排数|座位排数|票面位置|门票位置|座位位置/.test(String(ticket.table.columns[item.itemIndex] || "")) ? 80 : 0) +
+        (/[-到至]/.test(String(item.value || "")) ? 70 : 0),
+    }))
+    .sort((a, b) => b.score - a.score);
+  const fallbackIndex = fallbackCandidates[0]?.itemIndex ?? -1;
+  return fallbackIndex >= 0
+    ? extractSeatRowFromText(ticket.row[fallbackIndex], { allowBareRange: isSeatRowColumnName(ticket.table.columns[fallbackIndex]) }) || ticket.row[fallbackIndex]
+    : "";
+}
+
+function getTicketSeatValue(ticket) {
+  const composite = findCompositeSeatInfoInTicket(ticket);
+  if (composite?.seat) return composite.seat;
+  const zoneValue = cleanZoneToken(getTicketZoneValue(ticket));
+  const rowValue = String(getTicketRowValue(ticket) || "").trim();
+  const indexes = findSeatNumberColumnIndexes(ticket.table.columns || []);
+  const ranked = indexes
+    .map((item) => {
+      const value = ticket.row[item];
+      const column = String(ticket.table.columns[item] || "");
+      const parsed = extractSeatNumberFromText(value, { allowBareRange: isSeatNumberColumnName(column) });
+      const text = String(value || "").trim();
+      const score =
+        (parsed ? 100 : 0) +
+        (/座位号|座号|号段|号码/.test(column) ? 70 : 0) +
+        (/票面号段|门票号段/.test(column) ? 80 : 0) +
+        (/[-到至]/.test(text) ? 55 : 0);
+      return { index: item, value, parsed, score };
+    })
+    .filter(({ value, parsed }) => {
+      const token = cleanZoneToken(value);
+      return (
+        String(value || "").trim() &&
+        token !== zoneValue &&
+        String(value || "").trim() !== rowValue &&
+        (parsed || isLikelySeatNumberValue(value)) &&
+        !isLikelySalePriceValue(value)
+      );
+    })
+    .sort((a, b) => b.score - a.score);
+  const index = ranked[0]?.index ?? -1;
+  if (index >= 0) return extractSeatNumberFromText(ticket.row[index], { allowBareRange: isSeatNumberColumnName(ticket.table.columns[index]) }) || ticket.row[index];
+  return "";
+}
+
+function getTicketQuantityValue(ticket) {
+  const sourceColumns = ticket.table.originalColumns || ticket.table.columns || [];
+  const sourceQuantityIndex = findQuantityColumnIndex(sourceColumns);
+  if (sourceQuantityIndex < 0) return "1";
+  const originalRow = Array.isArray(ticket.table.originalRows) && ticket.table.originalRows[ticket.index] ? ticket.table.originalRows[ticket.index] : ticket.row;
+  const value = originalRow[sourceQuantityIndex];
+  return isLikelySeatCountValue(value) ? value : "1";
+}
+
+function getTicketPrimaryDateValue(ticket) {
+  const values = getTicketDateValues(ticket);
+  return values.find((value) => getDateKeysFromText(value).length) || "";
+}
+
+function getStandardTicketFields(ticket) {
+  const date = getTicketPrimaryDateValue(ticket) || getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["日期", "演出日期", "date", "day", "일자"]);
+  const face = getFirstFaceValue(ticket.table, ticket.row);
+  const zone = getTicketZoneValue(ticket);
+  const rowValue = getTicketRowValue(ticket);
+  const seat = getTicketSeatValue(ticket);
+  const quantity = getTicketQuantityValue(ticket);
+  const salePrice = getTicketSalePriceValue(ticket);
+  const note = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["备注", "remark", "note", "说明"]);
+  const visibleFace = String(face || "").trim() && extractNumber(face) !== extractNumber(salePrice) ? face : "";
+  return [
+    { label: "日期", value: date },
+    { label: "票面", value: visibleFace },
+    { label: "区域", value: zone },
+    { label: "排", value: rowValue },
+    { label: "座位号", value: seat },
+    { label: "数量", value: quantity },
+    { label: "售价", value: salePrice },
+    { label: "备注", value: note },
+  ].filter((field) => String(field.value || "").trim());
+}
+
+function valueMatchesCurrentSeatmapZone(value) {
+  return Boolean(currentEvent?.zones?.some((zone) => zoneTokenMatches(value, zone)));
+}
+
+function normalizeOriginalDisplayFields(ticket, field, { preserveOriginal = true } = {}) {
+  const label = String(field.label || "").trim();
+  const value = String(field.value || "").trim();
+  if (!label || !value) return [];
+  const number = extractNumber(value);
+  const salePrice = getTicketSalePriceValue(ticket);
+  const saleNumber = extractNumber(salePrice);
+
+  if (isInternalColorColumn(label)) return [];
+  if (!preserveOriginal && /(区域|^区$|區|block|section|zone|area|구역|구)/i.test(label) && !isSalePriceColumnName(label)) {
+    return [{ label: "区域", value: getZoneTokenFromCell(value) || value }];
+  }
+  if (!preserveOriginal && hasHeaderHint(label, ["date", "day", "일자", "날짜", "时间", "日期"])) {
+    return [{ label: "日期", value }];
+  }
+  if (!preserveOriginal && isSalePriceColumnName(label)) {
+    const price = extractSalePriceText(value, { minPrice: 100 }) || salePrice || value;
+    if (isLogisticsOrRemarkValue(value) && !isLikelySalePriceValue(value, { minPrice: 100 })) return [{ label: "备注", value }];
+    const hasExplicitSaleColumn = (ticket.table.columns || []).some((column) => isExplicitSalePriceColumnName(column));
+    if (hasExplicitSaleColumn && isGenericPriceColumnName(label) && saleNumber !== null && number !== saleNumber) {
+      return [{ label: "票面", value }];
+    }
+    return [{ label: "售价", value: price }];
+  }
+
+  const parsedComposite = parseCompositeSeatInfo(value);
+  if (isFaceValueColumnName(label) && isGenericFaceValue(value) && !parsedComposite) {
+    return [{ label: preserveOriginal ? label : "票面", value }];
+  }
+  if (!preserveOriginal && parsedComposite && (isSeatLocationColumnName(label) || isFaceValueColumnName(label) || /区域|区|block|section|zone|area|구역/i.test(label))) {
+    return [
+      parsedComposite.date ? { label: "日期", value: parsedComposite.date } : null,
+      parsedComposite.zone ? { label: "区域", value: parsedComposite.zone } : null,
+      parsedComposite.row ? { label: "排", value: parsedComposite.row } : null,
+      parsedComposite.seat ? { label: "座位号", value: parsedComposite.seat } : null,
+      parsedComposite.note ? { label: "备注", value: parsedComposite.note } : null,
+    ].filter(Boolean);
+  }
+
+  if (isFaceValueColumnName(label) && (valueMatchesCurrentSeatmapZone(value) || parsedComposite)) {
+    if (isGenericFaceValue(value) && !parsedComposite) return [{ label: preserveOriginal ? label : "票面", value }];
+    if (preserveOriginal && parsedComposite) return [{ label, value }];
+    return [{ label: "区域", value: getZoneTokenFromCell(value) || value }];
+  }
+
+  if (!preserveOriginal && isSeatRowColumnName(label)) {
+    const rowValue = extractSeatRowFromText(value, { allowBareRange: true }) || value;
+    return [{ label: "排", value: rowValue }];
+  }
+  if (!preserveOriginal && isSeatNumberColumnName(label)) {
+    const seatValue = extractSeatNumberFromText(value, { allowBareRange: true }) || value;
+    return [{ label: "座位号", value: seatValue }];
+  }
+
+  if ((/区域|区|位置|block|section|zone|area|구역/i.test(label) || normalize(label) === "票面") && !valueMatchesCurrentSeatmapZone(value)) {
+    const parsedRow = extractSeatRowFromText(value, { allowBareRange: true, preferActual: false });
+    if (!preserveOriginal && parsedRow && !isLikelyZoneCode(value)) return [{ label: "排", value: parsedRow }];
+    if (!preserveOriginal && isLikelySeatRowValue(value) && !isLikelyZoneCode(value)) return [{ label: "排", value }];
+  }
+
+  if (
+    !isSeatRowColumnName(label) &&
+    /(位置|seat\s*position)/i.test(label) &&
+    isLikelySeatNumberValue(value) &&
+    !extractSeatRowFromText(value)
+  ) {
+    return [{ label: preserveOriginal ? label : "座位号", value }];
+  }
+
+  if (isQuantityColumnName(label) && !isLikelySeatCountValue(value)) {
+    if (isLikelySalePriceValue(value, { minPrice: 100 }) || /[￥¥$€£₩]/.test(value) || (number !== null && number > 20)) {
+      return [{ label: "售价", value: salePrice || extractSalePriceText(value, { minPrice: 100 }) || value }];
+    }
+    if (isLogisticsOrRemarkValue(value)) return [{ label: preserveOriginal ? label : "备注", value }];
+    if (!preserveOriginal && isLikelySeatNumberValue(value)) return [{ label: "座位号", value }];
+    return preserveOriginal ? [{ label, value }] : [];
+  }
+
+  if (isSeatPositionColumnName(label) && isLikelySalePriceValue(value, { minPrice: 100 }) && saleNumber !== null && number === saleNumber) {
+    return [{ label: "售价", value: salePrice || value }];
+  }
+
+  if (isSalePriceColumnName(label) && isLogisticsOrRemarkValue(value) && !isLikelySalePriceValue(value, { minPrice: 100 })) {
+    return [{ label: preserveOriginal ? label : "备注", value }];
+  }
+
+  if (!preserveOriginal && isRemarkColumnName(label) && isSalePriceCandidateValue(value)) {
+    return [{ label: "售价", value: salePrice || extractSalePriceText(value, { minPrice: 100 }) || value }];
+  }
+
+  return [{ label, value }];
+}
+
+function normalizeOriginalDisplayField(ticket, field, options = {}) {
+  return normalizeOriginalDisplayFields(ticket, field, options)[0] || null;
+}
+
+function getCanonicalDisplayFieldLabel(label = "") {
+  const text = String(label || "");
+  const normalized = normalize(text);
+  if (!normalized) return "";
+  if (hasHeaderHint(text, ["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"])) return "日期";
+  if (isFaceValueColumnName(text)) return "票面";
+  if (/(区域|^区$|區|block|section|zone|area|구역|구)/i.test(text)) return "区域";
+  if (isSeatRowColumnName(text) || /^(排|排数|行|行数|row|열)$/i.test(text)) return "排";
+  if (isSeatNumberColumnName(text)) return "座位号";
+  if (isQuantityColumnName(text)) return "数量";
+  if (isSalePriceColumnName(text)) return isGenericPriceColumnName(text) ? normalized : "售价";
+  if (isRemarkColumnName(text)) return "备注";
+  return normalized;
+}
+
+function dedupeTicketFields(fields = [], { canonical = false } = {}) {
+  const seen = new Set();
+  return fields.filter((field) => {
+    const labelKey = canonical ? getCanonicalDisplayFieldLabel(field.label) : normalize(field.label);
+    const key = `${labelKey}::${normalize(field.value)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getOriginalTicketFields(ticket, options = {}) {
+  const preserveOriginal = options.preserveOriginal !== false;
+  const columns = preserveOriginal ? ticket.table.originalColumns || ticket.table.columns || [] : ticket.table.columns || ticket.table.originalColumns || [];
+  const originalRow =
+    preserveOriginal && Array.isArray(ticket.table.originalRows) && ticket.table.originalRows[ticket.index]
+      ? ticket.table.originalRows[ticket.index]
+      : ticket.row;
+  if (preserveOriginal) {
+    return dedupeTicketFields(columns
+      .map((column, columnIndex) => ({
+        label: String(column || "").trim(),
+        value: String(originalRow[columnIndex] || "").trim(),
+      }))
+      .filter((field) => field.label && field.value)
+      .filter((field) => !isInternalColorColumn(field.label)));
+  }
+  const salePrice = getTicketSalePriceValue(ticket);
+  const saleNumber = extractNumber(salePrice);
+  let movedPriceFromQuantity = false;
+  let movedPriceValue = salePrice;
+  const fields = columns
+    .map((column, columnIndex) => ({
+      label: String(column || "").trim(),
+      value: String(originalRow[columnIndex] || "").trim(),
+    }))
+    .filter((field) => field.value)
+    .filter((field) => {
+      const number = extractNumber(field.value);
+      if (isQuantityColumnName(field.label) && saleNumber !== null && number === saleNumber && !isLikelySeatCountValue(field.value)) {
+        movedPriceFromQuantity = true;
+        movedPriceValue = salePrice || extractSalePriceText(field.value, { minPrice: 100 }) || field.value;
+        return false;
+      }
+      if (isQuantityColumnName(field.label) && field.value && !isLikelySeatCountValue(field.value)) {
+        const priceLikeQuantity = isLikelySalePriceValue(field.value, { minPrice: 100 }) || /[￥¥$€£₩]/.test(field.value) || (number !== null && number > 20);
+        if (priceLikeQuantity) {
+          movedPriceFromQuantity = true;
+          movedPriceValue = salePrice || extractSalePriceText(field.value, { minPrice: 100 }) || field.value;
+          return false;
+        }
+      }
+      if (isSeatPositionColumnName(field.label) && isLikelySalePriceValue(field.value, { minPrice: 100 }) && saleNumber !== null && number === saleNumber) {
+        return false;
+      }
+      return true;
+    })
+    .flatMap((field) => normalizeOriginalDisplayFields(ticket, field, options))
+    .filter(Boolean);
+  const hasVisibleSalePrice = fields.some((field) => isSalePriceColumnName(field.label));
+  if (movedPriceFromQuantity && movedPriceValue && !hasVisibleSalePrice) {
+    fields.push({ label: "售价", value: movedPriceValue });
+  }
+  const hasVisibleQuantity = fields.some((field) => isQuantityColumnName(field.label));
+  const quantityValue = getTicketQuantityValue(ticket);
+  if (!hasVisibleQuantity && quantityValue) {
+    fields.push({ label: "数量", value: quantityValue });
+  }
+  return dedupeTicketFields(fields, { canonical: true });
+}
+
 function getTicketPrice(ticket) {
-  const directValue = getColumnValue(ticket, ["售价", "单价", "price", "ask"]);
+  const directValue = getTicketSalePriceValue(ticket);
   const directNumber = extractNumber(directValue);
   if (directNumber) return directNumber;
 
-  const numericValues = ticket.row.map(extractNumber).filter(Boolean);
-  return numericValues.length ? numericValues[numericValues.length - 1] : 999999;
+  const candidateNumber = extractNumber(getSalePriceCandidateFromRow(ticket.table, ticket.row)?.price);
+  return candidateNumber || 999999;
 }
 
 function getTicketPositionNumber(ticket) {
@@ -1451,6 +5817,86 @@ function removeOversizedZones(event) {
   return before - event.zones.length;
 }
 
+function isGuideOnlySeatmapZone(zone) {
+  const id = String(zone?.id || "").toLowerCase();
+  const label = String(zone?.label || "");
+  return id.startsWith("wc-") || /^轮椅席\s/.test(label);
+}
+
+function removeGuideOnlySeatmapZones(event) {
+  if (!Array.isArray(event?.zones)) return 0;
+  const before = event.zones.length;
+  event.zones = event.zones.filter((zone) => !isGuideOnlySeatmapZone(zone));
+  return before - event.zones.length;
+}
+
+function syncBuiltInSeatmapTemplate(event) {
+  if (!event?.seatmapTemplateId) return false;
+  if (isSeatmapTemplateAutoDisabled(event.seatmapTemplateId)) {
+    const hadTemplateZones = Array.isArray(event.zones) && event.zones.some((zone) => /template/.test(String(zone?.source || "")));
+    event.seatmapTemplateId = "";
+    event.seatmapFingerprint = "";
+    if (hadTemplateZones) {
+      event.zones = event.zones.filter((zone) => !/template/.test(String(zone?.source || "")));
+      resetSeatmapTestStatusForEvent(event, "已停用错位座位图模板，请重新扫描/保存热区并逐区测试");
+    }
+    return true;
+  }
+  const template = getAllSeatmapTemplates().find((item) => item.builtIn && item.id === event.seatmapTemplateId);
+  if (!template) return false;
+  if (template.id === "builtin-bigbang-goyang" && event.id !== "bigbang-goyang") return false;
+  if (Array.isArray(event.zones) && event.zones.length) return false;
+  event.seatmapImage = getTemplateSeatmapImage(template) || event.seatmapImage;
+  event.seatmapFileName = template.seatmapFileName || template.fileName || event.seatmapFileName;
+  event.seatmapSize = { ...template.size };
+  event.seatmapFingerprint = template.fingerprint || event.seatmapFingerprint || "";
+  event.zones = getTemplateZonesForSize(template, event.seatmapSize);
+  return true;
+}
+
+function repairKnownEventTemplateMismatch(event) {
+  if (!event || event.id !== "bigbang-singapore") return false;
+  const hasGoyangTemplate = event.seatmapTemplateId === "builtin-bigbang-goyang" || String(event.seatmapImage || "").includes("bigbang-goyang-seatmap");
+  const needsSingaporeTemplate =
+    !event.seatmapTemplateId ||
+    event.seatmapTemplateId === "builtin-bigbang-singapore" ||
+    hasGoyangTemplate ||
+    !Array.isArray(event.zones) ||
+    !event.zones.length;
+  if (!needsSingaporeTemplate) return false;
+  event.seatmapTemplateId = "builtin-bigbang-singapore";
+  event.seatmapImage = "assets/bigbang-singapore-seatmap.jpg";
+  event.seatmapFileName = "bigbang-singapore-seatmap.jpg";
+  event.seatmapSize = { width: 1206, height: 1181 };
+  event.seatmapFingerprint = "";
+  event.seatmapTitle = "BIGBANG 新加坡官方座位图";
+  event.zones = [];
+  return true;
+}
+
+function syncKnownExternalSeatmapTemplate(event) {
+  if (!event || event.id !== "bigbang-goyang") return false;
+  const template = getAllSeatmapTemplates().find((item) => item.id === "builtin-bigbang-goyang");
+  if (!template) return false;
+  const templateImage = getTemplateSeatmapImage(template);
+  const alreadySynced =
+    event.seatmapTemplateId === template.id &&
+    event.seatmapImage === templateImage &&
+    event.seatmapSize?.width === template.size.width &&
+    event.seatmapSize?.height === template.size.height &&
+    Array.isArray(event.zones) &&
+    event.zones.length === template.zones.length;
+  if (alreadySynced) return false;
+  event.seatmapTemplateId = template.id;
+  event.seatmapImage = templateImage || event.seatmapImage;
+  event.seatmapFileName = template.seatmapFileName || template.fileName || event.seatmapFileName;
+  event.seatmapSize = { ...template.size };
+  event.seatmapFingerprint = template.fingerprint || event.seatmapFingerprint || "";
+  event.seatmapTitle = `${event.name}官方座位图`;
+  event.zones = getTemplateZonesForSize(template, event.seatmapSize);
+  return true;
+}
+
 function getPolygonCenter(polygon) {
   const bounds = getPolygonBounds(polygon);
   return {
@@ -1560,32 +6006,355 @@ function getZoneFromSeatComponent(point) {
 function getZoneForPointer(event, seatmap) {
   const point = getSeatmapPoint(event, seatmap);
   if (!point) return null;
-  return getZoneAtPoint(point) || getZoneFromSeatComponent(point);
+  return getZoneAtPoint(point);
 }
 
 function getZoneFromTarget(target) {
   const hotspot = target.closest("[data-zone-id]");
   if (!hotspot) return null;
-  return currentEvent.zones.find((zone) => zone.id === hotspot.dataset.zoneId) || null;
+  const zoneId = String(hotspot.dataset.zoneId || "").toLowerCase();
+  return currentEvent.zones.find((zone) => String(zone.id).toLowerCase() === zoneId) || null;
 }
 
 function getZoneForSeatmapEvent(event, seatmap) {
   const targetZone = getZoneFromTarget(event.target);
-  const pointerZone = getZoneForPointer(event, seatmap);
-  if (!targetZone || !pointerZone || targetZone.id === pointerZone.id) return targetZone || pointerZone;
-
-  const point = getSeatmapPoint(event, seatmap);
-  if (!point) return targetZone;
-  const targetHit = pointInPolygon(point, targetZone.polygon);
-  const pointerHit = pointInPolygon(point, pointerZone.polygon);
-  if (targetHit && pointerHit) {
-    return getPolygonArea(targetZone.polygon) <= getPolygonArea(pointerZone.polygon) ? targetZone : pointerZone;
-  }
-  return targetHit ? targetZone : pointerZone;
+  if (targetZone) return targetZone;
+  return getZoneForPointer(event, seatmap);
 }
+
+window.ticketSeatmapDebug = {
+  getZones() {
+    return currentEvent.zones.map((zone) => ({
+      id: zone.id,
+      label: zone.label,
+      polygon: zone.polygon.map((point) => [...point]),
+    }));
+  },
+  getZoneAtCoordinate(x, y) {
+    const zone = getZoneAtPoint({ x, y });
+    return zone ? { id: zone.id, label: zone.label } : null;
+  },
+};
 
 function getPolygonPoints(polygon) {
   return polygon.map(([x, y]) => `${x},${y}`).join(" ");
+}
+
+function clonePolygonPoints(polygon) {
+  return Array.isArray(polygon) ? polygon.map(([x, y]) => [Number(x), Number(y)]) : [];
+}
+
+function getSeatmapZoneById(zoneId) {
+  return currentEvent.zones.find((zone) => String(zone.id) === String(zoneId)) || null;
+}
+
+function getSeatmapHotspotElement(zoneId) {
+  return Array.from(seatmapFrame.querySelectorAll(".seatmap-hotspot")).find(
+    (hotspot) => hotspot.dataset.zoneId === String(zoneId),
+  );
+}
+
+function getSeatmapEditingZone() {
+  return seatmapEditingZoneId ? getSeatmapZoneById(seatmapEditingZoneId) : null;
+}
+
+function getSeatmapEditPolygon() {
+  const zone = getSeatmapEditingZone();
+  if (!zone) return [];
+  return seatmapEditDraftPolygon || clonePolygonPoints(zone.polygon);
+}
+
+function clampSeatmapPoint(point) {
+  const { width, height } = currentEvent.seatmapSize;
+  return {
+    x: Math.max(0, Math.min(width, point.x)),
+    y: Math.max(0, Math.min(height, point.y)),
+  };
+}
+
+function getSeatmapEditBox(polygon) {
+  const bounds = getPolygonBounds(polygon);
+  return {
+    left: bounds.minX,
+    top: bounds.minY,
+    right: bounds.maxX,
+    bottom: bounds.maxY,
+    width: bounds.maxX - bounds.minX,
+    height: bounds.maxY - bounds.minY,
+    centerX: (bounds.minX + bounds.maxX) / 2,
+    centerY: (bounds.minY + bounds.maxY) / 2,
+  };
+}
+
+function transformSeatmapPolygon(polygon, fromBox, toBox) {
+  const safeWidth = fromBox.width || 1;
+  const safeHeight = fromBox.height || 1;
+  return polygon.map(([x, y]) => {
+    const nx = (x - fromBox.left) / safeWidth;
+    const ny = (y - fromBox.top) / safeHeight;
+    const point = clampSeatmapPoint({
+      x: toBox.left + nx * toBox.width,
+      y: toBox.top + ny * toBox.height,
+    });
+    return [Math.round(point.x), Math.round(point.y)];
+  });
+}
+
+function buildSeatmapResizeBox(startBox, point, handle) {
+  const minSize = 10;
+  let { left, top, right, bottom } = startBox;
+  if (handle.includes("w")) left = Math.min(point.x, right - minSize);
+  if (handle.includes("e")) right = Math.max(point.x, left + minSize);
+  if (handle.includes("n")) top = Math.min(point.y, bottom - minSize);
+  if (handle.includes("s")) bottom = Math.max(point.y, top + minSize);
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function getSeatmapEditPoint(event) {
+  const seatmap = event.target.closest(".seatmap-stage") || seatmapFrame.querySelector(".seatmap-stage");
+  return seatmap ? getSeatmapPoint(event, seatmap) : null;
+}
+
+function renderSeatmapEditControls() {
+  const zone = getSeatmapEditingZone();
+  const polygon = getSeatmapEditPolygon();
+  if (!zone || !polygon.length) return "";
+  const box = getSeatmapEditBox(polygon);
+  const handles = [
+    ["nw", box.left, box.top],
+    ["n", box.centerX, box.top],
+    ["ne", box.right, box.top],
+    ["e", box.right, box.centerY],
+    ["se", box.right, box.bottom],
+    ["s", box.centerX, box.bottom],
+    ["sw", box.left, box.bottom],
+    ["w", box.left, box.centerY],
+  ]
+    .map(
+      ([handle, x, y]) => `
+        <rect
+          class="seatmap-edit-control seatmap-edit-resize-handle seatmap-edit-resize-${handle}"
+          x="${x - 8}"
+          y="${y - 8}"
+          width="16"
+          height="16"
+          rx="3"
+          data-seatmap-edit-action="resize"
+          data-seatmap-edit-handle="${handle}"
+        />
+      `,
+    )
+    .join("");
+  const points = polygon
+    .map(
+      ([x, y], index) => `
+        <circle
+          class="seatmap-edit-control seatmap-edit-point-handle"
+          cx="${x}"
+          cy="${y}"
+          r="7"
+          data-seatmap-edit-action="point"
+          data-seatmap-edit-point="${index}"
+        />
+      `,
+    )
+    .join("");
+  return `
+    <g id="seatmapEditControls" class="seatmap-edit-controls" data-zone-id="${zone.id}">
+      <polygon class="seatmap-edit-outline" points="${getPolygonPoints(polygon)}" />
+      <rect
+        class="seatmap-edit-frame"
+        x="${box.left}"
+        y="${box.top}"
+        width="${box.width}"
+        height="${box.height}"
+        rx="3"
+      />
+      <circle
+        class="seatmap-edit-control seatmap-edit-move-handle"
+        cx="${box.centerX}"
+        cy="${box.centerY}"
+        r="13"
+        data-seatmap-edit-action="move"
+      />
+      ${handles}
+      ${points}
+    </g>
+  `;
+}
+
+function updateSeatmapEditDom() {
+  const zone = getSeatmapEditingZone();
+  const polygon = getSeatmapEditPolygon();
+  if (!zone || !polygon.length) return;
+  const hotspot = getSeatmapHotspotElement(zone.id);
+  if (hotspot) {
+    hotspot.setAttribute("points", getPolygonPoints(polygon));
+  }
+  const controls = seatmapFrame.querySelector("#seatmapEditControls");
+  if (controls) {
+    const wrapper = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    wrapper.innerHTML = renderSeatmapEditControls();
+    const nextControls = wrapper.firstElementChild;
+    if (nextControls) controls.replaceWith(nextControls);
+  }
+}
+
+function renderSeatmapAdminTools() {
+  const tools = seatmapFrame.querySelector("#seatmapAdminTools");
+  if (!tools || !IS_ADMIN_PAGE) return;
+  const editingZone = getSeatmapEditingZone();
+  const canEditSelected = selectedZone && currentEvent.zones.some((zone) => zone.id === selectedZone.id);
+  tools.innerHTML = `
+    <div class="seatmap-tool-copy">
+      <strong>座位图热区校准</strong>
+      <span>${
+        editingZone
+          ? `正在修改 ${editingZone.label}，可拖动边框、角点或多边形顶点。`
+          : seatmapHotspotVisible
+            ? "已显示全部热区，先点击要检查的区域，再点“修改选中热区”。"
+            : "客户视角不会显示热区线框，只保留点击效果。"
+      }</span>
+    </div>
+    <div class="seatmap-tool-actions">
+      <button type="button" class="secondary-button" data-seatmap-tool="show-hotspots">显示全部热区</button>
+      <button type="button" class="secondary-button" data-seatmap-tool="customer-test">客户视角测试</button>
+      <button type="button" class="secondary-button" data-seatmap-tool="edit-selected" ${canEditSelected || editingZone ? "" : "disabled"}>
+        ${editingZone ? `继续修改 ${editingZone.label}` : canEditSelected ? `修改 ${selectedZone.label} 热区` : "先点一个区域再修改"}
+      </button>
+      ${
+        editingZone
+          ? `
+            <button type="button" class="primary-button compact" data-seatmap-tool="save-edit">保存这个热区</button>
+            <button type="button" class="secondary-button" data-seatmap-tool="cancel-edit">取消修改</button>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
+function showSeatmapHotspots() {
+  seatmapHotspotVisible = true;
+  renderSeatmap();
+  showToast("已显示全部热区，可以点击检查或修改。", "success");
+}
+
+function showSeatmapCustomerTest() {
+  seatmapHotspotVisible = false;
+  seatmapEditingZoneId = "";
+  seatmapEditDraftPolygon = null;
+  seatmapEditDragging = null;
+  renderSeatmap();
+  showToast("已切到客户视角：热区线框隐藏，只测试点击结果。", "success");
+}
+
+function startSeatmapHotspotEdit(zoneId = selectedZone?.id) {
+  const zone = getSeatmapZoneById(zoneId);
+  if (!zone) {
+    showToast("请先点击一个要修改的区域。", "error");
+    return;
+  }
+  seatmapHotspotVisible = true;
+  seatmapEditingZoneId = zone.id;
+  seatmapEditDraftPolygon = clonePolygonPoints(zone.polygon);
+  seatmapEditDragging = null;
+  selectedZone = zone;
+  renderSeatmap();
+  zoneMarkingStatus.textContent = `正在修改 ${zone.label} 热区：可拖边、拖角、拖点，保存后再用客户视角测试。`;
+  showToast(`正在修改 ${zone.label} 热区。`, "success");
+}
+
+function cancelSeatmapHotspotEdit() {
+  const zone = getSeatmapEditingZone();
+  seatmapEditingZoneId = "";
+  seatmapEditDraftPolygon = null;
+  seatmapEditDragging = null;
+  renderSeatmap();
+  showToast(zone ? `已取消修改 ${zone.label}。` : "已取消修改。", "idle");
+}
+
+async function saveSeatmapHotspotEdit() {
+  const zone = getSeatmapEditingZone();
+  const polygon = getSeatmapEditPolygon();
+  if (!zone || !polygon.length) {
+    showToast("没有正在修改的热区。", "error");
+    return;
+  }
+  zone.polygon = clonePolygonPoints(polygon);
+  if (!Array.isArray(zone.aliases) || !zone.aliases.length) zone.aliases = [zone.label];
+  resetSeatmapTestStatus(`已修改 ${zone.label} 热区，需要重新测试`);
+  selectedZone = null;
+  hoveredZone = null;
+  seatmapHotspotVisible = false;
+  seatmapEditingZoneId = "";
+  seatmapEditDraftPolygon = null;
+  seatmapEditDragging = null;
+  const template = await saveCurrentSeatmapAsTemplate(true);
+  zoneMarkingStatus.textContent = template
+    ? `已保存 ${zone.label} 热区，并更新模板“${template.name}”。现在是客户视角，请重新点击验证。`
+    : `已保存 ${zone.label} 热区。现在是客户视角，请重新点击验证。`;
+  saveAppState();
+  renderSeatmapMarkers();
+  renderAdminEvent();
+  render();
+  setMode("customer");
+  seatmapFrame.scrollIntoView({ behavior: "smooth", block: "center" });
+  showToast("热区已保存，已切到客户视角测试。", "success");
+}
+
+function handleSeatmapEditPointerDown(event) {
+  const control = event.target.closest(".seatmap-edit-control");
+  if (!control || !seatmapEditingZoneId || !seatmapEditDraftPolygon) return;
+  const point = getSeatmapEditPoint(event);
+  if (!point) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const action = control.dataset.seatmapEditAction;
+  seatmapEditDragging = {
+    action,
+    handle: control.dataset.seatmapEditHandle || "",
+    pointIndex: Number(control.dataset.seatmapEditPoint),
+    startPoint: point,
+    startPolygon: clonePolygonPoints(seatmapEditDraftPolygon),
+    startBox: getSeatmapEditBox(seatmapEditDraftPolygon),
+  };
+}
+
+function handleSeatmapEditPointerMove(event) {
+  if (!seatmapEditDragging || !seatmapEditDraftPolygon) return;
+  const point = getSeatmapEditPoint(event);
+  if (!point) return;
+  event.preventDefault();
+  const drag = seatmapEditDragging;
+  const nextPoint = clampSeatmapPoint(point);
+  if (drag.action === "move") {
+    const dx = nextPoint.x - drag.startPoint.x;
+    const dy = nextPoint.y - drag.startPoint.y;
+    seatmapEditDraftPolygon = drag.startPolygon.map(([x, y]) => {
+      const moved = clampSeatmapPoint({ x: x + dx, y: y + dy });
+      return [Math.round(moved.x), Math.round(moved.y)];
+    });
+  } else if (drag.action === "resize") {
+    const nextBox = buildSeatmapResizeBox(drag.startBox, nextPoint, drag.handle);
+    seatmapEditDraftPolygon = transformSeatmapPolygon(drag.startPolygon, drag.startBox, nextBox);
+  } else if (drag.action === "point" && Number.isInteger(drag.pointIndex)) {
+    seatmapEditDraftPolygon = drag.startPolygon.map((item, index) =>
+      index === drag.pointIndex ? [Math.round(nextPoint.x), Math.round(nextPoint.y)] : item,
+    );
+  }
+  updateSeatmapEditDom();
+}
+
+function handleSeatmapEditPointerEnd() {
+  seatmapEditDragging = null;
 }
 
 function updateSeatmapHotspots() {
@@ -1603,15 +6372,37 @@ function updateSeatmapHotspots() {
 
 function selectZone(zone) {
   selectedZone = zone;
+  markSeatmapZoneTested(zone);
+  if (window.ticketSeatmapDebug?.enabled !== false) {
+    console.info("[seatmap-click-debug] select-zone", JSON.stringify({
+      eventId: currentEvent?.id,
+      zoneId: zone?.id || "",
+      zoneLabel: zone?.label || "",
+      ...getSelectedDateDebugInfo(),
+    }));
+  }
   updateSeatmapHotspots();
+  renderSeatmapAdminTools();
   renderZoneDrawer();
   zoneDrawer.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function bindSeatmapHotspotEvents() {
+  seatmapFrame.querySelectorAll(".seatmap-hotspot").forEach((hotspot) => {
+    hotspot.addEventListener("click", (event) => {
+      const zone = getZoneFromTarget(event.currentTarget);
+      if (!zone) return;
+      event.preventDefault();
+      event.stopPropagation();
+      selectZone(zone);
+    });
+  });
 }
 
 function renderSeatmap() {
   const { width, height } = currentEvent.seatmapSize;
   seatmapFrame.innerHTML = `
-    <div class="seatmap-stage" style="aspect-ratio: ${width} / ${height};">
+    <div class="seatmap-stage ${seatmapHotspotVisible ? "show-seatmap-hotspots" : ""} ${seatmapEditingZoneId ? "editing-seatmap-hotspot" : ""}" style="aspect-ratio: ${width} / ${height};">
       <img
         class="seatmap-image"
         src="${currentEvent.seatmapImage}"
@@ -1624,20 +6415,23 @@ function renderSeatmap() {
         aria-label="${currentEvent.name} 可点击座位区域"
       >
         ${currentEvent.zones
-          .map(
-            (zone) => `
+          .map((zone) => {
+            const isEditing = zone.id === seatmapEditingZoneId;
+            const polygon = isEditing && seatmapEditDraftPolygon ? seatmapEditDraftPolygon : zone.polygon;
+            return `
               <polygon
-                class="seatmap-hotspot"
-                points="${getPolygonPoints(zone.polygon)}"
+                class="seatmap-hotspot ${isEditing ? "editing" : ""}"
+                points="${getPolygonPoints(polygon)}"
                 data-zone-id="${zone.id}"
                 pointer-events="all"
                 tabindex="0"
                 role="button"
                 aria-label="${zone.label}"
               />
-            `,
-          )
+            `;
+          })
           .join("")}
+        ${renderSeatmapEditControls()}
       </svg>
       ${
         currentEvent.zones.length
@@ -1646,9 +6440,12 @@ function renderSeatmap() {
       }
       <div class="seatmap-hover-card hidden" id="seatmapHoverCard"></div>
     </div>
+    ${IS_ADMIN_PAGE ? `<div class="seatmap-test-tools" id="seatmapAdminTools"></div>` : ""}
   `;
+  bindSeatmapHotspotEvents();
   rebuildSeatmapPixelSampler();
   updateSeatmapHotspots();
+  renderSeatmapAdminTools();
 }
 
 function updateSeatmapHoverCard(event, zone) {
@@ -1669,14 +6466,75 @@ function groupTicketsByTable(tickets) {
   return [...grouped.values()];
 }
 
+function getCleanSourceName(table) {
+  const rawName = String(table.sourceFileName || table.sourceName || table.title || "表格来源")
+    .replace(/\s*·\s*第\s*\d+\s*页\/表\s*$/i, "")
+    .trim();
+  return shortenFileName(decodePossiblyEncodedFileName(rawName), 34);
+}
+
+function decodePossiblyEncodedFileName(value = "") {
+  let decoded = String(value || "");
+  for (let index = 0; index < 2; index += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
+  return decoded;
+}
+
+function shortenFileName(value = "", maxLength = 38) {
+  const text = String(value || "").trim();
+  if (text.length <= maxLength) return text;
+  const extensionMatch = text.match(/(\.[a-z0-9]{2,8})$/i);
+  const extension = extensionMatch?.[1] || "";
+  const body = extension ? text.slice(0, -extension.length) : text;
+  const available = Math.max(12, maxLength - extension.length - 1);
+  const headLength = Math.ceil(available * 0.58);
+  const tailLength = Math.max(4, available - headLength);
+  return `${body.slice(0, headLength)}…${body.slice(-tailLength)}${extension}`;
+}
+
+function getSelectedFileDisplayName(fileName = "") {
+  return shortenFileName(decodePossiblyEncodedFileName(fileName), 42);
+}
+
+function isPdfTableSource(table) {
+  const source = `${table.originalType || ""} ${table.originalImage || ""} ${table.sourceName || ""} ${table.sourceFileName || ""}`.toLowerCase();
+  return source.includes("application/pdf") || source.includes(".pdf");
+}
+
+function getTablePageText(table) {
+  const page = Number(table.sourcePage || 0);
+  if (page > 0) return isPdfTableSource(table) ? `PDF 第 ${page} 页` : `第 ${page} 张表`;
+  const part = Number(table.sourcePart || 0);
+  if (part > 0) return `第 ${part} 张表`;
+  return "";
+}
+
+function getTableSourceSummary(table) {
+  const sourceName = getCleanSourceName(table);
+  const pageText = getTablePageText(table);
+  return pageText ? `${sourceName} · ${pageText}` : sourceName;
+}
+
+function getCustomerTableSourceSummary(table) {
+  const pageText = getTablePageText(table);
+  return pageText ? `表格来源 · ${pageText}` : "表格来源";
+}
+
 function renderTicketCard(ticket, title, rank) {
   const { table, row, index } = ticket;
-  const fields = table.columns
+  const fields = getOriginalTicketFields(ticket, { preserveOriginal: true })
     .map(
-      (column, columnIndex) => `
+      ({ label, value }) => `
         <div class="ticket-field">
-          <span>${column}</span>
-          <strong>${row[columnIndex] || ""}</strong>
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value || "")}</strong>
         </div>
       `,
     )
@@ -1684,6 +6542,7 @@ function renderTicketCard(ticket, title, rank) {
 
   const recommendation = sortMode === "recommended" && rank < 3 ? `<span class="recommend-badge">优先推荐</span>` : "";
   const reason = sortMode === "recommended" ? `<span class="ticket-reason">按售价和座位/号数综合排序</span>` : "";
+  const sourceSummary = escapeHtml(getCustomerTableSourceSummary(table));
 
   return `
     <button class="ticket-card" type="button" data-ticket-key="${makeTicketKey(table, index)}">
@@ -1691,21 +6550,29 @@ function renderTicketCard(ticket, title, rank) {
         <span class="ticket-card-title">${title}</span>
         ${recommendation}
       </span>
+      <span class="ticket-source-meta">${sourceSummary}</span>
       <span class="ticket-fields">${fields}</span>
       ${reason}
-      <span class="ticket-open">表格来源</span>
+      <span class="ticket-open">查看原表 / 来源页</span>
     </button>
   `;
 }
 
 function renderRecognizedTableCard(group) {
   const { table, hitRows } = group;
-  const headers = table.columns.map((column) => `<th>${column}</th>`).join("");
-  const rows = table.rows
+  const pageText = getTablePageText(table);
+  const customerTitle = pageText ? `匹配票源 · ${pageText}` : "匹配票源表";
+  const displayColumns = Array.isArray(table.originalColumns) ? table.originalColumns : table.columns;
+  const displayRows = Array.isArray(table.originalRows) ? table.originalRows : table.rows;
+  const visibleColumns = displayColumns
+    .map((column, columnIndex) => ({ column, columnIndex }))
+    .filter((field) => !isInternalColorColumn(field.column));
+  const headers = visibleColumns.map(({ column }) => `<th>${escapeHtml(column || "")}</th>`).join("");
+  const rows = displayRows
     .map(
       (row, rowIndex) => `
         <tr class="${hitRows.has(rowIndex) ? "hit-row" : ""}">
-          ${table.columns.map((_, columnIndex) => `<td>${row[columnIndex] || ""}</td>`).join("")}
+          ${visibleColumns.map(({ columnIndex }) => `<td>${escapeHtml(row[columnIndex] || "")}</td>`).join("")}
         </tr>
       `,
     )
@@ -1714,8 +6581,8 @@ function renderRecognizedTableCard(group) {
     <article class="table-card">
       <div class="table-card-header">
         <div>
-          <p class="table-card-title">${table.title}</p>
-          <span class="ticket-reason">整张识别表 · 命中 ${hitRows.size} 行</span>
+          <p class="table-card-title">${escapeHtml(customerTitle)}</p>
+          <span class="ticket-reason">${escapeHtml(getCustomerTableSourceSummary(table))} · 命中 ${hitRows.size} 行</span>
         </div>
         <button class="small-button ghost" type="button" data-table-id="${table.id}">表格来源</button>
       </div>
@@ -1736,12 +6603,36 @@ function renderZoneDrawer() {
     return;
   }
 
-  const tickets = getZoneTickets(selectedZone);
+  const tickets = getZoneTickets(selectedZone).filter((ticket) => !selectedDateId || dateMatchesTicket(ticket));
   const rawZoneTickets = currentEvent.tables.flatMap((table) =>
     table.rows
       .map((row, index) => ({ table, row, index }))
-      .filter((ticket) => zoneMatchesTicket(ticket, selectedZone)),
+      .filter((ticket) => !isUnavailableTicket(ticket) && zoneMatchesTicket(ticket, selectedZone)),
   );
+  if (window.ticketSeatmapDebug?.enabled !== false) {
+    console.info("[ticket-date-debug] render-zone-drawer", JSON.stringify({
+      eventId: currentEvent?.id,
+      zone: selectedZone.label,
+      ...getSelectedDateDebugInfo(),
+      rawZoneTickets: rawZoneTickets.map((ticket) => ({
+        tableId: ticket.table.id,
+        rowIndex: ticket.index,
+          sourcePage: ticket.table.sourcePage || "",
+          dateValues: getTicketDateValues(ticket),
+          rowDateKeys: getTicketDateValues(ticket).flatMap((value) => getDateKeysFromText(value)),
+          zone: getTicketZoneValue(ticket),
+          dateMatches: !selectedDateId || dateMatchesTicket(ticket),
+      })),
+      shownTickets: tickets.map((ticket) => ({
+        tableId: ticket.table.id,
+        rowIndex: ticket.index,
+        sourcePage: ticket.table.sourcePage || "",
+        dateValues: getTicketDateValues(ticket),
+        rowDateKeys: getTicketDateValues(ticket).flatMap((value) => getDateKeysFromText(value)),
+        zone: getTicketZoneValue(ticket),
+      })),
+    }));
+  }
   const ticketCards = tickets.length
     ? tickets.map((ticket, rank) => renderTicketCard(ticket, `${selectedZone.label} 可售票`, rank)).join("")
     : !currentEvent.tables.length
@@ -1768,17 +6659,21 @@ function renderZoneDrawer() {
 }
 
 function openOriginalTable(table) {
-  modalTitle.textContent = `${table.title} · 表格来源`;
+  const pageText = getTablePageText(table);
+  const isCustomerMode = !customerView.classList.contains("hidden");
+  const safeCustomerTitle = pageText ? `表格来源 · ${pageText}` : "表格来源";
+  modalTitle.textContent = isCustomerMode ? safeCustomerTitle : `${table.title} · ${pageText || "表格来源"}`;
   const source = table.originalImage || "";
-  const isPdf = table.originalType === "application/pdf" || source.toLowerCase().includes("application/pdf");
+  const isPdf = isPdfTableSource(table);
   modalImage.classList.toggle("hidden", isPdf);
   modalPdf.classList.toggle("hidden", !isPdf);
   if (isPdf) {
-    modalPdf.src = source;
+    const page = Number(table.sourcePage || 0);
+    modalPdf.src = page > 0 ? `${source.split("#")[0]}#page=${page}` : source;
     modalImage.removeAttribute("src");
   } else {
     modalImage.src = source;
-    modalImage.alt = `${table.title} 表格来源`;
+    modalImage.alt = isCustomerMode ? safeCustomerTitle : `${table.title} ${pageText || "表格来源"}`;
     modalPdf.removeAttribute("src");
   }
   imageModal.classList.remove("hidden");
@@ -1793,19 +6688,46 @@ function closeOriginalImage() {
 }
 
 function renderEventList() {
-  eventList.innerHTML = events
-    .map(
-      (event) => `
+  const normalizedQuery = normalize(eventSearchTerm);
+  const hasQuery = Boolean(normalizedQuery);
+  const shouldShowMatches = eventPickerOpen || hasQuery;
+  const matchedEvents = hasQuery
+    ? events.filter((event) => normalize(`${event.name} ${event.location} ${event.venue || ""} ${event.dates}`).includes(normalizedQuery))
+    : events;
+  const visibleEvents = shouldShowMatches ? matchedEvents : [currentEvent];
+  eventList.classList.toggle("event-list-collapsed", !shouldShowMatches);
+  if (eventSearchInput && eventSearchInput.value !== eventSearchTerm) eventSearchInput.value = eventSearchTerm;
+  if (eventPickerToggle) {
+    eventPickerToggle.textContent = hasQuery ? "清空搜索" : eventPickerOpen ? "收起列表" : "展开全部";
+    eventPickerToggle.setAttribute("aria-expanded", shouldShowMatches ? "true" : "false");
+  }
+  if (eventPickerMeta) {
+    eventPickerMeta.textContent = hasQuery
+      ? matchedEvents.length
+        ? `找到 ${matchedEvents.length} 场演出`
+        : "没有找到匹配演出"
+      : shouldShowMatches
+        ? `共 ${events.length} 场演出`
+        : `当前：${currentEvent.name}`;
+  }
+  eventList.innerHTML = visibleEvents.length
+    ? visibleEvents
+        .map(
+          (event) => `
         <button class="event-card ${event.id === currentEvent.id ? "active" : ""}" type="button" data-event-id="${event.id}">
-          <span class="event-name">${event.name}</span>
+          <span class="event-card-head">
+            <span class="event-name">${escapeHtml(event.name)}</span>
+            ${event.id === currentEvent.id ? `<span class="event-current-pill">当前</span>` : ""}
+          </span>
           <span class="event-info">
-            <span>${event.location}</span>
-            <span>${event.dates}</span>
+            <span>${escapeHtml(event.location)}</span>
+            <span>${escapeHtml(event.dates)}</span>
           </span>
         </button>
       `,
-    )
-    .join("");
+        )
+        .join("")
+    : `<div class="event-empty-state">换个关键词试试。</div>`;
 }
 
 function renderAdminEventList() {
@@ -1892,13 +6814,22 @@ function renderAdminEvent() {
   renderSeatmapMarkers();
   renderAdminChecklist();
   renderSeatmapTemplates();
+  renderEventDraftHistory();
+  deleteCurrentEventButton.disabled = events.length <= 1;
 }
 
 function renderAdminChecklist() {
   const pendingCount = pendingTables.filter((table) => table.eventId === currentEvent.id).length;
+  const seatmapTestProgress = getSeatmapTestProgress();
   const items = [
     { done: Boolean(currentEvent.seatmapImage), label: "座位图已配置" },
     { done: currentEvent.zones.length > 0, label: `可点击热区 ${currentEvent.zones.length} 个` },
+    {
+      done: seatmapTestProgress.passed,
+      label: seatmapTestProgress.total
+        ? `座位图逐区测试 ${seatmapTestProgress.testedCount}/${seatmapTestProgress.total}`
+        : "座位图逐区测试 0/0",
+    },
     { done: currentEvent.tables.length > 0, label: `已发布票源表 ${currentEvent.tables.length} 张` },
     { done: pendingCount === 0, label: pendingCount ? `还有 ${pendingCount} 张待确认` : "没有待确认积压" },
   ];
@@ -1972,11 +6903,30 @@ async function refreshAiStatus() {
 }
 
 function renderUploadRecords() {
-  const currentPending = pendingTables.filter((table) => table.eventId === currentEvent.id);
-  if (!currentPending.length) {
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
+  const repairedTables = allCurrentPending.filter((table) => table._columnRepairChanged);
+  if (repairedTables.length) {
+    repairedTables.forEach((table) => {
+      delete table._columnRepairChanged;
+    });
+    scheduleAppStateSave();
+  }
+  const manualCount = allCurrentPending.filter((table) => table.needsManualReview).length;
+  const currentPending = manualReviewOnly ? allCurrentPending.filter((table) => table.needsManualReview) : allCurrentPending;
+  showManualReviewButton.textContent = manualReviewOnly ? "查看全部待确认" : `查看需人工确认${manualCount ? `（${manualCount}）` : ""}`;
+  showManualReviewButton.disabled = !allCurrentPending.length;
+  if (!allCurrentPending.length) {
+    manualReviewOnly = false;
     uploadRecords.innerHTML = `
       <strong>当前演出待确认/本次上传记录</strong>
       <div class="empty-upload-record">还没有发布记录。</div>
+    `;
+    return;
+  }
+  if (!currentPending.length) {
+    uploadRecords.innerHTML = `
+      <strong>当前演出待确认/本次上传记录</strong>
+      <div class="empty-upload-record">当前没有需要人工确认的表。</div>
     `;
     return;
   }
@@ -1985,15 +6935,23 @@ function renderUploadRecords() {
     <strong>当前演出待确认/本次上传记录</strong>
     ${currentPending
       .map(
-        (table) => `
-          <div class="upload-record ${table.id === selectedPendingTableId ? "active" : ""}">
+        (table) => {
+          const reasons = table.reviewReasons || [];
+          const reviewBadge = table.needsManualReview
+            ? `<em class="review-risk-badge">需人工确认</em>`
+            : `<em class="review-ok-badge">标准识别</em>`;
+          const titleText = shortenFileName(table.title || "新上传票源", 30);
+          const sourceText = getTableSourceSummary(table);
+          return `
+          <div class="upload-record ${table.id === selectedPendingTableId ? "active" : ""}" data-review-table="${table.id}" role="button" tabindex="0">
             <span>
-              <b>${table.title}</b>
-              <small>${table.sourceName} · ${table.rows.length} 条票源 · 待确认</small>
+              <b title="${escapeHtml(table.title || "")}">${escapeHtml(titleText)}${reviewBadge}</b>
+              <small title="${escapeHtml(sourceText)}">${escapeHtml(shortenFileName(sourceText, 46))} · ${table.rows.length} 条票源 · 待确认${reasons.length ? ` · ${escapeHtml(reasons.join(" / "))}` : ""}</small>
             </span>
-            <button class="small-button ghost" type="button" data-review-table="${table.id}">校对</button>
+            <button class="small-button ghost" type="button" data-review-table="${table.id}">打开这一页</button>
           </div>
-        `,
+        `;
+        },
       )
       .join("")}
   `;
@@ -2003,7 +6961,702 @@ function getSelectedPendingTable() {
   return pendingTables.find((table) => table.id === selectedPendingTableId) || null;
 }
 
-function renderReviewPanel() {
+function getCurrentPendingTables({ manualOnly = manualReviewOnly } = {}) {
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
+  return manualOnly ? allCurrentPending.filter((table) => table.needsManualReview) : allCurrentPending;
+}
+
+function getReviewTableNavigation(table) {
+  const queue = getCurrentPendingTables();
+  const index = table ? queue.findIndex((item) => item.id === table.id) : -1;
+  return {
+    queue,
+    index,
+    previous: index > 0 ? queue[index - 1] : null,
+    next: index >= 0 && index < queue.length - 1 ? queue[index + 1] : null,
+  };
+}
+
+function selectPendingTable(tableId, { scroll = false } = {}) {
+  const table = pendingTables.find((item) => item.id === tableId && item.eventId === currentEvent.id);
+  if (!table) return false;
+  selectedPendingTableId = table.id;
+  ensurePendingTableReviewFlags(table);
+  pendingReviewFocusRowIndex = getReviewableRowIndexes(table)[0] ?? getVisibleReviewRowIndexes(table)[0] ?? null;
+  renderReviewPanel(pendingReviewFocusRowIndex);
+  repairPendingTableRowColors(table);
+  window.requestAnimationFrame(() => renderUploadRecords());
+  if (scroll) document.querySelector("#reviewPanel")?.scrollIntoView({ behavior: "auto", block: "start" });
+  return true;
+}
+
+function selectAdjacentPendingTable(direction) {
+  const table = getSelectedPendingTable();
+  const navigation = getReviewTableNavigation(table);
+  const target = direction < 0 ? navigation.previous : navigation.next;
+  if (!target) {
+    showToast(direction < 0 ? "前面没有待校对表了。" : "后面没有待校对表了。", "error");
+    return;
+  }
+  selectPendingTable(target.id, { scroll: true });
+}
+
+function selectNextPendingTableAfterPublish(queueSnapshot, currentIndex) {
+  const stillVisible = getCurrentPendingTables();
+  const visibleIds = new Set(stillVisible.map((table) => table.id));
+  for (let index = currentIndex + 1; index < queueSnapshot.length; index += 1) {
+    const tableId = queueSnapshot[index]?.id;
+    if (visibleIds.has(tableId)) {
+      selectedPendingTableId = tableId;
+      pendingReviewFocusRowIndex = null;
+      return true;
+    }
+  }
+  const fallback = stillVisible[0];
+  selectedPendingTableId = fallback?.id || null;
+  pendingReviewFocusRowIndex = null;
+  return Boolean(fallback);
+}
+
+function isPendingRowReviewed(table, rowIndex) {
+  return Boolean(table?.reviewedRows?.[rowIndex]);
+}
+
+function markPendingRowReviewed(table, rowIndex) {
+  if (!table || !table.rows[rowIndex]) return;
+  table.reviewedRows = table.reviewedRows || {};
+  table.reviewedRows[rowIndex] = true;
+}
+
+function getReviewableRowIndexes(table) {
+  if (!table) return [];
+  return table.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => !isUnavailableTicket({ table, row, index }) && !isPendingRowReviewed(table, index))
+    .map(({ index }) => index);
+}
+
+function getNextReviewableRowIndex(table, currentIndex) {
+  const indexes = getReviewableRowIndexes(table);
+  return indexes.find((index) => index > currentIndex) ?? indexes[0] ?? null;
+}
+
+function getNextManualReviewTableAfter(currentTable) {
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
+  const currentIndex = currentTable ? allCurrentPending.findIndex((table) => table.id === currentTable.id) : -1;
+  const riskyTables = allCurrentPending.filter((table) => table.needsManualReview && table.id !== currentTable?.id);
+  if (!riskyTables.length) return null;
+  const laterTable = riskyTables.find((table) => allCurrentPending.findIndex((item) => item.id === table.id) > currentIndex);
+  return laterTable || riskyTables[0] || null;
+}
+
+function focusReviewRow(rowIndex) {
+  if (rowIndex === null || rowIndex === undefined) return;
+  window.requestAnimationFrame(() => {
+    document.querySelector(`[data-review-row-index="${rowIndex}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
+function refreshReviewAfterRowAction(rowIndex) {
+  const table = getSelectedPendingTable();
+  pendingReviewFocusRowIndex = getNextReviewableRowIndex(table, rowIndex);
+  if (pendingReviewFocusRowIndex === null) {
+    const nextTable = getNextManualReviewTableAfter(table);
+    if (nextTable) {
+      manualReviewOnly = true;
+      selectedPendingTableId = nextTable.id;
+      pendingReviewFocusRowIndex = getReviewableRowIndexes(nextTable)[0] ?? getVisibleReviewRowIndexes(nextTable)[0] ?? null;
+      showToast("已跳到下一张需要人工确认的表。", "success");
+    }
+  }
+  renderReviewPanel(pendingReviewFocusRowIndex);
+  window.requestAnimationFrame(() => renderUploadRecords());
+  scheduleAppStateSave();
+}
+
+function cloneReviewState(table) {
+  return {
+    columns: Array.isArray(table.columns) ? [...table.columns] : [],
+    rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
+    originalColumns: Array.isArray(table.originalColumns) ? [...table.originalColumns] : [],
+    originalRows: Array.isArray(table.originalRows) ? cloneRows(table.originalRows) : [],
+    publishRows: { ...(table.publishRows || {}) },
+    reviewedRows: { ...(table.reviewedRows || {}) },
+    userEditedRows: { ...(table.userEditedRows || {}) },
+    aiReviewDecisions: Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions.map((item) => ({ ...item })) : [],
+    aiReviewStatus: table.aiReviewStatus || "",
+    colorReviewSamples: { ...(table.colorReviewSamples || {}) },
+    rowColorSource: table.rowColorSource || "",
+    rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
+    rowColorReliable: Boolean(table.rowColorReliable),
+    rowColorConfirmed: Boolean(table.rowColorConfirmed),
+    rowColorAutoApplied: Boolean(table.rowColorAutoApplied),
+    rowColorAutoSkipCount: Number(table.rowColorAutoSkipCount || 0),
+    rowColorMessage: table.rowColorMessage || "",
+    rowColorSelectionMode: table.rowColorSelectionMode || "",
+    rowColorContiguous: Boolean(table.rowColorContiguous),
+    rowColorMaxGap: Number(table.rowColorMaxGap || 0),
+    rowColorRows: Array.isArray(table.rowColorRows) ? table.rowColorRows.map((item) => ({ ...item })) : [],
+    showOpenCvColorPreview: Boolean(table.showOpenCvColorPreview),
+    showSoldInReview: Boolean(table.showSoldInReview),
+    bulkSkipDraft: Boolean(table.bulkSkipDraft),
+  };
+}
+
+function pushReviewSnapshot(table, label) {
+  if (!table) return;
+  table.reviewSnapshots = Array.isArray(table.reviewSnapshots) ? table.reviewSnapshots : [];
+  table.reviewSnapshots.unshift({
+    id: `review-snapshot-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    label,
+    createdAt: new Date().toLocaleString("zh-CN", { hour12: false }),
+    state: cloneReviewState(table),
+  });
+  table.reviewSnapshots = table.reviewSnapshots.slice(0, 8);
+}
+
+function restoreReviewSnapshot(table, snapshotId) {
+  if (!table) return;
+  const snapshot = (table.reviewSnapshots || []).find((item) => item.id === snapshotId);
+  if (!snapshot?.state) {
+    showToast("没有找到这条历史记录。", "error");
+    return;
+  }
+  pushReviewSnapshot(table, "恢复前自动备份");
+  const state = snapshot.state;
+  table.columns = Array.isArray(state.columns) ? [...state.columns] : [];
+  table.rows = Array.isArray(state.rows) ? state.rows.map((row) => [...row]) : [];
+  table.originalColumns = Array.isArray(state.originalColumns) ? [...state.originalColumns] : [...table.columns];
+  table.originalRows = Array.isArray(state.originalRows) && state.originalRows.length ? cloneRows(state.originalRows) : cloneRows(table.rows);
+  table.publishRows = { ...(state.publishRows || {}) };
+  table.reviewedRows = { ...(state.reviewedRows || {}) };
+  table.userEditedRows = { ...(state.userEditedRows || {}) };
+  table.aiReviewDecisions = Array.isArray(state.aiReviewDecisions) ? state.aiReviewDecisions.map((item) => ({ ...item })) : [];
+  table.aiReviewStatus = `已恢复：${snapshot.label}`;
+  table.colorReviewSamples = { ...(state.colorReviewSamples || {}) };
+  table.rowColorSource = state.rowColorSource || "";
+  table.rowColorLogicVersion = Number(state.rowColorLogicVersion || 0);
+  table.rowColorReliable = Boolean(state.rowColorReliable);
+  table.rowColorConfirmed = Boolean(state.rowColorConfirmed);
+  table.rowColorAutoApplied = Boolean(state.rowColorAutoApplied);
+  table.rowColorAutoSkipCount = Number(state.rowColorAutoSkipCount || 0);
+  table.rowColorMessage = state.rowColorMessage || "";
+  table.rowColorSelectionMode = state.rowColorSelectionMode || "";
+  table.rowColorContiguous = Boolean(state.rowColorContiguous);
+  table.rowColorMaxGap = Number(state.rowColorMaxGap || 0);
+  table.rowColorRows = Array.isArray(state.rowColorRows) ? state.rowColorRows.map((item) => ({ ...item })) : [];
+  table.showOpenCvColorPreview = Boolean(state.showOpenCvColorPreview);
+  table.showSoldInReview = Boolean(state.showSoldInReview);
+  table.bulkSkipDraft = Boolean(state.bulkSkipDraft);
+  updatePendingTableReviewFlags(table);
+  renderUploadRecords();
+  renderReviewPanel();
+  scheduleAppStateSave();
+  showToast("已恢复到历史记录。", "success");
+}
+
+function toggleShowSkippedReviewRows(table) {
+  if (!table) return;
+  table.showSoldInReview = !table.showSoldInReview;
+  renderReviewPanel();
+}
+
+function setColorReviewSample(table, rowIndex, sampleType) {
+  if (!table || !table.rows[rowIndex]) return;
+  table.colorReviewSamples = table.colorReviewSamples || {};
+  if (sampleType === "sold") table.colorReviewSamples.soldRow = rowIndex;
+  if (sampleType === "available") table.colorReviewSamples.availableRow = rowIndex;
+  renderReviewPanel(rowIndex);
+  scheduleAppStateSave();
+  showToast(sampleType === "sold" ? "已设置已售颜色样本。" : "已设置未售颜色样本。", "success");
+}
+
+function getReviewEditKey(table, rowIndex) {
+  return `${table?.id || "table"}:${rowIndex}`;
+}
+
+function isReviewRowEditing(table, rowIndex) {
+  return editingReviewRows.has(getReviewEditKey(table, rowIndex));
+}
+
+function startReviewRowEdit(table, rowIndex) {
+  if (!table || !table.rows[rowIndex]) return;
+  editingReviewRows.add(getReviewEditKey(table, rowIndex));
+  renderReviewPanel(rowIndex);
+}
+
+function cancelReviewRowEdit(table, rowIndex) {
+  editingReviewRows.delete(getReviewEditKey(table, rowIndex));
+  renderReviewPanel(rowIndex);
+}
+
+function saveReviewRowPrice(table, rowIndex, value) {
+  if (!table || !table.rows[rowIndex]) return;
+  const price = String(value || "").trim();
+  if (!extractNumber(price)) {
+    showToast("请填写有效售价，例如 4800。", "error");
+    return;
+  }
+  const priceIndex = ensureSalePriceColumn(table);
+  while (table.rows[rowIndex].length < table.columns.length) table.rows[rowIndex].push("");
+  table.rows[rowIndex][priceIndex] = price;
+  syncOriginalRowValue(table, rowIndex, priceIndex, price, { appendMissing: true });
+  table.publishRows = table.publishRows || {};
+  table.publishRows[rowIndex] = true;
+  table.userEditedRows = table.userEditedRows || {};
+  table.userEditedRows[rowIndex] = true;
+  updatePendingTableReviewFlags(table);
+  markPendingRowReviewed(table, rowIndex);
+  refreshReviewAfterRowAction(rowIndex);
+  showToast("售价已保存，并设为可发布。", "success");
+}
+
+function applyReviewDateToTable(table, value) {
+  if (!table) return;
+  const date = String(value || "").trim();
+  if (!date) {
+    showToast("请填写日期，例如 9.12 或 2026-09-12。", "error");
+    return;
+  }
+  const dateIndex = ensureDateColumn(table);
+  let changedRows = 0;
+  table.rows.forEach((row, rowIndex) => {
+    while (row.length < table.columns.length) row.push("");
+    if (!String(row[dateIndex] || "").trim()) {
+      row[dateIndex] = date;
+      syncOriginalRowValue(table, rowIndex, dateIndex, date, { appendMissing: true });
+      table.userEditedRows = table.userEditedRows || {};
+      table.userEditedRows[rowIndex] = true;
+      changedRows += 1;
+    }
+  });
+  if (!changedRows) {
+    showToast("这张表的票源已经都有日期。", "error");
+    return;
+  }
+  updatePendingTableReviewFlags(table);
+  renderUploadRecords();
+  renderReviewPanel();
+  scheduleAppStateSave();
+  showToast(`已给 ${changedRows} 条票补上日期。`, "success");
+}
+
+function saveReviewRowEdits(table, rowIndex, card) {
+  if (!table || !table.rows[rowIndex] || !card) return;
+  const inputs = [...card.querySelectorAll("[data-review-edit-input]")];
+  if (!inputs.length) return;
+  const nextRow = [...table.rows[rowIndex]];
+  inputs.forEach((input) => {
+    const columnIndex = Number(input.dataset.reviewEditInput);
+    if (!Number.isInteger(columnIndex)) return;
+    nextRow[columnIndex] = input.value.trim();
+    syncOriginalRowValueByPosition(table, rowIndex, columnIndex, nextRow[columnIndex], { appendMissing: true });
+  });
+  while (nextRow.length < table.columns.length) nextRow.push("");
+  moveBusinessStatusMarkersToRemark(table, nextRow);
+  syncOriginalRowFromCurrentRow(table, rowIndex, nextRow);
+  table.rows[rowIndex] = nextRow;
+  table.userEditedRows = table.userEditedRows || {};
+  table.userEditedRows[rowIndex] = true;
+  table.publishRows = table.publishRows || {};
+  if (table.publishRows[rowIndex] === undefined) {
+    table.publishRows[rowIndex] = isCustomerPublishableTicket({ table, row: table.rows[rowIndex], index: rowIndex });
+  }
+  editingReviewRows.delete(getReviewEditKey(table, rowIndex));
+  updatePendingTableReviewFlags(table);
+  markPendingRowReviewed(table, rowIndex);
+  refreshReviewAfterRowAction(rowIndex);
+  showToast("票源信息已修改。", "success");
+}
+
+function ensureStatusColumn(table) {
+  let statusIndex = findColumnIndex(table.columns, ["状态", "售卖状态", "销售状态", "status"]);
+  if (statusIndex >= 0) return statusIndex;
+  table.columns.push("状态");
+  statusIndex = table.columns.length - 1;
+  table.rows.forEach((row) => {
+    while (row.length < table.columns.length) row.push("");
+  });
+  return statusIndex;
+}
+
+function togglePendingRowSold(table, rowIndex) {
+  if (!table || !table.rows[rowIndex]) return;
+  const statusIndex = ensureStatusColumn(table);
+  const ticket = { table, row: table.rows[rowIndex], index: rowIndex };
+  table.rows[rowIndex][statusIndex] = isSoldTicket(ticket) ? "" : "已售";
+  syncOriginalRowValue(table, rowIndex, statusIndex, table.rows[rowIndex][statusIndex], { appendMissing: true });
+  table.userEditedRows = table.userEditedRows || {};
+  table.userEditedRows[rowIndex] = true;
+  table.publishRows = table.publishRows || {};
+  const nextTicket = { table, row: table.rows[rowIndex], index: rowIndex };
+  table.publishRows[rowIndex] = isCustomerPublishableTicket(nextTicket);
+  markPendingRowReviewed(table, rowIndex);
+  updatePendingTableReviewFlags(table);
+  refreshReviewAfterRowAction(rowIndex);
+}
+
+function clearSoldMarkersFromRow(table, rowIndex) {
+  if (!table || !table.rows[rowIndex]) return;
+  table.rows[rowIndex].forEach((value, columnIndex) => {
+    if (!isSoldText(value, { strict: true })) return;
+    table.rows[rowIndex][columnIndex] = "";
+    syncOriginalRowValue(table, rowIndex, columnIndex, "");
+  });
+  const statusIndex = findColumnIndex(table.columns, ["状态", "售卖状态", "销售状态", "status"]);
+  if (statusIndex >= 0 && isSoldText(table.rows[rowIndex][statusIndex], { strict: true })) {
+    table.rows[rowIndex][statusIndex] = "";
+    syncOriginalRowValue(table, rowIndex, statusIndex, "");
+  }
+  const noteIndex = findColumnIndex(table.columns, ["备注", "remark", "note"]);
+  if (noteIndex >= 0 && isSoldText(table.rows[rowIndex][noteIndex], { strict: false })) {
+    table.rows[rowIndex][noteIndex] = "";
+    syncOriginalRowValue(table, rowIndex, noteIndex, "");
+  }
+}
+
+function clearColorMarkerFromRow(table, rowIndex) {
+  if (!table || !table.rows[rowIndex]) return;
+  const colorIndex = getRowColorColumnIndex(table);
+  if (colorIndex >= 0 && normalizeRowColorLabel(table.rows[rowIndex][colorIndex])) {
+    table.rows[rowIndex][colorIndex] = "";
+    syncOriginalRowValue(table, rowIndex, colorIndex, "");
+  }
+  if (Array.isArray(table.rowColorRows) && table.rowColorRows[rowIndex]) {
+    table.rowColorRows[rowIndex].userCleared = true;
+  }
+}
+
+function clearUnavailableMarkersFromRow(table, rowIndex) {
+  clearSoldMarkersFromRow(table, rowIndex);
+  clearColorMarkerFromRow(table, rowIndex);
+}
+
+function shouldPublishPendingRow(table, rowIndex) {
+  if (!table || !table.rows[rowIndex]) return false;
+  const ticket = { table, row: table.rows[rowIndex], index: rowIndex };
+  if (isUnavailableTicket(ticket)) return false;
+  if (!table.publishRows || table.publishRows[rowIndex] === undefined) {
+    return isCustomerPublishableTicket(ticket);
+  }
+  return table.publishRows[rowIndex] !== false;
+}
+
+function togglePendingRowPublish(table, rowIndex) {
+  if (!table || !table.rows[rowIndex]) return;
+  table.publishRows = table.publishRows || {};
+  const nextPublish = !shouldPublishPendingRow(table, rowIndex);
+  if (nextPublish) clearUnavailableMarkersFromRow(table, rowIndex);
+  table.publishRows[rowIndex] = nextPublish;
+  table.userEditedRows = table.userEditedRows || {};
+  table.userEditedRows[rowIndex] = true;
+  markPendingRowReviewed(table, rowIndex);
+  updatePendingTableReviewFlags(table);
+  renderUploadRecords();
+  renderReviewPanel(rowIndex);
+  scheduleAppStateSave();
+}
+
+function setPendingRowPublish(table, rowIndex, shouldPublish) {
+  if (!table || !table.rows[rowIndex]) return;
+  if (shouldPublish) clearUnavailableMarkersFromRow(table, rowIndex);
+  table.publishRows = table.publishRows || {};
+  table.publishRows[rowIndex] = Boolean(shouldPublish);
+  table.userEditedRows = table.userEditedRows || {};
+  table.userEditedRows[rowIndex] = true;
+  markPendingRowReviewed(table, rowIndex);
+  updatePendingTableReviewFlags(table);
+  renderUploadRecords();
+  renderReviewPanel(rowIndex);
+  scheduleAppStateSave();
+}
+
+function setPendingRowPublishDraft(table, rowIndex, shouldPublish) {
+  if (!table || !table.rows[rowIndex]) return;
+  table.publishRows = table.publishRows || {};
+  table.publishRows[rowIndex] = Boolean(shouldPublish);
+  renderReviewPanel(rowIndex);
+  scheduleAppStateSave();
+}
+
+function getVisibleReviewRowIndexes(table) {
+  if (!table) return [];
+  return table.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => !isUnavailableTicket({ table, row, index }))
+    .map(({ index }) => index);
+}
+
+function markAllReviewRowsSkipDraft(table) {
+  const rowIndexes = getVisibleReviewRowIndexes(table);
+  if (!table || !rowIndexes.length) {
+    showToast("当前没有可批量设置的票。", "error");
+    return;
+  }
+  pushReviewSnapshot(table, "全部改为不发布前");
+  table.publishRows = table.publishRows || {};
+  rowIndexes.forEach((rowIndex) => {
+    table.publishRows[rowIndex] = false;
+  });
+  table.bulkSkipDraft = true;
+  table.aiReviewStatus = `已把 ${rowIndexes.length} 条候选票全部改为“不发布”。你可以把少数可上架的票反选成“发布到前台”，最后点右上角“确认并发布”。`;
+  renderReviewPanel(rowIndexes[0]);
+  scheduleAppStateSave();
+  showToast("已全部改为不发布，可反选少量上架。", "success");
+}
+
+function createPublishedTableFromRows(table, rows, suffix = "") {
+  ensureOriginalTableSnapshot(table);
+  const sourceIndexes = rows.map((row) => table.rows.findIndex((candidate) => candidate === row));
+  const originalRows = rows.map((row, index) => {
+    const sourceIndex = sourceIndexes[index];
+    return [...(sourceIndex >= 0 && table.originalRows?.[sourceIndex] ? table.originalRows[sourceIndex] : row)];
+  });
+  const rowColorRows = sourceIndexes
+    .map((sourceIndex) => (sourceIndex >= 0 && Array.isArray(table.rowColorRows) && table.rowColorRows[sourceIndex] ? { ...table.rowColorRows[sourceIndex] } : null))
+    .filter(Boolean);
+  return {
+    ...table,
+    id: `${table.id}-published-${Date.now()}${suffix}`,
+    title: suffix ? `${table.title} · 已发布${suffix}` : table.title,
+    rows: rows.map((row) => [...row]),
+    originalColumns: Array.isArray(table.originalColumns) ? [...table.originalColumns] : [...(table.columns || [])],
+    originalRows,
+    publishRows: {},
+    reviewedRows: {},
+    userEditedRows: {},
+    aiReviewDecisions: [],
+    rowColorRows: rowColorRows.length === rows.length ? rowColorRows : [],
+    rowColorReliable: rowColorRows.length === rows.length ? table.rowColorReliable : false,
+    rowColorConfirmed: rowColorRows.length === rows.length ? table.rowColorConfirmed : false,
+    rowColorAutoApplied: rowColorRows.length === rows.length ? table.rowColorAutoApplied : false,
+    needsManualReview: false,
+    reviewReasons: [],
+  };
+}
+
+function keepPendingRows(table, rows) {
+  ensureOriginalTableSnapshot(table);
+  const previousRows = table.rows || [];
+  const previousOriginalRows = table.originalRows || [];
+  const previousPublishRows = { ...(table.publishRows || {}) };
+  const previousReviewedRows = { ...(table.reviewedRows || {}) };
+  const previousUserEditedRows = { ...(table.userEditedRows || {}) };
+  const previousRowColorRows = Array.isArray(table.rowColorRows) ? table.rowColorRows : [];
+  const nextPublishRows = {};
+  const nextReviewedRows = {};
+  const nextUserEditedRows = {};
+  const nextRowColorRows = [];
+  const originalRows = rows.map((row, nextIndex) => {
+    const sourceIndex = previousRows.findIndex((candidate) => candidate === row);
+    if (sourceIndex >= 0) {
+      if (previousPublishRows[sourceIndex] !== undefined) nextPublishRows[nextIndex] = previousPublishRows[sourceIndex];
+      if (previousReviewedRows[sourceIndex] !== undefined) nextReviewedRows[nextIndex] = previousReviewedRows[sourceIndex];
+      if (previousUserEditedRows[sourceIndex] !== undefined) nextUserEditedRows[nextIndex] = previousUserEditedRows[sourceIndex];
+      if (previousRowColorRows[sourceIndex]) nextRowColorRows[nextIndex] = { ...previousRowColorRows[sourceIndex] };
+    }
+    return [...(sourceIndex >= 0 && previousOriginalRows?.[sourceIndex] ? previousOriginalRows[sourceIndex] : row)];
+  });
+  table.rows = rows.map((row) => [...row]);
+  table.originalRows = originalRows;
+  table.publishRows = nextPublishRows;
+  table.reviewedRows = nextReviewedRows;
+  table.userEditedRows = nextUserEditedRows;
+  if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
+  table.aiReviewDecisions = [];
+  table.bulkSkipDraft = false;
+  updatePendingTableReviewFlags(table);
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function getReviewSourceDataUrl(table) {
+  const source = table?.originalImage || "";
+  if (source.startsWith("data:")) return source;
+  if (!source) return "";
+  const response = await fetch(source);
+  if (!response.ok) throw new Error("原图/PDF 无法读取，请重新上传文件后再试。");
+  return blobToDataUrl(await response.blob());
+}
+
+function getRowColorStartIndexForPendingTable(table) {
+  const sourcePage = Number(table?.sourcePage || 0);
+  const sourcePart = Number(table?.sourcePart || 0);
+  if (!sourcePage || sourcePart <= 1) return 0;
+  return pendingTables
+    .filter(
+      (item) =>
+        item !== table &&
+        item.eventId === table.eventId &&
+        item.originalImage === table.originalImage &&
+        Number(item.sourcePage || 0) === sourcePage &&
+        Number(item.sourcePart || 0) > 0 &&
+        Number(item.sourcePart || 0) < sourcePart,
+    )
+    .reduce((count, item) => count + (Array.isArray(item.rows) ? item.rows.length : 0), 0);
+}
+
+function shouldAutoRepairRowColors(table) {
+  return false;
+  if (!table || !Array.isArray(table.rows) || !table.rows.length) return false;
+  if (table._rowColorRepairing || table._rowColorRepairDone || table._rowColorRepairTried) return false;
+  if (isVisualRowColorSource(table) && Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION) return false;
+  if (!isPdfTableSource(table) && !String(table.originalType || "").startsWith("image/")) return false;
+  if (!table.originalImage) return false;
+  return true;
+}
+
+function getRowColorExpectedRowsForPendingTable(table) {
+  const sourcePage = Number(table?.sourcePage || 0);
+  if (!sourcePage) return table?.rows?.length || 0;
+  const relatedTables = pendingTables.filter(
+    (item) =>
+      item.eventId === table.eventId &&
+      item.originalImage === table.originalImage &&
+      Number(item.sourcePage || 0) === sourcePage,
+  );
+  const total = relatedTables.reduce((count, item) => count + (Array.isArray(item.rows) ? item.rows.length : 0), 0);
+  return total || table.rows.length;
+}
+
+async function repairPendingTableRowColors(table) {
+  if (!shouldAutoRepairRowColors(table)) return false;
+  table._rowColorRepairing = true;
+  table._rowColorRepairTried = true;
+  table.rowColorMessage = "正在用像素逐行检测原图行底色...";
+  renderUploadRecords();
+  try {
+    const source = String(table.originalImage || "");
+    const sourcePayload = source.startsWith("uploads/") ? { sourceUrl: source } : { image: await getReviewSourceDataUrl(table) };
+    let response = await fetch("/api/tables/analyze-row-colors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...sourcePayload,
+        sourcePage: table.sourcePage || 1,
+        expectedRows: getRowColorExpectedRowsForPendingTable(table),
+      }),
+    });
+    let result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      table.rowColorMessage = "像素行底色检测不可用，正在用 AI 逐行兜底...";
+      response = await fetch("/api/tables/analyze-row-colors-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...sourcePayload,
+          sourcePage: table.sourcePage || 1,
+          columns: table.columns,
+          rows: table.rows,
+        }),
+      });
+      result = await response.json().catch(() => ({}));
+    }
+    if (!response.ok) throw new Error(result.message || result.error || "行底色重新检测失败。");
+    const analysis = result.rowColorAnalysis;
+    if (!analysis) throw new Error("行底色重新检测没有返回结果。");
+    applyOpenCvRowColorsToTable(table, analysis, analysis.source === "ai_row_color" ? 0 : getRowColorStartIndexForPendingTable(table));
+    table._rowColorRepairDone = true;
+    table._rowColorRepairError = "";
+    updatePendingTableReviewFlags(table);
+    renderUploadRecords();
+    renderReviewPanel();
+    return true;
+  } catch (error) {
+    table._rowColorRepairError = error.message || "行底色重新检测失败。";
+    table.rowColorMessage = table._rowColorRepairError;
+    showToast(table._rowColorRepairError, "error");
+    renderUploadRecords();
+    renderReviewPanel();
+    return false;
+  } finally {
+    table._rowColorRepairing = false;
+  }
+}
+
+async function requestReviewAiAssist(table, instruction) {
+  if (!table || reviewAiBusy) return;
+  reviewAiBusy = true;
+  table.aiReviewInstruction = instruction;
+  table.aiReviewStatus = "AI 正在看原图并生成建议...";
+  renderReviewPanel();
+  try {
+    const source = await getReviewSourceDataUrl(table);
+    const samples = table.colorReviewSamples || {};
+    const sampleLines = [];
+    if (Number.isInteger(samples.soldRow) && table.rows[samples.soldRow]) {
+      sampleLines.push(`人工颜色样本：第 ${samples.soldRow + 1} 条票这一整行的底色/样式 = 已售/不发布样本。该样本优先级最高，请用它对比其它行的底色，不要把不同底色行误判成已售。样本行数据：${JSON.stringify(table.rows[samples.soldRow])}`);
+    }
+    if (Number.isInteger(samples.availableRow) && table.rows[samples.availableRow]) {
+      sampleLines.push(`人工颜色样本：第 ${samples.availableRow + 1} 条票这一整行的底色/样式 = 未售/可发布样本。该样本优先级最高，和它相同或接近的白底/浅底行应发布。样本行数据：${JSON.stringify(table.rows[samples.availableRow])}`);
+    }
+    const assistedInstruction = [instruction, ...sampleLines].filter(Boolean).join("\n");
+    const response = await fetch("/api/tables/review-assist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source,
+        sourcePage: table.sourcePage || 1,
+        columns: table.columns,
+        rows: table.rows,
+        instruction: assistedInstruction,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || payload.error || "AI 辅助校对失败。");
+    table.aiReviewDecisions = Array.isArray(payload.decisions) ? payload.decisions : [];
+    table.aiReviewStatus = table.aiReviewDecisions.length
+      ? `AI 已生成 ${table.aiReviewDecisions.length} 条建议，请核对后再点“应用 AI 建议”。`
+      : "AI 没有返回可用建议，请换一种规则描述再试。";
+    showToast(table.aiReviewStatus, table.aiReviewDecisions.length ? "success" : "error");
+  } catch (error) {
+    table.aiReviewStatus = error.message || "AI 辅助校对失败。";
+    showToast(table.aiReviewStatus, "error");
+  } finally {
+    reviewAiBusy = false;
+    renderReviewPanel();
+    scheduleAppStateSave();
+  }
+}
+
+function applyReviewAiSuggestions(table) {
+  if (!table?.aiReviewDecisions?.length) {
+    showToast("当前没有 AI 建议可以应用。", "error");
+    return;
+  }
+  pushReviewSnapshot(table, `应用 AI 建议前：${table.aiReviewInstruction || "未填写规则"}`);
+  table.publishRows = table.publishRows || {};
+  let publishCount = 0;
+  let skipCount = 0;
+  table.aiReviewDecisions.forEach((decision) => {
+    const rowIndex = Number(decision.row) - 1;
+    if (!table.rows[rowIndex]) return;
+    const ticket = { table, row: table.rows[rowIndex], index: rowIndex };
+    const shouldPublish =
+      decision.action === "publish" &&
+      !/已售|疑似|下架|复核/.test(String(decision.status || "")) &&
+      isCustomerPublishableTicket(ticket);
+    table.publishRows[rowIndex] = shouldPublish;
+    if (shouldPublish) publishCount += 1;
+    else skipCount += 1;
+  });
+  table.aiReviewStatus = `AI 建议已应用：${publishCount} 条设为发布，${skipCount} 条设为不发布。已自动保存历史，可随时恢复；所有票仍保留在校对列表里。`;
+  updatePendingTableReviewFlags(table);
+  pendingReviewFocusRowIndex = getVisibleReviewRowIndexes(table)[0] ?? null;
+  renderUploadRecords();
+  renderReviewPanel(pendingReviewFocusRowIndex);
+  scheduleAppStateSave();
+  showToast("已应用 AI 建议。", "success");
+}
+
+function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
   const table = getSelectedPendingTable();
   if (!table || table.eventId !== currentEvent.id) {
     reviewTitle.textContent = "选择一张待确认表";
@@ -2012,22 +7665,303 @@ function renderReviewPanel() {
     return;
   }
 
-  reviewTitle.textContent = table.title;
+  reviewTitle.textContent = shortenFileName(table.title || "新上传票源", 36);
+  reviewTitle.title = table.title || "";
   confirmReviewButton.disabled = false;
-  const headers = table.columns.map((column) => `<span>${column}</span>`).join("");
-  const rows = table.rows
-    .map((row) => `<div class="recognized-row">${table.columns.map((_, index) => `<span>${row[index] || ""}</span>`).join("")}</div>`)
+  ensurePendingTableReviewFlags(table);
+  if (shouldAutoRepairRowColors(table)) {
+    repairPendingTableRowColors(table);
+  }
+  if (table._columnRepairChanged) {
+    delete table._columnRepairChanged;
+  }
+  const navigation = getReviewTableNavigation(table);
+  const navigationLabel =
+    navigation.index >= 0
+      ? `当前第 ${navigation.index + 1}/${navigation.queue.length} 张${manualReviewOnly ? "需人工确认" : "待确认"}表`
+      : `当前表不在${manualReviewOnly ? "需人工确认" : "待确认"}队列里`;
+  table.publishRows = table.publishRows || {};
+  table.rows.forEach((row, rowIndex) => {
+    if (table.publishRows[rowIndex] === undefined) {
+      const ticket = { table, row, index: rowIndex };
+      table.publishRows[rowIndex] = isCustomerPublishableTicket(ticket);
+    }
+  });
+  const skippedSoldRows = table.rows.filter((row, rowIndex) => isUnavailableTicket({ table, row, index: rowIndex })).length;
+  const aiDecisions = Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions : [];
+  const aiDecisionByRow = new Map(aiDecisions.map((item) => [Number(item.row), item]));
+  const snapshots = Array.isArray(table.reviewSnapshots) ? table.reviewSnapshots : [];
+  const colorSamples = table.colorReviewSamples || {};
+  const sampleText = [
+    Number.isInteger(colorSamples.soldRow) ? `已售样本：第 ${colorSamples.soldRow + 1} 条` : "已售样本：未设置",
+    Number.isInteger(colorSamples.availableRow) ? `未售样本：第 ${colorSamples.availableRow + 1} 条` : "未售样本：未设置",
+  ].join(" / ");
+  const hasColorPreview = hasOpenCvRowColorPreview(table);
+  const openCvConflict = hasColorPreview && hasOpenCvWhiteAndColoredConflict(table);
+  const openCvLabels = hasColorPreview ? getOpenCvNonSoldColorLabels(table) : [];
+  const rowColorEngineName = getRowColorEngineName(table);
+  const rowColorStatusText =
+    isVisualRowColorSource(table)
+      ? table.rowColorReliable
+        ? table.rowColorMessage || `${rowColorEngineName} 已匹配本表行底色`
+        : openCvConflict
+          ? table.rowColorMessage || `${rowColorEngineName} 检测到颜色冲突，需人工确认原图颜色`
+          : openCvLabels.length
+            ? `${rowColorEngineName} 已识别 ${table.rowColorRows.length}/${table.rows.length} 行底色，未发现颜色冲突`
+            : `${rowColorEngineName} 未识别到会影响上架的颜色冲突`
+      : "";
+  const colorEngineHint = hasTrustedRowColorSource(table)
+    ? openCvConflict
+      ? `${rowColorEngineName} 已启用：未 sold 票里白底和其他底色并存，非白底会自动下架。`
+      : `${rowColorEngineName} 已启用：未 sold 票没有白底+其他底色冲突，不会因为颜色下架。`
+    : openCvConflict
+      ? "检测到颜色冲突，但当前未自动使用；请查看识别颜色，确认原图无误后再使用。"
+      : "未发现白底+其他底色冲突，不会因为颜色进入人工审核。";
+  const openCvPreviewRows =
+    hasColorPreview && table.showOpenCvColorPreview
+      ? table.rows
+          .map((row, index) => {
+            const item = table.rowColorRows[index] || {};
+            const label = normalizeRowColorLabel(item.label) || normalizeRowColorLabel(item.rawLabel) || "未识别";
+            const confidence = Math.round(Number(item.confidence || 0) * 100);
+            const whiteRatio = Math.round(Number(item.whiteRatio || 0) * 100);
+            const coloredRatio = Math.round(Number(item.coloredRatio || 0) * 100);
+            const coverageRatio = Math.round(Number(item.coverageRatio || 0) * 100);
+            const decision = getOpenCvColorDecisionText(table, index);
+            return `
+              <span class="opencv-color-row ${decision.includes("下架") || decision.includes("已售") ? "skip" : "keep"}">
+                <b>第 ${index + 1} 行</b>
+                <em>${escapeHtml(label)} · ${escapeHtml(decision)}</em>
+                <small>可信度 ${confidence}% / 白 ${whiteRatio}% / 色 ${coloredRatio}% / 覆盖 ${coverageRatio}%</small>
+              </span>
+            `;
+          })
+          .join("")
+      : "";
+  const dateColumnIndex = findColumnIndex(table.columns, ["日期", "演出日期", "date", "day", "일자"]);
+  const missingDateCount =
+    dateColumnIndex < 0
+      ? table.rows.length
+      : table.rows.filter((row, rowIndex) => !isUnavailableTicket({ table, row, index: rowIndex }) && !String(row[dateColumnIndex] || "").trim()).length;
+  const reviewRows = table.rows
+    .map((row, rowIndex) => ({ row, rowIndex }))
+    .filter(({ row, rowIndex }) => table.showSoldInReview || !isUnavailableTicket({ table, row, index: rowIndex }));
+  const reviewZoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
+  const rows = reviewRows
+    .map(({ row, rowIndex }) => {
+      const shouldPublish = shouldPublishPendingRow(table, rowIndex);
+      const aiDecision = aiDecisionByRow.get(rowIndex + 1);
+      const missingPrice = !hasTicketSalePrice({ table, row, index: rowIndex });
+      const soldLike = isSoldTicket({ table, row, index: rowIndex });
+      const colorHeld = !soldLike && isColorHeldForReviewTicket({ table, row, index: rowIndex });
+      const zoneUnmatched =
+        !soldLike &&
+        currentEvent.zones.length > 0 &&
+        !currentEvent.zones.some((zone) => zoneMatchesTicket({ table, row, index: rowIndex }, zone));
+      const editing = isReviewRowEditing(table, rowIndex);
+      const fields = getOriginalTicketFields({ table, row, index: rowIndex }, { preserveOriginal: false })
+        .map(
+          (field) => `
+            <span class="review-ticket-field">
+              <em>${escapeHtml(field.label)}</em>
+              <strong>${escapeHtml(field.value)}</strong>
+            </span>
+          `,
+        )
+        .join("");
+      const editFields = table.columns
+        .map((column, index) => ({ column, index }))
+        .filter((field) => !isInternalColorColumn(field.column))
+        .map(
+          (field) => `
+            <label class="review-edit-field">
+              <span>${escapeHtml(field.column)}</span>
+              <input type="text" value="${escapeHtml(row[field.index] || "")}" data-review-edit-input="${field.index}" />
+            </label>
+          `,
+        )
+        .join("");
+      const priceEditor = missingPrice
+        ? `<div class="review-price-editor">
+            <label>
+              <span>补售价</span>
+              <input type="text" placeholder="例如 4800" data-review-price-input="${rowIndex}" />
+            </label>
+            <button class="small-button" type="button" data-save-review-price="${rowIndex}">保存价格</button>
+          </div>`
+        : "";
+      return `
+        <article class="review-ticket-card ${soldLike ? "sold-row" : ""} ${colorHeld ? "color-review-row" : ""} ${missingPrice ? "missing-price" : ""}" data-review-row-index="${rowIndex}">
+          <div class="review-ticket-top">
+            <strong>第 ${rowIndex + 1} 条票</strong>
+            <span class="${shouldPublish ? "review-ticket-status upload" : "review-ticket-status skip"}">${soldLike ? "已售" : colorHeld ? "颜色标色下架" : shouldPublish ? "会发布到客户前台" : "不会发布"}</span>
+          </div>
+          ${missingPrice ? `<div class="review-ticket-warning">缺少售价：请对照左侧原图补上售价，保存后再决定是否发布。</div>${priceEditor}` : ""}
+          ${zoneUnmatched ? `<div class="review-ticket-warning">区域未匹配座位图热区：请检查“区域”是否识别错字，或到座位图热区里补这个区。</div>` : ""}
+          ${
+            aiDecision
+              ? `<div class="ai-suggestion ${aiDecision.action === "publish" ? "publish" : "skip"}">
+                  <strong>AI 建议：${aiDecision.action === "publish" ? "发布" : "不发布"}</strong>
+                  <span>${escapeHtml(aiDecision.status || "")}${aiDecision.reason ? ` · ${escapeHtml(aiDecision.reason)}` : ""}</span>
+                </div>`
+              : ""
+          }
+          <div class="review-ticket-fields">
+            ${fields || `<span class="review-ticket-empty">这一行没有识别到有效内容</span>`}
+          </div>
+          ${
+            editing
+              ? `<div class="review-edit-panel">
+                  <div class="review-edit-grid">${editFields}</div>
+                  <div class="review-edit-actions">
+                    <button class="small-button" type="button" data-save-review-row="${rowIndex}">保存修改</button>
+                    <button class="small-button ghost" type="button" data-cancel-review-row="${rowIndex}">取消</button>
+                  </div>
+                </div>`
+              : ""
+          }
+          <div class="review-ticket-actions">
+            <div class="publish-choice" role="group" aria-label="是否发布到前台">
+              <button class="choice-button ${shouldPublish ? "active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="true">发布到前台</button>
+              <button class="choice-button ${!shouldPublish ? "danger active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="false">不发布</button>
+            </div>
+            <button class="row-action-button" type="button" data-edit-review-row="${rowIndex}">${editing ? "正在修改" : "修改"}</button>
+            <button class="row-action-button" type="button" data-toggle-row-sold="${rowIndex}">标已售</button>
+            <button class="row-action-button sample ${colorSamples.soldRow === rowIndex ? "active" : ""}" type="button" data-color-sample-row="${rowIndex}" data-color-sample-type="sold">设为已售样本</button>
+            <button class="row-action-button sample ${colorSamples.availableRow === rowIndex ? "active" : ""}" type="button" data-color-sample-row="${rowIndex}" data-color-sample-type="available">设为未售样本</button>
+          </div>
+        </article>
+      `;
+    })
     .join("");
+  const source = table.originalImage || "";
+  const isPdf = isPdfTableSource(table);
+  const page = Number(table.sourcePage || 0);
+  const sourceUrl = isPdf && page > 0 ? `${source.split("#")[0]}#page=${page}` : source;
   reviewLayout.innerHTML = `
-    <button class="source-preview source-preview-button" type="button" data-review-source="${table.id}">
-      <span>原始图片/PDF 页面</span>
-      <strong>${table.sourceName}</strong>
-    </button>
-    <div class="recognized-table">
-      <div class="recognized-head">${headers}</div>
-      ${rows}
+    ${
+      table.needsManualReview
+        ? `<div class="manual-review-note"><strong>需人工确认</strong><span>${escapeHtml((table.reviewReasons || []).join(" / "))}</span></div>`
+        : `<div class="manual-review-note ok"><strong>标准识别</strong><span>关键字段完整，仍建议发布前快速看一眼原始图。</span></div>`
+    }
+    <div class="review-source-panel">
+      <div class="review-source-head">
+        <span>原始图片/PDF 页面</span>
+        <button class="small-button ghost" type="button" data-review-source="${table.id}">放大查看</button>
+      </div>
+      <strong>${escapeHtml(getTableSourceSummary(table))}</strong>
+      ${
+        isPdf
+          ? `<iframe class="review-source-frame" src="${sourceUrl}" title="${escapeHtml(getTableSourceSummary(table))}"></iframe>`
+          : `<img class="review-source-image" src="${sourceUrl}" alt="${escapeHtml(getTableSourceSummary(table))}" />`
+      }
+    </div>
+    <div class="review-ticket-list">
+      <div class="review-ticket-list-head">
+        <div>
+          <strong>逐票确认</strong>
+          <span>${skippedSoldRows ? `已自动跳过 ${skippedSoldRows} 条已售/颜色下架票源；` : ""}修改和发布状态会先保留，最后点“确认并发布”。</span>
+        </div>
+        <div class="review-bulk-actions">
+          ${
+            skippedSoldRows
+              ? `<button class="small-button ghost" type="button" data-toggle-skipped-review>${table.showSoldInReview ? "隐藏已跳过票源" : `显示已跳过票源 ${skippedSoldRows} 条`}</button>`
+              : ""
+          }
+          <button class="small-button ghost danger" type="button" data-mark-all-skip-draft>全部改为不发布</button>
+        </div>
+      </div>
+      <div class="review-table-nav">
+        <button class="small-button ghost" type="button" data-review-table-nav="prev" ${navigation.previous ? "" : "disabled"}>上一页</button>
+        <span>${escapeHtml(navigationLabel)}</span>
+        <button class="small-button ghost" type="button" data-review-table-nav="next" ${navigation.next ? "" : "disabled"}>下一页</button>
+      </div>
+      ${
+        missingDateCount
+          ? `<div class="review-quick-tools">
+              <label>
+                <span>批量补日期</span>
+                <input type="text" data-review-date-input placeholder="例如 9.12 或 2026-09-12" />
+              </label>
+              <button class="small-button" type="button" data-apply-review-date>给空日期一键补上</button>
+              <em>只补 ${missingDateCount} 条空日期，不覆盖已有日期。</em>
+            </div>`
+          : ""
+      }
+      ${
+        snapshots.length
+          ? `<div class="review-history-panel">
+              <strong>校对历史</strong>
+              <div class="review-history-actions">
+                ${snapshots
+                  .slice(0, 4)
+                  .map(
+                    (snapshot) => `
+                      <button class="small-button ghost" type="button" data-restore-review-snapshot="${snapshot.id}">
+                        恢复：${escapeHtml(snapshot.label)} · ${escapeHtml(snapshot.createdAt)}
+                      </button>
+                    `,
+                  )
+                  .join("")}
+              </div>
+            </div>`
+          : ""
+      }
+      ${
+        rowColorStatusText
+          ? `<div class="review-sample-panel color-engine-status">
+              <div>
+                <strong>颜色检测</strong>
+                <span>${escapeHtml(rowColorStatusText)}</span>
+                <em>${escapeHtml(colorEngineHint)}${openCvLabels.length ? ` 未 sold 候选底色：${escapeHtml(openCvLabels.join(" / "))}` : ""}</em>
+              </div>
+              ${
+                hasColorPreview
+                  ? `<div class="review-color-actions">
+                      <button class="small-button ghost" type="button" data-toggle-opencv-colors>
+                        ${table.showOpenCvColorPreview ? "隐藏识别颜色" : "查看识别颜色"}
+                      </button>
+                      ${
+                        hasTrustedRowColorSource(table)
+                          ? ""
+                          : `<button class="small-button" type="button" data-confirm-opencv-colors>确认使用颜色结果</button>`
+                      }
+                    </div>`
+                  : ""
+              }
+            </div>
+            ${
+              openCvPreviewRows
+                ? `<div class="opencv-color-preview">
+                    <strong>${escapeHtml(rowColorEngineName)} 逐行颜色</strong>
+                    <span>${openCvConflict ? "这张表同时有白底和其他底色：确认后其他底色会下架，白底保留。" : "这张表未形成白底+其他底色冲突：确认后不会因为颜色批量下架。"}</span>
+                    <div class="opencv-color-grid">${openCvPreviewRows}</div>
+                  </div>`
+                : ""
+            }`
+          : ""
+      }
+      <div class="review-ai-panel">
+        <label for="reviewAiInstruction">AI 辅助校对</label>
+        <textarea id="reviewAiInstruction" rows="3" placeholder="例如：橙色整行底色是已售；浅绿色底不是已售；只有整行明显橙色才下架。AI 只生成建议，应用前你还能再看。">${escapeHtml(table.aiReviewInstruction || "")}</textarea>
+        <div class="review-sample-panel">
+          <strong>颜色样本</strong>
+          <span>${escapeHtml(sampleText)}</span>
+          <em>先在下方票卡选择一条“已售样本”和一条“未售样本”，再生成建议。</em>
+        </div>
+        <div class="review-ai-actions">
+          <button class="small-button" type="button" data-review-ai-assist ${reviewAiBusy ? "disabled" : ""}>${reviewAiBusy ? "正在生成..." : "生成发布/下架建议"}</button>
+          <button class="small-button ghost ${aiDecisions.length ? "" : "hidden"}" type="button" data-apply-ai-review>应用 AI 建议</button>
+        </div>
+        <p class="review-ai-status">${escapeHtml(table.aiReviewStatus || "输入这张表的颜色/标记规则，AI 会按原图给出哪些上传、哪些下架。")}</p>
+      </div>
+      ${
+        rows ||
+        `<div class="empty-state">这张表当前没有显示中的票；可以点“显示已跳过票源”恢复查看，或从“校对历史”恢复到上一步。</div>`
+      }
     </div>
   `;
+  focusReviewRow(focusRowIndex);
 }
 
 function renderPublishedTables() {
@@ -2037,7 +7971,7 @@ function renderPublishedTables() {
         <div class="admin-table-row">
           <span>${table.title}</span>
           <span>${currentEvent.name}</span>
-          <span>${table.sourceName || "样例数据"}</span>
+          <span>${escapeHtml(getTableSourceSummary(table))}</span>
           <span>已发布</span>
           <span>${table.rows.length} 条票源</span>
         </div>
@@ -2057,24 +7991,79 @@ function renderPublishedTables() {
   `;
 }
 
-function createUploadedTables(parsedTables) {
-  const count = parsedTables.length;
-  return Array.from({ length: count }, (_, index) => ({
-    id: `uploaded-${Date.now()}-${index}`,
-    title: count > 1 ? `${uploadTableTitle.value.trim() || uploadedSource.name} · 第 ${index + 1} 页/表` : uploadTableTitle.value.trim() || uploadedSource.name,
-    originalImage: uploadedSource.url,
-    originalType: uploadedSource.type,
-    sourceName: count > 1 ? `${uploadedSource.name} · 第 ${index + 1} 页/表` : uploadedSource.name,
-    sourcePage: index + 1,
-    eventId: currentEvent.id,
-    columns: parsedTables[index].columns,
-    rows: parsedTables[index].rows,
-  }));
+async function getUploadImageRowColorAnalyses(parsedTables) {
+  const isPdf = uploadedSource?.type === "application/pdf" || uploadedSource?.name?.toLowerCase().endsWith(".pdf");
+  if (isPdf) return {};
+  const isImage = String(uploadedSource?.type || "").startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(uploadedSource?.name || "");
+  const hasImageSource = uploadedSource?.dataUrl?.startsWith("data:image/") || String(uploadedSource?.url || "").startsWith("uploads/");
+  if (isImage && !hasImageSource) throw new Error("无法读取原始图片做行底色检测，请重新选择图片后再生成待确认表。");
+  if (!hasImageSource) return {};
+  const expectedRows = parsedTables.reduce((count, table) => count + (Array.isArray(table.rows) ? table.rows.length : 0), 0);
+  if (!expectedRows) return {};
+  const response = await fetch("/api/tables/analyze-row-colors", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      image: uploadedSource.dataUrl || "",
+      sourceUrl: uploadedSource.url || "",
+      expectedRows,
+    }),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.message || result.error || "图片行底色检测失败。");
+  return result.rowColorAnalysis ? { "1": result.rowColorAnalysis } : {};
 }
 
-function publishUpload() {
+function createUploadedTables(parsedTables, rowColorAnalyses = null) {
+  const count = parsedTables.length;
+  const isPdf = uploadedSource.type === "application/pdf" || uploadedSource.name.toLowerCase().endsWith(".pdf");
+  const colorAnalyses = rowColorAnalyses || (isPdf ? lastTicketOcrJobSnapshot?.rowColorAnalyses || {} : {});
+  const pageColorCursors = {};
+  return Array.from({ length: count }, (_, index) => {
+    const parsedTable = parsedTables[index];
+    const sourcePage = Number(parsedTable.sourcePage || 0) || index + 1;
+    const sourcePart = Number(parsedTable.sourcePart || 0) || index + 1;
+    const pageText = isPdf ? `PDF 第 ${sourcePage} 页${sourcePart > 1 ? ` · 第 ${sourcePart} 块表` : ""}` : `第 ${sourcePart} 张表`;
+    const baseTitle = uploadTableTitle.value.trim() || uploadedSource.name;
+    const table = {
+      id: `uploaded-${Date.now()}-${index}`,
+      title: count > 1 ? `${baseTitle} · ${pageText}` : baseTitle,
+      originalImage: uploadedSource.url,
+      originalType: uploadedSource.type,
+      sourceFileName: uploadedSource.name,
+      sourceName: uploadedSource.name,
+      sourcePage,
+      sourcePart,
+      eventId: currentEvent.id,
+      columns: parsedTable.columns,
+      originalColumns: Array.isArray(parsedTable.originalColumns) ? parsedTable.originalColumns : [...parsedTable.columns],
+      originalRows: Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
+      rows: parsedTable.rows,
+    };
+    const colorAnalysis = colorAnalyses[String(sourcePage)] || colorAnalyses[sourcePage] || null;
+    if (colorAnalysis) {
+      const pageKey = String(sourcePage);
+      const startIndex = pageColorCursors[pageKey] || 0;
+      const consumedRows = applyOpenCvRowColorsToTable(table, colorAnalysis, startIndex);
+      pageColorCursors[pageKey] = startIndex + Math.max(consumedRows, table.rows.length);
+    }
+    return updatePendingTableReviewFlags(table);
+  });
+}
+
+async function publishUpload() {
   setUploadStatus("正在检查上传内容...", "loading");
   showToast("正在处理上传...", "loading");
+  if (fieldMappingDraft) {
+    const draftSource = String(fieldMappingDraft.sourceName || fieldMappingDraft.sourceType || "").toLowerCase();
+    if (/\.(csv|tsv|txt|xlsx)$/.test(draftSource) || /csv|spreadsheet|excel/.test(draftSource)) {
+      setUploadStatus("当前 CSV / Excel 正在字段映射预览，请先点“按这个映射导入”或取消映射。", "error");
+      showToast("请先处理字段映射。", "error");
+      return;
+    }
+    fieldMappingDraft = null;
+    renderFieldMappingPreview();
+  }
   const parsedTables = splitRecognizedTables(uploadTableText.value);
   if (!uploadedSource) {
     setUploadStatus("请先选择一张图片或 PDF。", "error");
@@ -2086,20 +8075,23 @@ function publishUpload() {
     showToast("上传失败：表格内容不完整。", "error");
     return;
   }
-
-  const tables = createUploadedTables(parsedTables);
+  const rowColorAnalyses = await getUploadImageRowColorAnalyses(parsedTables);
+  const rawTables = createUploadedTables(parsedTables, rowColorAnalyses);
+  const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
+  const tables = rawTables.filter((table) => table.rows.length);
   pendingTables.unshift(...tables);
   selectedPendingTableId = tables[0]?.id || selectedPendingTableId;
   selectedDateId = null;
   selectedZone = null;
   searchTerm = "";
   searchInput.value = "";
-  setUploadStatus(`已生成 ${tables.length} 张待确认表。校对确认后才会发布给客户。`, "success");
-  showToast(`已生成 ${tables.length} 张待确认表。`, "success");
+  setUploadStatus(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，已自动跳过 ${removedSoldRows} 条已售票` : ""}。校对确认后才会发布给客户。`, "success");
+  showToast(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，跳过 ${removedSoldRows} 条已售` : ""}。`, "success");
   renderUploadRecords();
   renderReviewPanel();
   renderPublishedTables();
   renderAdminEvent();
+  scheduleAppStateSave();
   uploadRecords.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -2116,53 +8108,216 @@ function previewUploadedTable(tableId) {
 }
 
 function confirmSelectedPendingTable() {
+  if (!requireSeatmapTestBeforePublish()) return;
   const table = getSelectedPendingTable();
   if (!table) {
     showToast("请先选择一张待确认表。", "error");
     return;
   }
+  const queueSnapshot = getCurrentPendingTables();
+  const currentQueueIndex = queueSnapshot.findIndex((item) => item.id === table.id);
+  const publishRows = [];
+  const remainingRows = [];
+  table.rows.forEach((row, rowIndex) => {
+    const ticket = { table, row, index: rowIndex };
+    if (isUnavailableTicket(ticket)) return;
+    const explicitDecision = table.publishRows?.[rowIndex];
+    if (explicitDecision === true) {
+      if (isCustomerPublishableTicket(ticket)) publishRows.push(row);
+      else remainingRows.push(row);
+      return;
+    }
+    if (explicitDecision === false) return;
+    const reviewed = isPendingRowReviewed(table, rowIndex);
+    if (reviewed && shouldPublishPendingRow(table, rowIndex) && isCustomerPublishableTicket(ticket)) {
+      publishRows.push(row);
+    } else if (!reviewed) {
+      remainingRows.push(row);
+    }
+  });
+  if (!publishRows.length) {
+    table.showSoldInReview = true;
+    renderUploadRecords();
+    renderReviewPanel();
+    scheduleAppStateSave();
+    showToast("这张表没有勾选要上传的票，已保留在待确认里。你可以恢复历史或反选可发布票。", "error");
+    return;
+  }
+  const publishedTable = createPublishedTableFromRows(table, publishRows);
   const index = pendingTables.findIndex((item) => item.id === table.id);
-  if (index >= 0) pendingTables.splice(index, 1);
-  currentEvent.tables.unshift(table);
-  uploadedTables.unshift(table);
+  if (remainingRows.length) {
+    keepPendingRows(table, remainingRows);
+  } else if (index >= 0) {
+    pendingTables.splice(index, 1);
+  }
+  currentEvent.tables.unshift(publishedTable);
+  uploadedTables.unshift(publishedTable);
   selectFirstDateWithTickets();
-  selectedPendingTableId = pendingTables.find((item) => item.eventId === currentEvent.id)?.id || null;
+  if (remainingRows.length) {
+    selectedPendingTableId = table.id;
+    pendingReviewFocusRowIndex = getVisibleReviewRowIndexes(table)[0] ?? null;
+  } else {
+    selectNextPendingTableAfterPublish(queueSnapshot, currentQueueIndex);
+  }
   const matchedRows = countZoneRowsFromTables();
-  const matchMessage = getPublishMatchMessage(table.title, matchedRows);
+  const matchMessage = getPublishMatchMessage(`${table.title} · ${publishRows.length} 条`, matchedRows);
   setUploadStatus(matchMessage.text, matchMessage.type);
   showToast(matchMessage.toast, matchMessage.type);
-  saveAppState();
   renderUploadRecords();
   renderReviewPanel();
   renderPublishedTables();
   renderAdminEvent();
-  render();
+  window.setTimeout(render, 0);
+  scheduleAppStateSave();
 }
 
 function confirmAllPendingTables() {
-  const currentPending = pendingTables.filter((table) => table.eventId === currentEvent.id);
+  if (!requireSeatmapTestBeforePublish()) return;
+  const currentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
   if (!currentPending.length) {
     showToast("当前演出没有待确认表。", "error");
     return;
   }
+  const riskyTables = currentPending.filter((table) => table.needsManualReview);
+  if (riskyTables.length) {
+    const confirmed = window.confirm(`有 ${riskyTables.length} 张表被标记为“需人工确认”。\n\n建议先点“查看需人工确认”逐张校对原始图。仍然一键发布全部吗？`);
+    if (!confirmed) {
+      manualReviewOnly = true;
+      selectedPendingTableId = riskyTables[0]?.id || selectedPendingTableId;
+      renderUploadRecords();
+      renderReviewPanel();
+      return;
+    }
+  }
+  let publishedRowCount = 0;
   currentPending.forEach((table) => {
+    const publishRows = [];
+    const remainingRows = [];
+    table.rows.forEach((row, rowIndex) => {
+      const ticket = { table, row, index: rowIndex };
+      if (isUnavailableTicket(ticket)) return;
+      const explicitDecision = table.publishRows?.[rowIndex];
+      if (explicitDecision === true) {
+        if (isCustomerPublishableTicket(ticket)) publishRows.push(row);
+        else remainingRows.push(row);
+        return;
+      }
+      if (explicitDecision === false) return;
+      const reviewed = isPendingRowReviewed(table, rowIndex);
+      if (reviewed && shouldPublishPendingRow(table, rowIndex) && isCustomerPublishableTicket(ticket)) {
+        publishRows.push(row);
+      } else if (!reviewed) {
+        remainingRows.push(row);
+      }
+    });
+    if (publishRows.length) {
+      const publishedTable = createPublishedTableFromRows(table, publishRows, currentPending.length > 1 ? ` ${publishRows.length}条` : "");
+      currentEvent.tables.unshift(publishedTable);
+      uploadedTables.unshift(publishedTable);
+      publishedRowCount += publishRows.length;
+    } else {
+      table.showSoldInReview = true;
+      ensurePendingTableReviewFlags(table);
+      return;
+    }
     const index = pendingTables.findIndex((item) => item.id === table.id);
-    if (index >= 0) pendingTables.splice(index, 1);
+    if (remainingRows.length) {
+      keepPendingRows(table, remainingRows);
+    } else if (index >= 0) {
+      pendingTables.splice(index, 1);
+    }
   });
-  currentEvent.tables.unshift(...currentPending);
-  uploadedTables.unshift(...currentPending);
+  if (!publishedRowCount) {
+    showToast("当前没有勾选要上传的票。", "error");
+    renderUploadRecords();
+    renderReviewPanel();
+    return;
+  }
   selectFirstDateWithTickets();
   selectedPendingTableId = null;
   const matchedRows = countZoneRowsFromTables();
-  const matchMessage = getPublishMatchMessage(`已一键发布 ${currentPending.length} 张表`, matchedRows);
+  const matchMessage = getPublishMatchMessage(`已一键发布 ${publishedRowCount} 条票`, matchedRows);
   setUploadStatus(matchMessage.text, matchMessage.type);
   showToast(matchMessage.toast, matchMessage.type);
-  saveAppState();
   renderUploadRecords();
   renderReviewPanel();
   renderPublishedTables();
   renderAdminEvent();
-  render();
+  window.setTimeout(render, 0);
+  scheduleAppStateSave();
+}
+
+function confirmReadyPendingTables() {
+  if (!requireSeatmapTestBeforePublish()) return;
+  const currentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
+  if (!currentPending.length) {
+    showToast("当前演出没有待确认表。", "error");
+    return;
+  }
+  const readyTables = currentPending.filter((table) => !table.needsManualReview);
+  if (!readyTables.length) {
+    manualReviewOnly = true;
+    const riskyTable = currentPending.find((table) => table.needsManualReview);
+    selectedPendingTableId = riskyTable?.id || selectedPendingTableId;
+    renderUploadRecords();
+    renderReviewPanel();
+    showToast("没有无需人工确认的表，已切到需人工确认列表。", "error");
+    return;
+  }
+
+  let publishedRowCount = 0;
+  let publishedTableCount = 0;
+  readyTables.forEach((table) => {
+    const publishRows = [];
+    const remainingRows = [];
+    table.rows.forEach((row, rowIndex) => {
+      const ticket = { table, row, index: rowIndex };
+      if (isUnavailableTicket(ticket)) return;
+      const explicitDecision = table.publishRows?.[rowIndex];
+      if (explicitDecision === false) return;
+      if (shouldPublishPendingRow(table, rowIndex) && isCustomerPublishableTicket(ticket)) {
+        publishRows.push(row);
+      } else {
+        remainingRows.push(row);
+      }
+    });
+    if (!publishRows.length) {
+      ensurePendingTableReviewFlags(table);
+      return;
+    }
+    const publishedTable = createPublishedTableFromRows(table, publishRows, readyTables.length > 1 ? ` ${publishRows.length}条` : "");
+    currentEvent.tables.unshift(publishedTable);
+    uploadedTables.unshift(publishedTable);
+    publishedRowCount += publishRows.length;
+    publishedTableCount += 1;
+
+    const index = pendingTables.findIndex((item) => item.id === table.id);
+    if (remainingRows.length) {
+      keepPendingRows(table, remainingRows);
+    } else if (index >= 0) {
+      pendingTables.splice(index, 1);
+    }
+  });
+
+  if (!publishedRowCount) {
+    showToast("无需人工确认的表里没有可发布票源。", "error");
+    renderUploadRecords();
+    renderReviewPanel();
+    return;
+  }
+  selectedPendingTableId = pendingTables.find((table) => table.eventId === currentEvent.id && table.needsManualReview)?.id || null;
+  manualReviewOnly = Boolean(selectedPendingTableId);
+  selectFirstDateWithTickets();
+  const matchedRows = countZoneRowsFromTables();
+  const matchMessage = getPublishMatchMessage(`已发布 ${publishedTableCount} 张标准表、${publishedRowCount} 条票`, matchedRows);
+  setUploadStatus(matchMessage.text, matchMessage.type);
+  showToast(matchMessage.toast, matchMessage.type);
+  renderUploadRecords();
+  renderReviewPanel();
+  renderPublishedTables();
+  renderAdminEvent();
+  window.setTimeout(render, 0);
+  scheduleAppStateSave();
 }
 
 function clearCurrentPendingTables() {
@@ -2946,7 +9101,8 @@ function generateQuickZones() {
     return;
   }
   currentEvent.zones = createQuickZones(labels);
-  seatmapStatus.textContent = `已生成 ${labels.length} 个可点击区域。前台现在可以点击区域测试。`;
+  resetSeatmapTestStatus("快速生成热区后需要逐区测试");
+  seatmapStatus.textContent = `已生成 ${labels.length} 个可点击区域。发布票源前必须前台逐区测试。`;
   showToast(`已生成 ${labels.length} 个可点击区域。`, "success");
   saveAppState();
   renderAdminEvent();
@@ -2976,6 +9132,7 @@ function startZoneMarking() {
     return;
   }
   currentEvent.zones = [];
+  resetSeatmapTestStatus("开始重新标注热区");
   markingIndex = 0;
   isMarkingZones = true;
   renderSeatmapMarkers();
@@ -2999,7 +9156,8 @@ function markNextZone(event) {
   renderSeatmapMarkers();
   if (markingIndex >= markingZones.length) {
     isMarkingZones = false;
-    zoneMarkingStatus.textContent = `已标注 ${markingZones.length} 个 SVG 可点击热区，前台 hover/点击会高亮。`;
+    resetSeatmapTestStatus("手动标注热区后需要逐区测试");
+    zoneMarkingStatus.textContent = `已标注 ${markingZones.length} 个 SVG 可点击热区，发布票源前必须前台逐区测试。`;
     showToast("区域标注完成。", "success");
     saveAppState();
     renderAdminEvent();
@@ -3039,6 +9197,7 @@ async function saveScannedSeatmapZones() {
     aliases: [region.label],
     polygon: region.polygon,
   }));
+  resetSeatmapTestStatus("扫描保存热区后需要逐区测试");
   scannedRegions = [];
   zoneNameInput.value = "";
   recognizedZonesList.textContent = currentEvent.zones.map((zone) => zone.label).join(", ");
@@ -3048,8 +9207,8 @@ async function saveScannedSeatmapZones() {
   hoveredZone = null;
   const template = await saveCurrentSeatmapAsTemplate(true);
   zoneMarkingStatus.textContent = template
-    ? `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区，并已把座位图底图一起存入模板库“${template.name}”。已切到前台测试。`
-    : `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区，已切到前台测试，请直接点击座位图验证。`;
+    ? `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区，并已把座位图底图一起存入模板库“${template.name}”。已切到前台测试，必须逐区点击验证。`
+    : `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区，已切到前台测试，请逐区点击验证。`;
   showToast(template ? "整套座位图模板已保存。" : "座位图热区已保存。", "success");
   saveAppState();
   renderSeatmapMarkers();
@@ -3063,37 +9222,56 @@ function openSeatmapTest() {
   selectedDateId = null;
   selectedZone = null;
   hoveredZone = null;
+  seatmapHotspotVisible = Boolean(currentEvent.zones.length);
+  seatmapEditingZoneId = "";
+  seatmapEditDraftPolygon = null;
+  seatmapEditDragging = null;
   searchTerm = "";
   searchInput.value = "";
   render();
   setMode("customer");
   seatmapFrame.scrollIntoView({ behavior: "smooth", block: "center" });
   const message = currentEvent.zones.length
-    ? `已进入前台测试：${currentEvent.zones.length} 个热区可直接点击，票源 PDF 可以后面再补。`
+    ? `已进入热区检查：${currentEvent.zones.length} 个热区已显示。保存后可切到客户视角测试。`
     : "已进入前台测试：当前只有座位图，保存热区后才能点击区域。";
   showToast(message, currentEvent.zones.length ? "success" : "idle");
 }
 
+function syncNewEventDisplayName() {
+  const artist = newEventArtist.value.trim();
+  const city = newEventCity.value.trim();
+  if (!newEventName.value.trim() && (artist || city)) {
+    newEventName.placeholder = artist && city ? `${artist} ${city}` : "不填则自动生成：团体 + 城市";
+  }
+}
+
 function createNewEvent() {
-  const name = newEventName.value.trim();
-  const location = newEventLocation.value.trim();
+  const artist = newEventArtist.value.trim();
+  const city = newEventCity.value.trim();
+  const venue = newEventVenue.value.trim();
+  const manualName = newEventName.value.trim();
+  const name = manualName || [artist, city].filter(Boolean).join(" ").trim();
   const dates = newEventDates.value.trim();
-  if (!name) {
-    newEventStatus.textContent = "请先填写演出名称。";
+  if (!artist && !name) {
+    newEventStatus.textContent = "请先填写演出人员/团体，或填写前台显示的演出名称。";
     newEventStatus.dataset.status = "error";
-    showToast("创建失败：缺少演出名称。", "error");
+    showToast("创建失败：缺少演出信息。", "error");
     return;
   }
 
   const idBase = slugify(name);
   const id = events.some((event) => event.id === idBase) ? `${idBase}-${Date.now()}` : idBase;
+  const location = [city || "待填写城市", venue || "待填写场馆"].filter(Boolean).join(" · ");
   const newEvent = {
     id,
     name,
-    location: location || "待填写场馆",
+    artist: artist || name,
+    city: city || "",
+    location,
     dates: dates || "待定",
     dateOptions: parseDateOptions(dates),
-    venue: location || "待填写场馆",
+    venue: venue || location || "待填写场馆",
+    venueLocal: venue || "",
     seatmapTitle: `${name} 官方座位图`,
     seatmapImage: createPlaceholderSeatmap(name),
     seatmapFileName: "待上传座位图",
@@ -3107,6 +9285,7 @@ function createNewEvent() {
   selectedZone = null;
   searchTerm = "";
   searchInput.value = "";
+  manualReviewOnly = false;
   newEventForm.classList.add("hidden");
   newEventForm.reset();
   newEventStatus.dataset.status = "success";
@@ -3118,6 +9297,72 @@ function createNewEvent() {
   renderUploadRecords();
   renderReviewPanel();
   renderPublishedTables();
+}
+
+function deleteCurrentEvent() {
+  if (events.length <= 1) {
+    showToast("至少需要保留一个演出。", "error");
+    return;
+  }
+  const tableCount = currentEvent.tables.length;
+  const pendingCount = pendingTables.filter((table) => table.eventId === currentEvent.id).length;
+  const confirmed = window.confirm(`确定删除「${currentEvent.name}」吗？\n\n会删除该演出的座位图、热区、${tableCount} 张已发布票源表和 ${pendingCount} 张待确认表。`);
+  if (!confirmed) return;
+  const deletedName = currentEvent.name;
+  const deletedId = currentEvent.id;
+  const currentIndex = events.findIndex((event) => event.id === deletedId);
+  if (currentIndex >= 0) events.splice(currentIndex, 1);
+  for (let index = pendingTables.length - 1; index >= 0; index -= 1) {
+    if (pendingTables[index].eventId === deletedId) pendingTables.splice(index, 1);
+  }
+  currentEvent = events[Math.max(0, currentIndex - 1)] || events[0];
+  selectedDateId = null;
+  selectedZone = null;
+  hoveredZone = null;
+  searchTerm = "";
+  selectedPendingTableId = pendingTables.find((table) => table.eventId === currentEvent.id)?.id || null;
+  searchInput.value = "";
+  newEventForm.classList.add("hidden");
+  pendingSeatmap = null;
+  manualReviewOnly = false;
+  saveAppState();
+  render();
+  renderAdminEvent();
+  renderUploadRecords();
+  renderReviewPanel();
+  renderPublishedTables();
+  showToast(`已删除 ${deletedName}。`, "success");
+}
+
+function clearCurrentPublishedTables() {
+  const tableCount = currentEvent.tables.length;
+  if (!tableCount) {
+    showToast("当前演出没有已发布票源可清空。", "error");
+    return;
+  }
+  const confirmed = window.confirm(
+    `确定清空「${currentEvent.name}」的已发布票源吗？\n\n会删除 ${tableCount} 张已发布票源表，客户前台会立刻清空旧票。座位图、热区和待确认表不会删除。`,
+  );
+  if (!confirmed) return;
+  const removedIds = new Set(currentEvent.tables.map((table) => table.id));
+  currentEvent.tables = [];
+  for (let index = uploadedTables.length - 1; index >= 0; index -= 1) {
+    const table = uploadedTables[index];
+    if (table.eventId === currentEvent.id || removedIds.has(table.id)) uploadedTables.splice(index, 1);
+  }
+  selectedDateId = null;
+  selectedZone = null;
+  hoveredZone = null;
+  searchTerm = "";
+  searchInput.value = "";
+  saveAppState();
+  render();
+  renderAdminEvent();
+  renderUploadRecords();
+  renderReviewPanel();
+  renderPublishedTables();
+  setUploadStatus(`已清空 ${tableCount} 张已发布票源表，可以上传今天的新票。`, "success");
+  showToast("已清空当前演出前台旧票。", "success");
 }
 
 function render() {
@@ -3165,6 +9410,25 @@ cancelNewEventButton.addEventListener("click", () => {
 });
 
 createEventButton.addEventListener("click", createNewEvent);
+deleteCurrentEventButton.addEventListener("click", deleteCurrentEvent);
+newEventArtist.addEventListener("input", syncNewEventDisplayName);
+newEventCity.addEventListener("input", syncNewEventDisplayName);
+
+eventSearchInput.addEventListener("input", () => {
+  eventSearchTerm = eventSearchInput.value.trim();
+  renderEventList();
+});
+
+eventPickerToggle.addEventListener("click", () => {
+  if (eventSearchTerm) {
+    eventSearchTerm = "";
+    eventSearchInput.value = "";
+    eventPickerOpen = false;
+  } else {
+    eventPickerOpen = !eventPickerOpen;
+  }
+  renderEventList();
+});
 
 adminEventList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-admin-event-id]");
@@ -3175,10 +9439,12 @@ adminEventList.addEventListener("click", (event) => {
   searchTerm = "";
   searchInput.value = "";
   pendingSeatmap = null;
+  manualReviewOnly = false;
   render();
   renderAdminEvent();
   renderUploadRecords();
   renderReviewPanel();
+  renderFieldMappingPreview();
   renderPublishedTables();
 });
 
@@ -3190,7 +9456,11 @@ eventList.addEventListener("click", (event) => {
   selectedDateId = null;
   selectedZone = null;
   hoveredZone = null;
+  eventPickerOpen = false;
+  eventSearchTerm = "";
+  eventSearchInput.value = "";
   searchInput.value = "";
+  manualReviewOnly = false;
   render();
   renderAdminEvent();
   renderUploadRecords();
@@ -3219,6 +9489,17 @@ sortFilter.addEventListener("click", (event) => {
 });
 
 seatmapFrame.addEventListener("click", (event) => {
+  const toolButton = event.target.closest("[data-seatmap-tool]");
+  if (toolButton) {
+    const action = toolButton.dataset.seatmapTool;
+    if (action === "show-hotspots") showSeatmapHotspots();
+    if (action === "customer-test") showSeatmapCustomerTest();
+    if (action === "edit-selected") startSeatmapHotspotEdit();
+    if (action === "save-edit") saveSeatmapHotspotEdit();
+    if (action === "cancel-edit") cancelSeatmapHotspotEdit();
+    return;
+  }
+  if (event.target.closest(".seatmap-edit-control")) return;
   const seatmap = event.target.closest(".seatmap-stage");
   if (!seatmap) return;
   const zone = getZoneForSeatmapEvent(event, seatmap);
@@ -3229,6 +9510,10 @@ seatmapFrame.addEventListener("click", (event) => {
 seatmapFrame.addEventListener("mousemove", (event) => {
   const seatmap = event.target.closest(".seatmap-stage");
   if (!seatmap) return;
+  if (seatmapEditDragging || event.target.closest(".seatmap-edit-control")) {
+    seatmap.style.cursor = "";
+    return;
+  }
   const zone = getZoneForSeatmapEvent(event, seatmap);
   hoveredZone = zone || null;
   seatmap.style.cursor = zone ? "pointer" : "default";
@@ -3247,17 +9532,38 @@ seatmapFrame.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
   const hotspot = event.target.closest("[data-zone-id]");
   if (!hotspot) return;
-  const zone = currentEvent.zones.find((item) => item.id === hotspot.dataset.zoneId);
+  const zone = getZoneFromTarget(hotspot);
   if (!zone) return;
   event.preventDefault();
   selectZone(zone);
 });
 
+seatmapFrame.addEventListener("pointerdown", handleSeatmapEditPointerDown);
+window.addEventListener("pointermove", handleSeatmapEditPointerMove);
+window.addEventListener("pointerup", handleSeatmapEditPointerEnd);
+window.addEventListener("pointercancel", handleSeatmapEditPointerEnd);
+
 zoneDrawer.addEventListener("click", (event) => {
   const ticketCard = event.target.closest("[data-ticket-key]");
   if (ticketCard) {
     const ticket = findTicketByKey(ticketCard.dataset.ticketKey);
-    if (ticket) openOriginalTable(ticket.table);
+    if (ticket) {
+      if (window.ticketSeatmapDebug?.enabled !== false) {
+        console.info("[ticket-date-debug] ticket-card-click", JSON.stringify({
+          ticketKey: ticketCard.dataset.ticketKey,
+          eventId: currentEvent?.id,
+          zone: selectedZone?.label || "",
+          ...getSelectedDateDebugInfo(),
+          tableId: ticket.table.id,
+          rowIndex: ticket.index,
+          sourcePage: ticket.table.sourcePage || "",
+          dateValues: getTicketDateValues(ticket),
+          rowDateKeys: getTicketDateValues(ticket).flatMap((value) => getDateKeysFromText(value)),
+          row: ticket.row,
+        }));
+      }
+      openOriginalTable(ticket.table);
+    }
     return;
   }
 
@@ -3314,6 +9620,7 @@ async function applyPendingSeatmapToCurrentEvent({ autoScan = false } = {}) {
   currentEvent.seatmapTemplateId = "";
   currentEvent.seatmapTitle = `${currentEvent.name} 官方座位图`;
   currentEvent.zones = [];
+  resetSeatmapTestStatus("座位图已更换，需要重新扫描并测试热区");
   scannedRegions = [];
   isMarkingZones = false;
   markingZones = [];
@@ -3335,7 +9642,8 @@ async function applyPendingSeatmapToCurrentEvent({ autoScan = false } = {}) {
   if (isLaiziSeatmapCandidate(savedSeatmapName)) {
     currentEvent.zones = createLaiziTemplateZones(currentEvent.seatmapSize);
     currentEvent.seatmapTemplateId = "builtin-laizi";
-    seatmapStatus.textContent = `座位图已保存，并已自动套用 ${currentEvent.zones.length} 个拉椅子标准热区。可直接点“前台测试座位图”。`;
+    resetSeatmapTestStatus("自动套用标准热区后需要逐区测试");
+    seatmapStatus.textContent = `座位图已保存，并已自动套用 ${currentEvent.zones.length} 个拉椅子标准热区。发布票源前必须前台逐区测试。`;
     if (!saveAppState()) return false;
     showToast(`${currentEvent.name} 座位图已更新。`, "success");
     renderAdminEvent();
@@ -3419,8 +9727,13 @@ testSeatmapButton.addEventListener("click", openSeatmapTest);
 saveSeatmapTemplateButton.addEventListener("click", () => {
   saveCurrentSeatmapAsTemplate(false);
 });
-toggleTemplateLibraryButton.addEventListener("click", () => {
+toggleTemplateLibraryButton.addEventListener("click", async () => {
   templateLibraryOpen = !templateLibraryOpen;
+  if (templateLibraryOpen) {
+    templateLibrarySummary.textContent = "正在刷新模板文件...";
+    await loadExternalSeatmapTemplates();
+    return;
+  }
   renderSeatmapTemplates();
 });
 applyMatchedTemplateButton.addEventListener("click", () => {
@@ -3482,6 +9795,15 @@ seatmapTemplateList.addEventListener("click", (event) => {
   }
 });
 confirmAllButton.addEventListener("click", confirmAllPendingTables);
+publishReadyButton.addEventListener("click", confirmReadyPendingTables);
+clearPublishedButton.addEventListener("click", clearCurrentPublishedTables);
+showManualReviewButton.addEventListener("click", () => {
+  manualReviewOnly = !manualReviewOnly;
+  const riskyTable = pendingTables.find((table) => table.eventId === currentEvent.id && ensurePendingTableReviewFlags(table).needsManualReview);
+  if (manualReviewOnly && riskyTable) selectedPendingTableId = riskyTable.id;
+  renderUploadRecords();
+  renderReviewPanel();
+});
 clearPendingButton.addEventListener("click", clearCurrentPendingTables);
 
 sourceFileInput.addEventListener("change", async () => {
@@ -3490,19 +9812,55 @@ sourceFileInput.addEventListener("change", async () => {
     stopTicketOcrPolling();
     uploadedSource = null;
     selectedSourceName.textContent = "微信截图通常一张图是一张表；PDF 可能包含多张表，需要先按页/按表拆开。";
+    selectedSourceName.title = "";
     pdfDetectionStatus.textContent = "选择 PDF 后自动识别页数/候选表数量。";
     setUploadStatus("先选择原始图片/PDF，再发布测试。");
     return;
   }
   stopTicketOcrPolling();
-  if (uploadedSource?.url) URL.revokeObjectURL(uploadedSource.url);
+  const dataUrl = await readFileAsDataUrl(file);
+  let stableUrl = dataUrl;
+  try {
+    stableUrl = await saveUploadedSourceFile(file, dataUrl);
+  } catch (error) {
+    showToast(error.message || "原始文件保存失败，将临时保存在浏览器。", "error");
+  }
   uploadedSource = {
     name: file.name,
-    type: file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/*"),
-    url: URL.createObjectURL(file),
+    type: file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : isSpreadsheetFile(file) ? "text/csv" : "image/*"),
+    url: stableUrl,
+    dataUrl: String(stableUrl || "").startsWith("uploads/") ? "" : dataUrl,
     detectedTables: 1,
   };
-  selectedSourceName.textContent = `已选择：${file.name}`;
+  if (isSpreadsheetFile(file)) {
+    try {
+      setUploadStatus("正在读取表格，准备字段映射预览...", "loading");
+      showToast("正在读取表格...", "loading");
+      const rawRows = await readSpreadsheetRows(file, dataUrl);
+      const spreadsheet = normalizeSpreadsheetRows(rawRows);
+      if (!spreadsheet) throw new Error("没有读到有效表头和数据行。");
+      startFieldMappingPreview({
+        headers: spreadsheet.headers,
+        rows: spreadsheet.rows,
+        sourceName: getSelectedFileDisplayName(file.name),
+        sourceUrl: stableUrl,
+        sourceType: uploadedSource.type,
+      });
+      selectedSourceName.textContent = `已选择：${getSelectedFileDisplayName(file.name)}`;
+      selectedSourceName.title = decodePossiblyEncodedFileName(file.name);
+      pdfDetectionStatus.textContent = "已读取表格文件，请先完成字段映射，再确认导入。";
+      setUploadStatus("请在字段映射预览里指定每一列含义。", "success");
+      showToast("已进入字段映射预览。", "success");
+      return;
+    } catch (error) {
+      setUploadStatus(error.message || "表格读取失败。", "error");
+      showToast("表格读取失败。", "error");
+      return;
+    }
+  }
+  saveAppState();
+  selectedSourceName.textContent = `已选择：${getSelectedFileDisplayName(file.name)}`;
+  selectedSourceName.title = decodePossiblyEncodedFileName(file.name);
   setUploadStatus("正在自动检测文件结构...", "loading");
   showToast("正在检测文件结构...", "loading");
   const detectedTables = await detectPdfPageCount(file);
@@ -3526,10 +9884,80 @@ sourceFileInput.addEventListener("change", async () => {
 
 ticketUploadForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  publishUpload();
+  publishUpload().catch((error) => {
+    setUploadStatus(error.message || "上传处理失败。", "error");
+    showToast("上传处理失败。", "error");
+  });
 });
 
-publishUploadButton.addEventListener("click", publishUpload);
+publishUploadButton.addEventListener("click", () => {
+  publishUpload().catch((error) => {
+    setUploadStatus(error.message || "上传处理失败。", "error");
+    showToast("上传处理失败。", "error");
+  });
+});
+
+retryFailedOcrButton.addEventListener("click", async () => {
+  const jobId = lastTicketOcrJobSnapshot?.id || activeTicketOcrJobId;
+  if (!jobId) {
+    showToast("没有可重试的识别任务。", "error");
+    return;
+  }
+  retryFailedOcrButton.disabled = true;
+  setUploadStatus("正在重试失败页...", "loading");
+  showToast("正在重试失败页。", "loading");
+  try {
+    const response = await fetch("/api/tables/recognize/retry-failed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: jobId }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || result.error || "失败页重试启动失败。");
+    activeTicketOcrJobId = result.id || jobId;
+    renderFailedOcrPanel(result);
+    await pollTicketOcrJob(activeTicketOcrJobId);
+  } catch (error) {
+    retryFailedOcrButton.disabled = false;
+    setUploadStatus(error.message || "失败页重试失败。", "error");
+    showToast("失败页重试失败。", "error");
+  }
+});
+
+copyFailedOcrButton.addEventListener("click", async () => {
+  const report = buildFailedOcrReport();
+  if (!report) {
+    showToast("暂无失败数据可复制。", "error");
+    return;
+  }
+  failedOcrData.value = report;
+  try {
+    await navigator.clipboard.writeText(report);
+    showToast("失败数据已复制。", "success");
+  } catch {
+    failedOcrData.select();
+    showToast("已选中失败数据，可以手动复制。", "error");
+  }
+});
+
+fieldMappingTable.addEventListener("change", (event) => {
+  const select = event.target.closest("[data-field-mapping-index]");
+  if (!select || !fieldMappingDraft) return;
+  const index = Number(select.dataset.fieldMappingIndex);
+  if (!Number.isInteger(index)) return;
+  fieldMappingDraft.mapping[index] = select.value;
+  saveAppState();
+});
+
+confirmFieldMappingButton.addEventListener("click", confirmFieldMappingImport);
+
+cancelFieldMappingButton.addEventListener("click", () => {
+  fieldMappingDraft = null;
+  renderFieldMappingPreview();
+  saveAppState();
+  setUploadStatus("已取消字段映射，本次表格未导入。", "idle");
+  showToast("已取消字段映射。", "success");
+});
 
 document.querySelectorAll("[data-ai-provider]").forEach((button) => {
   button.addEventListener("click", () => renderAiProviderTemplate(button.dataset.aiProvider));
@@ -3548,12 +9976,117 @@ copyEnvTemplateButton.addEventListener("click", async () => {
 uploadRecords.addEventListener("click", (event) => {
   const button = event.target.closest("[data-review-table]");
   if (!button) return;
-  selectedPendingTableId = button.dataset.reviewTable;
-  renderUploadRecords();
-  renderReviewPanel();
+  selectPendingTable(button.dataset.reviewTable, { scroll: true });
+});
+
+uploadRecords.addEventListener("keydown", (event) => {
+  if (!["Enter", " "].includes(event.key)) return;
+  const record = event.target.closest("[data-review-table]");
+  if (!record) return;
+  event.preventDefault();
+  selectPendingTable(record.dataset.reviewTable, { scroll: true });
 });
 
 reviewLayout.addEventListener("click", (event) => {
+  const navButton = event.target.closest("[data-review-table-nav]");
+  if (navButton) {
+    selectAdjacentPendingTable(navButton.dataset.reviewTableNav === "prev" ? -1 : 1);
+    return;
+  }
+  const bulkSkipButton = event.target.closest("[data-mark-all-skip-draft]");
+  if (bulkSkipButton) {
+    markAllReviewRowsSkipDraft(getSelectedPendingTable());
+    return;
+  }
+  const toggleSkippedButton = event.target.closest("[data-toggle-skipped-review]");
+  if (toggleSkippedButton) {
+    toggleShowSkippedReviewRows(getSelectedPendingTable());
+    return;
+  }
+  const restoreSnapshotButton = event.target.closest("[data-restore-review-snapshot]");
+  if (restoreSnapshotButton) {
+    restoreReviewSnapshot(getSelectedPendingTable(), restoreSnapshotButton.dataset.restoreReviewSnapshot);
+    return;
+  }
+  const toggleOpenCvColorsButton = event.target.closest("[data-toggle-opencv-colors]");
+  if (toggleOpenCvColorsButton) {
+    toggleOpenCvRowColorPreview(getSelectedPendingTable());
+    return;
+  }
+  const confirmOpenCvColorsButton = event.target.closest("[data-confirm-opencv-colors]");
+  if (confirmOpenCvColorsButton) {
+    confirmOpenCvRowColorResult(getSelectedPendingTable());
+    return;
+  }
+  const colorSampleButton = event.target.closest("[data-color-sample-row]");
+  if (colorSampleButton) {
+    setColorReviewSample(
+      getSelectedPendingTable(),
+      Number(colorSampleButton.dataset.colorSampleRow),
+      colorSampleButton.dataset.colorSampleType,
+    );
+    return;
+  }
+  const aiButton = event.target.closest("[data-review-ai-assist]");
+  if (aiButton) {
+    const table = getSelectedPendingTable();
+    const instruction = document.querySelector("#reviewAiInstruction")?.value.trim() || "";
+    requestReviewAiAssist(table, instruction);
+    return;
+  }
+  const applyAiButton = event.target.closest("[data-apply-ai-review]");
+  if (applyAiButton) {
+    applyReviewAiSuggestions(getSelectedPendingTable());
+    return;
+  }
+  const savePriceButton = event.target.closest("[data-save-review-price]");
+  if (savePriceButton) {
+    const table = getSelectedPendingTable();
+    const rowIndex = Number(savePriceButton.dataset.saveReviewPrice);
+    const input = reviewLayout.querySelector(`[data-review-price-input="${rowIndex}"]`);
+    saveReviewRowPrice(table, rowIndex, input?.value || "");
+    return;
+  }
+  const applyDateButton = event.target.closest("[data-apply-review-date]");
+  if (applyDateButton) {
+    const input = reviewLayout.querySelector("[data-review-date-input]");
+    applyReviewDateToTable(getSelectedPendingTable(), input?.value || "");
+    return;
+  }
+  const editRowButton = event.target.closest("[data-edit-review-row]");
+  if (editRowButton) {
+    startReviewRowEdit(getSelectedPendingTable(), Number(editRowButton.dataset.editReviewRow));
+    return;
+  }
+  const saveRowButton = event.target.closest("[data-save-review-row]");
+  if (saveRowButton) {
+    const card = saveRowButton.closest("[data-review-row-index]");
+    saveReviewRowEdits(getSelectedPendingTable(), Number(saveRowButton.dataset.saveReviewRow), card);
+    return;
+  }
+  const cancelRowButton = event.target.closest("[data-cancel-review-row]");
+  if (cancelRowButton) {
+    cancelReviewRowEdit(getSelectedPendingTable(), Number(cancelRowButton.dataset.cancelReviewRow));
+    return;
+  }
+  const setPublishButton = event.target.closest("[data-set-row-publish]");
+  if (setPublishButton) {
+    const table = getSelectedPendingTable();
+    setPendingRowPublish(table, Number(setPublishButton.dataset.setRowPublish), setPublishButton.dataset.publishValue === "true");
+    return;
+  }
+  const publishButton = event.target.closest("[data-toggle-row-publish]");
+  if (publishButton) {
+    const table = getSelectedPendingTable();
+    togglePendingRowPublish(table, Number(publishButton.dataset.toggleRowPublish));
+    return;
+  }
+  const rowButton = event.target.closest("[data-toggle-row-sold]");
+  if (rowButton) {
+    const table = getSelectedPendingTable();
+    togglePendingRowSold(table, Number(rowButton.dataset.toggleRowSold));
+    return;
+  }
   const button = event.target.closest("[data-review-source]");
   if (!button) return;
   const table = pendingTables.find((item) => item.id === button.dataset.reviewSource);
@@ -3582,7 +10115,9 @@ render();
 renderAdminEvent();
 renderUploadRecords();
 renderReviewPanel();
+renderFieldMappingPreview();
 renderPublishedTables();
-setMode(new URLSearchParams(window.location.search).get("admin") === "1" ? "admin" : "customer");
+setMode(IS_ADMIN_PAGE ? "admin" : "customer");
 renderAiProviderTemplate("aliyun");
 refreshAiStatus();
+loadExternalSeatmapTemplates();

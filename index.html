@@ -22,6 +22,14 @@
           <span class="status-dot" aria-label="在线"></span>
         </div>
 
+        <div class="event-picker-tools">
+          <label class="event-search-field" for="eventSearchInput">
+            <span>搜索演出</span>
+            <input id="eventSearchInput" type="search" placeholder="输入演出、城市、场馆或日期" autocomplete="off" />
+          </label>
+          <button class="event-toggle-button" id="eventPickerToggle" type="button" aria-expanded="false">展开全部</button>
+        </div>
+        <p class="event-picker-meta" id="eventPickerMeta"></p>
         <div class="event-list" id="eventList"></div>
       </aside>
 
@@ -145,26 +153,44 @@
                 <p class="eyebrow">一对一资料包</p>
                 <h3>一个演出 = 一张座位图 + 多个票源文件</h3>
               </div>
-              <button class="small-button" id="toggleNewEventForm" type="button">新增演出</button>
+              <div class="admin-actions">
+                <button class="small-button danger ghost" id="deleteCurrentEventButton" type="button">删除当前演出</button>
+                <button class="small-button" id="toggleNewEventForm" type="button">新增演出</button>
+              </div>
             </div>
             <form class="new-event-form hidden" id="newEventForm">
               <label class="admin-field">
-                <span>演出名称</span>
-                <input id="newEventName" type="text" placeholder="例如：BLACKPINK 香港" />
+                <span>演出人员/团体</span>
+                <input id="newEventArtist" type="text" list="eventArtistHistory" placeholder="例如：TWS / BIGBANG" autocomplete="off" />
               </label>
               <label class="admin-field">
-                <span>城市/场馆</span>
-                <input id="newEventLocation" type="text" placeholder="例如：香港 · AsiaWorld-Arena" />
+                <span>城市</span>
+                <input id="newEventCity" type="text" list="eventCityHistory" placeholder="例如：澳门 / 香港 / 高阳" autocomplete="off" />
               </label>
               <label class="admin-field">
-                <span>演出日期</span>
-                <input id="newEventDates" type="text" placeholder="例如：10月3日 / 10月4日" />
+                <span>场馆</span>
+                <input id="newEventVenue" type="text" list="eventVenueHistory" placeholder="例如：伦敦人综艺馆" autocomplete="off" />
               </label>
+              <label class="admin-field">
+                <span>演出名称（前台显示）</span>
+                <input id="newEventName" type="text" placeholder="不填则自动生成：团体 + 城市" />
+              </label>
+              <label class="admin-field">
+                <span>演出日期（标准模板）</span>
+                <input id="newEventDates" type="text" placeholder="2026-09-19 / 2026-09-20" />
+              </label>
+              <div class="date-format-tip">
+                <strong>日期格式</strong>
+                <span>请按 YYYY-MM-DD 填写；多天演出用 / 分开，例如 2026-09-19 / 2026-09-20。</span>
+              </div>
+              <datalist id="eventArtistHistory"></datalist>
+              <datalist id="eventCityHistory"></datalist>
+              <datalist id="eventVenueHistory"></datalist>
               <div class="admin-actions">
                 <button class="small-button" id="createEventButton" type="button">创建演出</button>
                 <button class="small-button ghost" id="cancelNewEventButton" type="button">取消</button>
               </div>
-              <p class="upload-status" id="newEventStatus">创建后可以立即上传座位图和票源 PDF。</p>
+              <p class="upload-status" id="newEventStatus">创建后可以立即上传座位图；后续每天有新票，直接在同一演出的票源文件区继续上传即可追加。</p>
             </form>
             <div class="event-package-summary">
               <div>
@@ -254,7 +280,7 @@
               <button class="small-button ghost" id="saveScannedZonesButton" type="button">保存热区</button>
               <button class="small-button ghost" id="testSeatmapButton" type="button">前台测试座位图</button>
             </div>
-            <div class="template-library">
+            <div class="template-library" id="seatmapTemplateLibrary">
               <div class="template-library-head">
                 <div>
                   <strong>座位图模板库</strong>
@@ -291,8 +317,8 @@
             <h3>上传当前演出的图片/PDF</h3>
             <form class="upload-form" id="ticketUploadForm">
               <label class="upload-box">
-                <input id="sourceFileInput" type="file" accept="image/*,.pdf,application/pdf" />
-                <strong>选择微信截图、长图、JPG/PNG 或 PDF</strong>
+                <input id="sourceFileInput" type="file" accept="image/*,.pdf,application/pdf,.csv,.tsv,.txt,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <strong>选择微信截图、长图、JPG/PNG、PDF、CSV 或 Excel</strong>
                 <span id="selectedSourceName">文件会归入当前选中的演出。</span>
               </label>
               <label class="admin-field">
@@ -309,6 +335,35 @@
               <button class="small-button" id="publishUploadButton" type="button">生成待确认表</button>
               <p class="upload-status" id="uploadStatus">先选择原始图片/PDF，再生成待确认表。</p>
             </form>
+            <div class="field-mapping-panel hidden" id="fieldMappingPanel">
+              <div class="field-mapping-head">
+                <div>
+                  <p class="eyebrow">CSV / Excel 可选辅助</p>
+                  <strong id="fieldMappingTitle">等待上传 CSV 或 Excel</strong>
+                  <span id="fieldMappingSummary">只在表格文件需要手动指定列含义时使用；PDF 默认走智能识别和校对。</span>
+                </div>
+                <div class="admin-actions">
+                  <button class="small-button ghost" id="cancelFieldMappingButton" type="button">取消映射</button>
+                  <button class="small-button" id="confirmFieldMappingButton" type="button">按这个映射导入</button>
+                </div>
+              </div>
+              <div class="field-mapping-table" id="fieldMappingTable"></div>
+              <p class="upload-detection" id="fieldMappingStatus">映射只影响本次 CSV / Excel 导入，不改变表主原图。</p>
+            </div>
+            <div class="failed-ocr-panel hidden" id="failedOcrPanel">
+              <div class="failed-ocr-header">
+                <div>
+                  <p class="eyebrow">识别失败页</p>
+                  <strong id="failedOcrSummary">暂无失败页</strong>
+                </div>
+                <div class="admin-actions">
+                  <button class="small-button ghost" id="retryFailedOcrButton" type="button">重试失败页</button>
+                  <button class="small-button ghost" id="copyFailedOcrButton" type="button">复制失败数据</button>
+                </div>
+              </div>
+              <div class="failed-ocr-list" id="failedOcrList"></div>
+              <textarea class="failed-ocr-data" id="failedOcrData" readonly></textarea>
+            </div>
             <div class="admin-kv">
               <span>目标演出</span>
               <strong id="uploadTargetEvent">TWS 澳门</strong>
@@ -338,6 +393,8 @@
             </div>
             <div class="admin-actions batch-actions">
               <button class="small-button" id="confirmAllButton" type="button">一键确认并发布全部</button>
+              <button class="small-button ghost" id="publishReadyButton" type="button">只发布无需人工确认的表</button>
+              <button class="small-button ghost" id="showManualReviewButton" type="button">查看需人工确认</button>
               <button class="small-button ghost" id="clearPendingButton" type="button">清空待确认</button>
             </div>
             <div class="upload-records" id="uploadRecords" aria-live="polite">
@@ -365,7 +422,10 @@
                 <p class="eyebrow">票源表管理</p>
                 <h3>后台保留原图和表主，前台只显示可售票源</h3>
               </div>
-              <button class="small-button" type="button">导出当前演出</button>
+              <div class="admin-actions">
+                <button class="small-button danger ghost" id="clearPublishedButton" type="button">清空当前演出已发布票源</button>
+                <button class="small-button" type="button">导出当前演出</button>
+              </div>
             </div>
             <div class="admin-table" id="publishedTables"></div>
           </article>

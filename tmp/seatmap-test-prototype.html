@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>座位图测试流程预览</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172033;
+        --muted: #657084;
+        --line: #dcd8ce;
+        --paper: #fbfaf6;
+        --panel: #ffffff;
+        --teal: #147a80;
+        --teal-soft: #e9f7f7;
+        --red: #b42318;
+        --red-soft: #fff0ed;
+        --amber: #b85c1b;
+        --amber-soft: #fff6e8;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #f3f0e8;
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      .page {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .topbar,
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .topbar {
+        padding: 18px 20px;
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: center;
+        margin-bottom: 18px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 24px;
+        line-height: 1.25;
+      }
+
+      .sub {
+        color: var(--muted);
+        margin-top: 6px;
+        font-size: 15px;
+      }
+
+      .status {
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: var(--amber-soft);
+        color: var(--amber);
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(520px, 1.2fr) minmax(420px, 0.8fr);
+        gap: 18px;
+      }
+
+      .panel {
+        padding: 18px;
+      }
+
+      .seatmap-stage {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 1206 / 1226;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fff;
+      }
+
+      .seatmap-stage img,
+      .seatmap-stage svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .seatmap-stage img {
+        object-fit: contain;
+      }
+
+      .hotspot {
+        fill: rgba(20, 122, 128, 0.01);
+        stroke: transparent;
+        stroke-width: 4;
+        cursor: pointer;
+        pointer-events: all;
+        transition: fill 0.15s ease, stroke 0.15s ease;
+      }
+
+      .seatmap-stage.show-hotspots .hotspot {
+        fill: rgba(20, 122, 128, 0.18);
+        stroke: rgba(20, 122, 128, 0.75);
+      }
+
+      .seatmap-stage.show-hotspots .hotspot:hover,
+      .seatmap-stage.show-hotspots .hotspot.active {
+        fill: rgba(20, 122, 128, 0.28);
+        stroke: #147a80;
+      }
+
+      .hotspot.editing {
+        fill: rgba(184, 92, 27, 0.32);
+        stroke: #b85c1b;
+      }
+
+      .handle {
+        fill: #fff;
+        stroke: #b85c1b;
+        stroke-width: 5;
+        cursor: grab;
+      }
+
+      .handle:active {
+        cursor: grabbing;
+      }
+
+      .edit-frame {
+        fill: rgba(184, 92, 27, 0.06);
+        stroke: #b85c1b;
+        stroke-width: 3;
+        stroke-dasharray: 12 8;
+        pointer-events: none;
+      }
+
+      .resize-handle {
+        fill: #fff8ef;
+        stroke: #b85c1b;
+        stroke-width: 4;
+        cursor: grab;
+      }
+
+      .resize-handle[data-resize="n"],
+      .resize-handle[data-resize="s"] {
+        cursor: ns-resize;
+      }
+
+      .resize-handle[data-resize="e"],
+      .resize-handle[data-resize="w"] {
+        cursor: ew-resize;
+      }
+
+      .resize-handle[data-resize="nw"],
+      .resize-handle[data-resize="se"] {
+        cursor: nwse-resize;
+      }
+
+      .resize-handle[data-resize="ne"],
+      .resize-handle[data-resize="sw"] {
+        cursor: nesw-resize;
+      }
+
+      .move-handle {
+        fill: #147a80;
+        stroke: #fff;
+        stroke-width: 5;
+        cursor: move;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 14px 0 0;
+      }
+
+      .hint-strip {
+        margin-top: 12px;
+        padding: 12px 14px;
+        border: 1px solid #b8d3d6;
+        border-radius: 8px;
+        background: var(--teal-soft);
+        color: #0b4f56;
+        font-weight: 800;
+        line-height: 1.55;
+      }
+
+      button {
+        border: 1px solid #b8d3d6;
+        background: #fff;
+        color: #0b4f56;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-weight: 800;
+        font-size: 15px;
+        cursor: pointer;
+      }
+
+      button.wide {
+        min-width: 168px;
+      }
+
+      button.primary {
+        background: var(--teal);
+        color: #fff;
+        border-color: var(--teal);
+      }
+
+      button.danger {
+        color: var(--red);
+        border-color: #efb9b2;
+        background: var(--red-soft);
+      }
+
+      .result-list {
+        display: grid;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .result {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        background: var(--paper);
+      }
+
+      .result.failed {
+        border-color: #efb9b2;
+        background: var(--red-soft);
+      }
+
+      .result.passed {
+        border-color: #b8d3d6;
+        background: var(--teal-soft);
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .badge {
+        font-weight: 900;
+        color: var(--red);
+      }
+
+      .passed .badge {
+        color: var(--teal);
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 14px;
+        margin-top: 8px;
+        line-height: 1.55;
+      }
+
+      .edit-panel {
+        margin-top: 14px;
+        padding: 14px;
+        border-radius: 8px;
+        background: var(--amber-soft);
+        border: 1px solid #f1cda6;
+      }
+
+      .coord-box {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .coord-box code {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 8px;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .log {
+        min-height: 120px;
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: #fff;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      @media (max-width: 980px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="topbar">
+        <div>
+          <h1>座位图热区测试流程预览</h1>
+          <p class="sub">独立临时页：只模拟修改流程，不改正式系统代码。请重点测试 207 / 208 是否有手型、是否点到正确区域。</p>
+        </div>
+        <div class="status" id="status">等待测试</div>
+      </section>
+
+      <section class="grid">
+        <div class="panel">
+          <h2>前台座位图点击测试</h2>
+          <p class="sub">客户视角下热区不可见，但鼠标移上去会变手，点击后只返回当前区域。</p>
+          <div class="hint-strip" id="modeHint">当前是客户视角：热区已隐藏。要检查覆盖范围，请点“显示全部热区”。</div>
+          <div class="seatmap-stage customer-mode" id="stage">
+            <img src="../assets/nct-dream-10th-fm-seatmap.jpg" alt="NCT DREAM 10周年 FM 座位图" />
+            <svg viewBox="0 0 1206 1226" id="svg"></svg>
+          </div>
+          <div class="toolbar">
+            <button class="primary wide" id="runTest">显示全部热区</button>
+            <button class="wide" id="customerMode">客户视角测试</button>
+            <button class="wide" id="reset">清空选中状态</button>
+          </div>
+          <div class="log" id="log">还没有点击。这里会显示实际命中的 zoneId / zoneLabel。</div>
+        </div>
+
+        <aside class="panel">
+          <h2>后台测试结果和修改入口</h2>
+          <p class="sub">这是我建议加到正式后台的交互：测试不通过时，不只提示失败，还给“修改这个热区”。</p>
+
+          <div class="result-list" id="results">
+            <div class="result failed" data-result-zone="207">
+              <div class="row">
+                <h3>207 热区缺失或太小</h3>
+                <span class="badge">未通过</span>
+              </div>
+              <p class="small">问题：鼠标不变手型，客户无法点击 207。建议：直接进入 207 热区编辑。</p>
+              <div class="toolbar">
+                <button class="primary wide" data-edit-zone="207">进入 207 热区编辑</button>
+              </div>
+            </div>
+            <div class="result failed" data-result-zone="208">
+              <div class="row">
+                <h3>208 命中范围偏窄</h3>
+                <span class="badge">未通过</span>
+              </div>
+              <p class="small">问题：208 只覆盖了一条窄边，容易点不到。建议：放大到完整色块。</p>
+              <div class="toolbar">
+                <button class="primary wide" data-edit-zone="208">进入 208 热区编辑</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="edit-panel" id="editPanel">
+            <h3>当前未进入修改状态</h3>
+            <p class="small">点击上面的“进入热区编辑”后，左侧会出现可拖动边框。拖好后点“拖好了，保存热区”。</p>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script>
+      const svg = document.querySelector("#svg");
+      const stage = document.querySelector("#stage");
+      const statusEl = document.querySelector("#status");
+      const logEl = document.querySelector("#log");
+      const editPanel = document.querySelector("#editPanel");
+      const modeHint = document.querySelector("#modeHint");
+      let activeZoneId = "";
+      let editingZoneId = "";
+      let dragging = null;
+
+      function createHotspot(zone) {
+        const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        polygon.setAttribute("class", "hotspot");
+        polygon.dataset.zoneId = zone.id;
+        polygon.dataset.zoneLabel = zone.label || zone.id;
+        polygon.setAttribute("points", zone.polygon.map(([x, y]) => `${x},${y}`).join(" "));
+        return polygon;
+      }
+
+      async function loadTemplateZones() {
+        try {
+          const response = await fetch("../seatmap-templates/nct-dream-10th-fm.json", { cache: "no-store" });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const template = await response.json();
+          svg.innerHTML = "";
+          template.zones.forEach((zone) => svg.appendChild(createHotspot(zone)));
+          writeLog(`已读取正式座位图模板：${template.zones.length} 个热区。现在显示的是模板坐标，不再使用手画粗框。`);
+        } catch (error) {
+          writeLog(`读取模板失败：${error.message}`);
+        }
+      }
+
+      function getZone(zoneId) {
+        return svg.querySelector(`[data-zone-id="${zoneId}"]`);
+      }
+
+      function pointsToArray(points) {
+        return points
+          .trim()
+          .split(/\s+/)
+          .map((pair) => pair.split(",").map(Number));
+      }
+
+      function arrayToPoints(points) {
+        return points.map(([x, y]) => `${Math.round(x)},${Math.round(y)}`).join(" ");
+      }
+
+      function getBox(points) {
+        const xs = points.map(([x]) => x);
+        const ys = points.map(([, y]) => y);
+        const x1 = Math.min(...xs);
+        const x2 = Math.max(...xs);
+        const y1 = Math.min(...ys);
+        const y2 = Math.max(...ys);
+        return { x1, y1, x2, y2, width: x2 - x1, height: y2 - y1 };
+      }
+
+      function transformPoints(points, fromBox, toBox) {
+        const width = Math.max(fromBox.width, 1);
+        const height = Math.max(fromBox.height, 1);
+        return points.map(([x, y]) => {
+          const rx = (x - fromBox.x1) / width;
+          const ry = (y - fromBox.y1) / height;
+          return [toBox.x1 + rx * toBox.width, toBox.y1 + ry * toBox.height];
+        });
+      }
+
+      function setActive(zoneId) {
+        activeZoneId = zoneId;
+        svg.querySelectorAll(".hotspot").forEach((item) => {
+          item.classList.toggle("active", item.dataset.zoneId === zoneId);
+        });
+      }
+
+      function writeLog(message) {
+        logEl.innerHTML = message;
+      }
+
+      function showAllHotspots() {
+        stage.classList.add("show-hotspots");
+        modeHint.textContent = "当前是后台校准视角：所有热区都显示出来了。哪里不准，就点右侧进入对应热区编辑。";
+        statusEl.textContent = "正在显示全部热区";
+      }
+
+      function showCustomerMode() {
+        stage.classList.remove("show-hotspots");
+        modeHint.textContent = "当前是客户视角：热区已隐藏，但鼠标移到可点击区会变手，点击会展示命中的区域。";
+        statusEl.textContent = "客户视角测试";
+      }
+
+      function clearHandles() {
+        svg.querySelectorAll(".edit-control").forEach((item) => item.remove());
+      }
+
+      function renderHandles(zoneId) {
+        clearHandles();
+        const zone = getZone(zoneId);
+        if (!zone) return;
+        const points = pointsToArray(zone.getAttribute("points"));
+        const box = getBox(points);
+
+        const frame = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        frame.setAttribute("class", "edit-control edit-frame");
+        frame.setAttribute("x", box.x1);
+        frame.setAttribute("y", box.y1);
+        frame.setAttribute("width", box.width);
+        frame.setAttribute("height", box.height);
+        svg.appendChild(frame);
+
+        const resizePoints = [
+          ["nw", box.x1, box.y1],
+          ["n", box.x1 + box.width / 2, box.y1],
+          ["ne", box.x2, box.y1],
+          ["e", box.x2, box.y1 + box.height / 2],
+          ["se", box.x2, box.y2],
+          ["s", box.x1 + box.width / 2, box.y2],
+          ["sw", box.x1, box.y2],
+          ["w", box.x1, box.y1 + box.height / 2],
+        ];
+
+        resizePoints.forEach(([name, x, y]) => {
+          const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          rect.setAttribute("class", "edit-control resize-handle");
+          rect.setAttribute("x", x - 11);
+          rect.setAttribute("y", y - 11);
+          rect.setAttribute("width", 22);
+          rect.setAttribute("height", 22);
+          rect.setAttribute("rx", 5);
+          rect.dataset.zoneId = zoneId;
+          rect.dataset.resize = name;
+          svg.appendChild(rect);
+        });
+
+        const move = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        move.setAttribute("class", "edit-control move-handle");
+        move.setAttribute("r", "13");
+        move.setAttribute("cx", box.x1 + box.width / 2);
+        move.setAttribute("cy", box.y1 + box.height / 2);
+        move.dataset.zoneId = zoneId;
+        move.dataset.move = "1";
+        svg.appendChild(move);
+
+        points.forEach(([x, y], index) => {
+          const handle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          handle.setAttribute("class", "edit-control handle");
+          handle.setAttribute("r", "7");
+          handle.setAttribute("cx", x);
+          handle.setAttribute("cy", y);
+          handle.dataset.zoneId = zoneId;
+          handle.dataset.index = String(index);
+          svg.appendChild(handle);
+        });
+      }
+
+      function showEditPanel(zoneId) {
+        const zone = getZone(zoneId);
+        const points = zone ? zone.getAttribute("points") : "";
+        editPanel.innerHTML = `
+          <h3>正在修改 ${zoneId} 热区</h3>
+          <p class="small">左侧橙色区域就是当前热区。拖边框/边角可以像修图片一样整体校正；拖中间圆点可以整体移动；小圆点用于细修轮廓。</p>
+          <div class="coord-box">
+            <code>${points}</code>
+          </div>
+          <div class="toolbar">
+            <button class="primary wide" id="saveEdit">拖好了，保存热区</button>
+            <button class="danger wide" id="cancelEdit">放弃本次修改</button>
+          </div>
+        `;
+        document.querySelector("#saveEdit").addEventListener("click", () => {
+          document.querySelector(`[data-result-zone="${zoneId}"]`)?.classList.replace("failed", "passed");
+          const badge = document.querySelector(`[data-result-zone="${zoneId}"] .badge`);
+          if (badge) badge.textContent = "已修正";
+          stopEditing();
+          showCustomerMode();
+          setActive("");
+          writeLog(`${zoneId} 热区已保存。现在已自动切回客户视角：热区不可见，请直接用鼠标移动和点击测试。`);
+        });
+        document.querySelector("#cancelEdit").addEventListener("click", stopEditing);
+      }
+
+      function startEditing(zoneId) {
+        editingZoneId = zoneId;
+        stage.classList.add("show-hotspots");
+        setActive(zoneId);
+        svg.querySelectorAll(".hotspot").forEach((item) => item.classList.toggle("editing", item.dataset.zoneId === zoneId));
+        renderHandles(zoneId);
+        showEditPanel(zoneId);
+        statusEl.textContent = `正在修改 ${zoneId}`;
+      }
+
+      function stopEditing() {
+        editingZoneId = "";
+        dragging = null;
+        clearHandles();
+        svg.querySelectorAll(".hotspot").forEach((item) => item.classList.remove("editing"));
+        editPanel.innerHTML = `
+          <h3>当前未进入修改状态</h3>
+          <p class="small">点击上面的“进入热区编辑”后，左侧会出现可拖动边框。拖好后点“拖好了，保存热区”。</p>
+        `;
+      }
+
+      function getSvgPoint(event) {
+        const rect = svg.getBoundingClientRect();
+        return {
+          x: ((event.clientX - rect.left) / rect.width) * 1206,
+          y: ((event.clientY - rect.top) / rect.height) * 1226,
+        };
+      }
+
+      function buildResizedBox(startBox, point, resize) {
+        const next = { ...startBox };
+        if (resize.includes("n")) next.y1 = point.y;
+        if (resize.includes("s")) next.y2 = point.y;
+        if (resize.includes("w")) next.x1 = point.x;
+        if (resize.includes("e")) next.x2 = point.x;
+
+        const minSize = 18;
+        if (next.x2 - next.x1 < minSize) {
+          if (resize.includes("w")) next.x1 = next.x2 - minSize;
+          else next.x2 = next.x1 + minSize;
+        }
+        if (next.y2 - next.y1 < minSize) {
+          if (resize.includes("n")) next.y1 = next.y2 - minSize;
+          else next.y2 = next.y1 + minSize;
+        }
+        next.width = next.x2 - next.x1;
+        next.height = next.y2 - next.y1;
+        return next;
+      }
+
+      svg.addEventListener("click", (event) => {
+        const zone = event.target.closest(".hotspot");
+        if (!zone) return;
+        setActive(zone.dataset.zoneId);
+        statusEl.textContent = `命中 ${zone.dataset.zoneLabel}`;
+        writeLog(`点击结果：<strong>zoneId=${zone.dataset.zoneId}</strong>，zoneLabel=${zone.dataset.zoneLabel}<br>这里没有像素猜测，只认被点击的 SVG 热区。`);
+      });
+
+      svg.addEventListener("pointerdown", (event) => {
+        const resizeHandle = event.target.closest(".resize-handle");
+        const moveHandle = event.target.closest(".move-handle");
+        const handle = event.target.closest(".handle");
+        if (!handle && !resizeHandle && !moveHandle) return;
+        const target = handle || resizeHandle || moveHandle;
+        const zone = getZone(target.dataset.zoneId);
+        const startPoint = getSvgPoint(event);
+        const startPoints = pointsToArray(zone.getAttribute("points"));
+        dragging = {
+          zoneId: target.dataset.zoneId,
+          index: handle ? Number(handle.dataset.index) : -1,
+          resize: resizeHandle ? resizeHandle.dataset.resize : "",
+          move: Boolean(moveHandle),
+          pointerId: event.pointerId,
+          startPoint,
+          startPoints,
+          startBox: getBox(startPoints),
+        };
+        target.setPointerCapture(event.pointerId);
+      });
+
+      svg.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        const point = getSvgPoint(event);
+        const zone = getZone(dragging.zoneId);
+        let points = pointsToArray(zone.getAttribute("points"));
+        if (dragging.resize) {
+          const nextBox = buildResizedBox(dragging.startBox, point, dragging.resize);
+          points = transformPoints(dragging.startPoints, dragging.startBox, nextBox);
+        } else if (dragging.move) {
+          const dx = point.x - dragging.startPoint.x;
+          const dy = point.y - dragging.startPoint.y;
+          points = dragging.startPoints.map(([x, y]) => [x + dx, y + dy]);
+        } else {
+          points[dragging.index] = [point.x, point.y];
+        }
+        zone.setAttribute("points", arrayToPoints(points));
+        renderHandles(dragging.zoneId);
+        showEditPanel(dragging.zoneId);
+      });
+
+      svg.addEventListener("pointerup", () => {
+        dragging = null;
+      });
+
+      document.querySelector("#results").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-edit-zone]");
+        if (!button) return;
+        startEditing(button.dataset.editZone);
+      });
+
+      document.querySelector("#runTest").addEventListener("click", () => {
+        showAllHotspots();
+        writeLog("后台校准视角：整张图所有已配置热区都显示出来了。保存某个热区后，会自动隐藏热区，方便你从客户视角重新点击。");
+      });
+
+      document.querySelector("#customerMode").addEventListener("click", () => {
+        stopEditing();
+        showCustomerMode();
+        setActive("");
+        writeLog("已切换到客户视角：看不到热区，只测试鼠标是否变手、点击是否命中正确区域。");
+      });
+
+      document.querySelector("#reset").addEventListener("click", () => {
+        setActive("");
+        stopEditing();
+        showCustomerMode();
+        writeLog("已重置。");
+      });
+
+      loadTemplateZones();
+    </script>
+  </body>
+</html>

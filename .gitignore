@@ -5,3 +5,6 @@ dist/
 build/
 coverage/
 *.log
+uploads/
+tmp/pdfs/
+tools/__pycache__/
