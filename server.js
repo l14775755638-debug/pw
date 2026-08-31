@@ -13,6 +13,8 @@ const pdfinfoPath = path.join(depsRoot, "bin", "pdfinfo");
 const nodeModuleRoot = path.join(depsRoot, "node", "node_modules");
 const pythonPath = process.env.PYTHON || "/usr/bin/python3";
 const rowColorScriptPath = path.join(root, "tools", "detect_ticket_row_colors.py");
+const pdfRowColorScriptPath = path.join(root, "tools", "detect_pdf_row_colors.py");
+const depsPythonPath = path.join(depsRoot, "python", "bin", "python3");
 const seatmapTemplateDir = path.join(root, "seatmap-templates");
 const uploadSourceDir = path.join(root, "uploads");
 const ticketOcrJobs = new Map();
@@ -1043,6 +1045,50 @@ async function analyzeTicketRowColorsFromDataUrl(imageDataUrl, expectedRows) {
   }
 }
 
+async function analyzeTicketRowColorsFromPdfPath(pdfPath, page, expectedRows) {
+  if (!fs.existsSync(pdfRowColorScriptPath)) {
+    return { source: "pdf_vector", reliable: false, error: "PDF 原始颜色脚本不存在", rows: [] };
+  }
+  const python = fs.existsSync(depsPythonPath) ? depsPythonPath : pythonPath;
+  try {
+    const { stdout } = await runFile(python, [
+      pdfRowColorScriptPath,
+      pdfPath,
+      "--page",
+      String(Math.max(1, Math.floor(Number(page || 1)))),
+      "--expected-rows",
+      String(expectedRows || 0),
+    ]);
+    const parsed = JSON.parse(stdout || "{}");
+    return {
+      source: "pdf_vector",
+      expectedRows: Number(parsed.expectedRows || expectedRows || 0),
+      detectedRows: Number(parsed.detectedRows || 0),
+      selectionMode: parsed.selectionMode || "",
+      reliable: Boolean(parsed.reliable),
+      contiguous: Boolean(parsed.contiguous),
+      maxRowGap: Number(parsed.maxRowGap || 0),
+      labels: Array.isArray(parsed.labels) ? parsed.labels : [],
+      rows: Array.isArray(parsed.rows) ? parsed.rows : [],
+      error: parsed.error || "",
+    };
+  } catch (error) {
+    return { source: "pdf_vector", reliable: false, error: formatErrorMessage(error), rows: [] };
+  }
+}
+
+async function analyzeTicketRowColorsFromPdfDataUrl(pdfDataUrl, page, expectedRows) {
+  const { buffer } = dataUrlToBuffer(pdfDataUrl);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-pdf-row-color-"));
+  const pdfPath = path.join(tempDir, "source.pdf");
+  fs.writeFileSync(pdfPath, buffer);
+  try {
+    return await analyzeTicketRowColorsFromPdfPath(pdfPath, page, expectedRows);
+  } finally {
+    fs.rm(tempDir, { recursive: true, force: true }, () => {});
+  }
+}
+
 function getTicketOcrText(job) {
   const blocks = job.results
     .slice()
@@ -1085,9 +1131,14 @@ async function recognizeTicketPageWithRetry(item, job) {
       const checked = await recognizeTicketPageTextWithCompletenessCheck(item);
       const text = checked.text;
       const expectedRows = checked.recognizedRows;
-      const rowColorAnalysis = ocrRowColorDuringScanEnabled && expectedRows
-        ? await analyzeTicketRowColorsFromDataUrl(item.image, expectedRows)
-        : null;
+      let rowColorAnalysis = null;
+      if (expectedRows && item.pdfPath) {
+        rowColorAnalysis = await analyzeTicketRowColorsFromPdfPath(item.pdfPath, item.page, expectedRows);
+        if (!rowColorAnalysis.reliable && !rowColorAnalysis.rows?.length) rowColorAnalysis = null;
+      }
+      if (!rowColorAnalysis && ocrRowColorDuringScanEnabled && expectedRows) {
+        rowColorAnalysis = await analyzeTicketRowColorsFromDataUrl(item.image, expectedRows);
+      }
       return { page: item.page, text, attempts: attempt, rowColorAnalysis };
     } catch (error) {
       lastError = error;
@@ -1140,8 +1191,12 @@ async function recognizeTicketPageTextWithCompletenessCheck(item) {
 }
 
 async function runTicketOcrBatch(job, file, maxPages) {
+  let pdfVectorTempDir = "";
   try {
     const { buffer } = dataUrlToBuffer(file);
+    pdfVectorTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-ocr-pdf-vector-"));
+    const pdfVectorPath = path.join(pdfVectorTempDir, "source.pdf");
+    fs.writeFileSync(pdfVectorPath, buffer);
     job.totalPages = await getPdfPageCountFromBuffer(buffer).catch(() => Number(maxPages) || 1);
     const requestedPages = Number.isFinite(Number(maxPages)) && Number(maxPages) > 0 ? Number(maxPages) : job.totalPages;
     const pagesToRender = getRequestedTicketOcrPages(Math.min(requestedPages, job.totalPages), job.totalPages);
@@ -1160,7 +1215,7 @@ async function runTicketOcrBatch(job, file, maxPages) {
     job.message = `正在批量识别 0/${images.length} 页...`;
     const workers = Array.from({ length: Math.min(batchOcrConcurrency, images.length) }, async () => {
       while (cursor < images.length) {
-        const item = images[cursor];
+        const item = { ...images[cursor], pdfPath: pdfVectorPath };
         cursor += 1;
         try {
           const result = await recognizeTicketPageWithRetry(item, job);
@@ -1187,6 +1242,7 @@ async function runTicketOcrBatch(job, file, maxPages) {
     job.status = "error";
     job.message = formatErrorMessage(error);
   } finally {
+    if (pdfVectorTempDir) fs.rm(pdfVectorTempDir, { recursive: true, force: true }, () => {});
     job.finishedAt = Date.now();
     setTimeout(() => ticketOcrJobs.delete(job.id), 30 * 60 * 1000);
   }
@@ -1253,32 +1309,44 @@ async function recognizeTicketTables(request, response) {
     sendJson(response, 400, { error: "Only PDF OCR is supported here", message: "当前自动 OCR 只处理 PDF；图片会作为单张表入库。" });
     return;
   }
-  const images = await renderPdfPagesToImages(file, maxPages);
-  if (!images.length) {
-    sendJson(response, 422, { error: "No pages rendered", message: "PDF 页面渲染失败，请换一个 PDF 再试。" });
-    return;
-  }
-  const blocks = [];
-  const rowColorAnalyses = {};
-  for (let index = 0; index < images.length; index += 1) {
-    const checked = await recognizeTicketPageTextWithCompletenessCheck(images[index]);
-    const text = checked.text;
-    if (text) {
-      blocks.push(`--- PDF 第 ${images[index].page} 页 ---\n${text}`);
-      const expectedRows = checked.recognizedRows;
-      if (expectedRows) {
-        rowColorAnalyses[String(images[index].page)] = await analyzeTicketRowColorsFromDataUrl(images[index].image, expectedRows);
+  const { buffer } = dataUrlToBuffer(file);
+  const pdfVectorTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-recognize-pdf-vector-"));
+  const pdfVectorPath = path.join(pdfVectorTempDir, "source.pdf");
+  fs.writeFileSync(pdfVectorPath, buffer);
+  try {
+    const images = await renderPdfPagesToImages(file, maxPages);
+    if (!images.length) {
+      sendJson(response, 422, { error: "No pages rendered", message: "PDF 页面渲染失败，请换一个 PDF 再试。" });
+      return;
+    }
+    const blocks = [];
+    const rowColorAnalyses = {};
+    for (let index = 0; index < images.length; index += 1) {
+      const checked = await recognizeTicketPageTextWithCompletenessCheck(images[index]);
+      const text = checked.text;
+      if (text) {
+        blocks.push(`--- PDF 第 ${images[index].page} 页 ---\n${text}`);
+        const expectedRows = checked.recognizedRows;
+        if (expectedRows) {
+          const vectorAnalysis = await analyzeTicketRowColorsFromPdfPath(pdfVectorPath, images[index].page, expectedRows);
+          rowColorAnalyses[String(images[index].page)] =
+            vectorAnalysis.reliable || vectorAnalysis.rows?.length
+              ? vectorAnalysis
+              : await analyzeTicketRowColorsFromDataUrl(images[index].image, expectedRows);
+        }
       }
     }
+    const text = cleanRecognizedTableText(blocks);
+    sendJson(response, 200, {
+      text,
+      rowColorAnalyses,
+      pagesProcessed: images.length,
+      fileName,
+      message: text ? `已识别 ${images.length} 页票源内容。` : `已扫描 ${images.length} 页，但没有识别到可用表格内容。`,
+    });
+  } finally {
+    fs.rm(pdfVectorTempDir, { recursive: true, force: true }, () => {});
   }
-  const text = cleanRecognizedTableText(blocks);
-  sendJson(response, 200, {
-    text,
-    rowColorAnalyses,
-    pagesProcessed: images.length,
-    fileName,
-    message: text ? `已识别 ${images.length} 页票源内容。` : `已扫描 ${images.length} 页，但没有识别到可用表格内容。`,
-  });
 }
 
 async function analyzeTicketRowColors(request, response) {
@@ -1298,12 +1366,26 @@ async function analyzeTicketRowColors(request, response) {
     const buffer = fs.readFileSync(sourcePath);
     const mimeType = getMimeForExtension(sourcePath);
     if (mimeType === "application/pdf") {
+      if (expectedRows) {
+        const vectorAnalysis = await analyzeTicketRowColorsFromPdfPath(sourcePath, sourcePage, expectedRows);
+        if (vectorAnalysis.reliable || vectorAnalysis.rows?.length) {
+          sendJson(response, 200, { rowColorAnalysis: vectorAnalysis });
+          return;
+        }
+      }
       image = await renderPdfPageToImage(`data:application/pdf;base64,${buffer.toString("base64")}`, sourcePage);
     } else {
       image = `data:${mimeType};base64,${buffer.toString("base64")}`;
     }
   }
   if (image.startsWith("data:application/pdf")) {
+    if (expectedRows) {
+      const vectorAnalysis = await analyzeTicketRowColorsFromPdfDataUrl(image, sourcePage, expectedRows);
+      if (vectorAnalysis.reliable || vectorAnalysis.rows?.length) {
+        sendJson(response, 200, { rowColorAnalysis: vectorAnalysis });
+        return;
+      }
+    }
     image = await renderPdfPageToImage(image, sourcePage);
   }
   if (!image.startsWith("data:image/")) {

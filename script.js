@@ -4354,10 +4354,11 @@ function ensureRowColorColumn(table) {
 }
 
 function isVisualRowColorSource(table) {
-  return table?.rowColorSource === "opencv" || table?.rowColorSource === "ai_row_color";
+  return table?.rowColorSource === "opencv" || table?.rowColorSource === "ai_row_color" || table?.rowColorSource === "pdf_vector";
 }
 
 function getRowColorEngineName(table) {
+  if (table?.rowColorSource === "pdf_vector") return "PDF 原始颜色";
   return table?.rowColorSource === "ai_row_color" ? "AI" : "OpenCV";
 }
 
@@ -4371,7 +4372,7 @@ function hasTrustedRowColorSource(table) {
 
 function hasExactOpenCvRowAlignment(table) {
   return (
-    table?.rowColorSource === "opencv" &&
+    (table?.rowColorSource === "opencv" || table?.rowColorSource === "pdf_vector") &&
     Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
     Array.isArray(table.rows) &&
     Array.isArray(table.rowColorRows) &&
@@ -4383,7 +4384,7 @@ function hasExactOpenCvRowAlignment(table) {
 
 function hasExactVisualRowColorAlignment(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
-  if (table.rowColorSource === "opencv") return hasExactOpenCvRowAlignment(table);
+  if (table.rowColorSource === "opencv" || table.rowColorSource === "pdf_vector") return hasExactOpenCvRowAlignment(table);
   return (
     table.rowColorSource === "ai_row_color" &&
     Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
@@ -4889,7 +4890,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorRows = [];
   table.rowColorExactRowAligned = false;
 
-  if (!analysis || (analysis.source !== "opencv" && analysis.source !== "ai_row_color")) return 0;
+  if (!analysis || !["opencv", "ai_row_color", "pdf_vector"].includes(analysis.source)) return 0;
   table.rowColorSource = analysis.source;
   table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
   table.rowColorSelectionMode = analysis.selectionMode || "";
@@ -4916,7 +4917,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorAlignedStart = aligned.startIndex;
   table.rowColorExactRowAligned = Boolean(
     analysis.source === "ai_row_color" ||
-      (analysis.source === "opencv" && aligned.exact === true && assignedRows.length === table.rows.length),
+      ((analysis.source === "opencv" || analysis.source === "pdf_vector") && aligned.exact === true && assignedRows.length === table.rows.length),
   );
   const alignedSourceIndexes = Array.isArray(aligned.sourceIndexes) ? aligned.sourceIndexes : [];
   table.rowColorSourceIndexes = alignedSourceIndexes.length === table.rows.length ? [...alignedSourceIndexes] : table.rowColorSourceIndexes;
