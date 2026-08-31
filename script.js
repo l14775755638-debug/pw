@@ -1951,7 +1951,7 @@ function renderFailedOcrPanel(result = null) {
     )
     .join("");
   failedOcrData.value = buildFailedOcrReport(snapshot);
-  retryFailedOcrButton.disabled = snapshot.status === "running" || snapshot.status === "queued";
+  retryFailedOcrButton.disabled = !(snapshot.id || activeTicketOcrJobId);
 }
 
 async function pollTicketOcrJob(jobId) {
@@ -2008,6 +2008,15 @@ async function pollTicketOcrJob(jobId) {
       showToast("批量识别失败。", "error");
     });
   }, 1200);
+}
+
+async function refreshTicketOcrJobSnapshot(jobId) {
+  const response = await fetch(`/api/tables/recognize/job?id=${encodeURIComponent(jobId)}`);
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.message || result.error || "批量识别任务查询失败。");
+  activeTicketOcrJobId = result.id || jobId;
+  renderFailedOcrPanel(result);
+  return result;
 }
 
 async function recognizeTicketSource(file, detectedTables) {
@@ -11602,6 +11611,12 @@ retryFailedOcrButton.addEventListener("click", async () => {
   setUploadStatus("正在重试失败页...", "loading");
   showToast("正在重试失败页。", "loading");
   try {
+    const latest = await refreshTicketOcrJobSnapshot(jobId);
+    if (latest.status === "running" || latest.status === "queued") {
+      setUploadStatus(latest.message || "当前识别任务还没结束，请等全部扫描结束后再重试失败页。", "idle");
+      showToast("当前识别任务还没结束。", "idle");
+      return;
+    }
     const response = await fetch("/api/tables/recognize/retry-failed", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -11613,9 +11628,11 @@ retryFailedOcrButton.addEventListener("click", async () => {
     renderFailedOcrPanel(result);
     await pollTicketOcrJob(activeTicketOcrJobId);
   } catch (error) {
-    retryFailedOcrButton.disabled = false;
     setUploadStatus(error.message || "失败页重试失败。", "error");
     showToast("失败页重试失败。", "error");
+  } finally {
+    const snapshot = lastTicketOcrJobSnapshot;
+    retryFailedOcrButton.disabled = !snapshot?.id && !activeTicketOcrJobId;
   }
 });
 
