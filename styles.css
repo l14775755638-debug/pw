@@ -2284,31 +2284,6 @@ tr.hit-row td {
   gap: 8px;
 }
 
-.row-color-quality {
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid rgba(166, 58, 36, 0.22);
-  border-radius: 8px;
-  background: #fff7f2;
-}
-
-.row-color-quality.passed {
-  border-color: rgba(20, 108, 117, 0.22);
-  background: var(--soft);
-}
-
-.row-color-quality strong {
-  color: var(--ink);
-  font-size: 13px;
-}
-
-.row-color-quality span {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
 .opencv-color-preview {
   display: grid;
   gap: 8px;
