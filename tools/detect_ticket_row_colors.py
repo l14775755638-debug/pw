@@ -41,6 +41,9 @@ def build_color_masks(region):
     h = hsv[:, :, 0].astype(np.int16)
     s = hsv[:, :, 1].astype(np.int16)
     v = hsv[:, :, 2].astype(np.int16)
+    b = region[:, :, 0].astype(np.int16)
+    g = region[:, :, 1].astype(np.int16)
+    r = region[:, :, 2].astype(np.int16)
 
     valid = v > 55
     # Drop black text/grid pixels. They carry row borders/text, not background.
@@ -50,9 +53,15 @@ def build_color_masks(region):
         "white": non_ink & (s < 38) & (v > 178),
         "gray": non_ink & (s < 45) & (v <= 178) & (v > 80),
         "black": valid & (v <= 55),
-        "red": non_ink & (s > 65) & (v > 90) & ((h <= 8) | (h >= 170)),
-        "orange": non_ink & (s > 55) & (v > 95) & (h > 8) & (h < 24),
-        "yellow": non_ink & (s > 45) & (v > 100) & (h >= 24) & (h < 40),
+        "red": non_ink
+        & (s > 92)
+        & (v > 105)
+        & ((h <= 6) | (h >= 174))
+        & (r > 135)
+        & (r > g * 1.22)
+        & (r > b * 1.22),
+        "orange": non_ink & (s > 72) & (v > 105) & (h > 8) & (h < 23) & (r > b * 1.18),
+        "yellow": non_ink & (s > 62) & (v > 112) & (h >= 24) & (h < 39) & (r > b * 1.08) & (g > b * 1.08),
         "green": non_ink & (s > 45) & (v > 80) & (h >= 40) & (h < 88),
         "cyan": non_ink & (s > 45) & (v > 80) & (h >= 88) & (h < 104),
         "blue": non_ink & (s > 45) & (v > 70) & (h >= 104) & (h < 130),
@@ -169,11 +178,11 @@ def classify_pixels(region):
 
     strong_color = (
         colored_name in COLOR_KEYS
-        and colored_ratio >= 0.5
-        and coverage_ratio >= 0.62
-        and spatial["coloredBins"] >= max(4, spatial["whiteBins"] + 2)
-        and colored_confidence >= 0.52
-        and (white_ratio <= 0.18 or colored_ratio >= white_ratio * 2.2)
+        and colored_ratio >= 0.42
+        and coverage_ratio >= 0.42
+        and spatial["coloredBins"] >= max(3, spatial["whiteBins"] + 2)
+        and colored_confidence >= 0.5
+        and colored_ratio >= white_ratio + 0.16
     )
     if not strong_color:
         # Do not call a row "sold-colored" when only one cell, a side date block,
@@ -202,36 +211,76 @@ def classify_pixels(region):
 
 def detect_horizontal_intervals(image):
     height, width = image.shape[:2]
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    raw_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(raw_gray, (3, 3), 0)
     binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 21, 12)
-    kernel_width = max(35, width // 28)
-    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_width, 1))
-    horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
-    # Many seller screenshots use white or very pale grid lines on colored rows.
-    # Canny catches both dark and light separators, so row detection does not
-    # collapse into one giant band on pastel/red/yellow tables.
-    edges = cv2.Canny(gray, 45, 135)
-    horizontal_edges = cv2.morphologyEx(edges, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
-    horizontal = cv2.bitwise_or(horizontal, horizontal_edges)
-    projection = np.count_nonzero(horizontal, axis=1)
-    threshold = max(18, int(width * 0.055))
-    ys = np.where(projection >= threshold)[0]
-    line_runs = merge_runs(ys, gap=5)
-    line_centers = [int((start + end) / 2) for start, end in line_runs]
+    edges = cv2.Canny(raw_gray, 30, 110)
+    blurred_edges = cv2.Canny(gray, 35, 120)
 
+    # Seller screenshots mix full-width rules, short cell borders, and pale
+    # separators on colored rows. A single long kernel misses many small tables,
+    # so collect horizontal rules at several scales and then merge their y
+    # positions into row boundaries.
+    line_centers = []
+
+    def append_projection_lines(mask, min_fraction, max_thickness, gap=2):
+        projection = np.count_nonzero(mask, axis=1)
+        ys = np.where(projection >= max(24, int(width * min_fraction)))[0]
+        for run in merge_runs(ys, gap=gap):
+            if run[1] - run[0] > max_thickness:
+                continue
+            line_centers.append((int(run[0]) + int(run[1])) // 2)
+
+    # Thin white/light grid lines inside colored rows are easy to lose after
+    # thresholding. Keep them as possible row boundaries so rows near separators
+    # do not inherit the color of the divider above or below.
+    append_projection_lines(raw_gray < 82, 0.08, max(8, int(height * 0.012)), gap=2)
+    append_projection_lines(raw_gray > 246, 0.08, max(5, int(height * 0.008)), gap=1)
+    row_gradient = np.abs(cv2.Sobel(raw_gray, cv2.CV_16S, 0, 1, ksize=3))
+    append_projection_lines(row_gradient > 48, 0.10, max(6, int(height * 0.01)), gap=1)
+
+    full_rule_projection = np.count_nonzero(edges, axis=1)
+    full_rule_ys = np.where(full_rule_projection >= max(36, int(width * 0.10)))[0]
+    for run in merge_runs(full_rule_ys, gap=3):
+        if run[1] - run[0] <= max(8, int(height * 0.012)):
+            line_centers.append((int(run[0]) + int(run[1])) // 2)
+
+    kernel_widths = sorted(set([32, max(42, width // 32), max(64, width // 20)]))
+    for kernel_width in kernel_widths:
+        horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_width, 1))
+        min_fraction = 0.026 if kernel_width <= 40 else 0.02
+        min_pixels = max(4, int(width * min_fraction))
+        for source in (binary, edges, blurred_edges):
+            horizontal = cv2.morphologyEx(source, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
+            projection = np.count_nonzero(horizontal, axis=1)
+            ys = np.where(projection >= min_pixels)[0]
+            for run in merge_runs(ys, gap=3):
+                if run[1] - run[0] > max(12, int(height * 0.018)):
+                    continue
+                line_centers.append((int(run[0]) + int(run[1])) // 2)
+
+    if not line_centers:
+        return []
+
+    line_runs = merge_runs(sorted(line_centers), gap=5)
+    line_runs = [(max(0, run[0] - 1), min(height - 1, run[1] + 1)) for run in line_runs]
     intervals = []
-    for top, bottom in zip(line_centers, line_centers[1:]):
-        row_height = bottom - top
+    for upper_run, lower_run in zip(line_runs, line_runs[1:]):
+        # Use the content area between two detected horizontal rules, not the
+        # centers of the rules. Thick colored separators otherwise bleed into
+        # the next real ticket row and make a white row look red/yellow/green.
+        content_gap = int(lower_run[0]) - int(upper_run[1]) - 1
+        edge_padding = max(1, min(4, int(content_gap * 0.12)))
+        y1 = max(0, int(upper_run[1]) + edge_padding)
+        y2 = min(height, int(lower_run[0]) - edge_padding)
+        row_height = y2 - y1
         if row_height < 9 or row_height > max(95, int(height * 0.1)):
             continue
-        y1 = max(0, top + 2)
-        y2 = min(height, bottom - 2)
         if y2 - y1 < 7:
             continue
         band_gray = gray[y1:y2, :]
         dark_density = float(np.count_nonzero(band_gray < 150)) / band_gray.size
-        if dark_density < 0.003:
+        if dark_density < 0.0012:
             continue
         dark = band_gray < 130
         col_counts = np.count_nonzero(dark, axis=0)
@@ -246,7 +295,19 @@ def detect_horizontal_intervals(image):
                 "verticalLines": int(len(vertical_runs)),
             }
         )
-    return intervals
+
+    deduped = []
+    for interval in sorted(intervals, key=lambda item: (item["y1"], item["y2"])):
+        if deduped and interval["y1"] <= deduped[-1]["y2"] + 2:
+            current = deduped[-1]
+            current["y1"] = min(current["y1"], interval["y1"])
+            current["y2"] = max(current["y2"], interval["y2"])
+            current["height"] = current["y2"] - current["y1"]
+            current["darkDensity"] = max(current["darkDensity"], interval["darkDensity"])
+            current["verticalLines"] = max(current["verticalLines"], interval["verticalLines"])
+        else:
+            deduped.append(interval)
+    return deduped
 
 
 def group_intervals(intervals):
@@ -272,46 +333,55 @@ def choose_data_intervals(intervals, expected_rows):
     if not groups:
         return intervals[:expected_rows], "fallback"
 
-    drop_first = []
-    for group in groups:
-        drop_first.extend(group[1:] if len(group) > 1 else group)
-    if len(drop_first) == expected_rows:
-        return drop_first, "drop_header_exact"
-
-    drop_first_two = []
-    for group in groups:
-        drop_first_two.extend(group[2:] if len(group) > 2 else group[1:] if len(group) > 1 else group)
-    if len(drop_first_two) == expected_rows:
-        return drop_first_two, "drop_two_headers_exact"
-
-    candidates = drop_first if len(drop_first) >= expected_rows else intervals
-    if len(candidates) <= expected_rows:
-        return candidates, "short"
-
-    if expected_rows <= 2 and len(candidates) > expected_rows:
-        return candidates[-expected_rows:], "tail_small_table"
+    all_heights = [item["height"] for item in intervals]
+    median_height = float(np.median(all_heights)) if all_heights else 18
 
     def looks_like_non_data_row(item):
+        height = int(item.get("height") or 0)
         vertical_lines = int(item.get("verticalLines") or 0)
         dark_density = float(item.get("darkDensity") or 0)
-        likely_header = vertical_lines >= 30 and dark_density < 0.35
-        likely_separator = vertical_lines <= 8 and dark_density < 0.08
-        return likely_header or likely_separator
+        # Keep full ticket rows even when they are colored. Only remove visual
+        # separators or empty bands that have little cell/text structure.
+        likely_short_divider = (
+            height <= max(7, int(median_height * 0.32))
+            and dark_density < 0.055
+            and vertical_lines <= 4
+        )
+        likely_empty_gap = vertical_lines <= 1 and dark_density < 0.012
+        return likely_short_divider or likely_empty_gap
 
-    filtered_candidates = [item for item in candidates if not looks_like_non_data_row(item)]
-    if len(filtered_candidates) >= expected_rows:
-        candidates = filtered_candidates
+    def take_in_visual_order(candidates, mode):
+        if len(candidates) <= expected_rows:
+            return candidates, mode if mode != "prefix" else "short"
+        filtered = [item for item in candidates if not looks_like_non_data_row(item)]
+        if len(filtered) >= expected_rows:
+            return filtered[:expected_rows], f"{mode}_filtered"
+        return candidates[:expected_rows], mode
 
-    best = None
-    for start in range(0, len(candidates) - expected_rows + 1):
-        segment = candidates[start : start + expected_rows]
-        heights = np.array([item["height"] for item in segment], dtype=np.float32)
-        regularity = float(np.std(heights) / max(1.0, np.mean(heights)))
-        density = float(np.mean([item["darkDensity"] for item in segment]))
-        score = regularity - density * 0.15
-        if best is None or score < best[0]:
-            best = (score, segment)
-    return (best[1], "segment") if best else (candidates[:expected_rows], "segment")
+    def build_body(global_header_count):
+        selected = []
+        for group_index, group in enumerate(groups):
+            body = group
+            # Only the first visual table may contribute page-level title/header
+            # rows. Later groups often start right after a separator; dropping
+            # their first rows caused real tickets near a divider to inherit the
+            # divider color or disappear from color alignment.
+            if group_index == 0 and len(group) > global_header_count:
+                body = group[global_header_count:]
+            selected.extend(item for item in body if not looks_like_non_data_row(item))
+        return selected
+
+    for header_count in (2, 1, 0):
+        candidates = build_body(header_count)
+        if len(candidates) == expected_rows:
+            return candidates, f"global_header_{header_count}_exact"
+        if len(candidates) > expected_rows:
+            return take_in_visual_order(candidates, f"global_header_{header_count}")
+
+    candidates = [item for item in intervals if not looks_like_non_data_row(item)]
+    if len(candidates) < expected_rows:
+        candidates = intervals
+    return take_in_visual_order(candidates, "prefix")
 
 
 def find_x_bounds(image, y1, y2):
@@ -336,15 +406,181 @@ def find_x_bounds(image, y1, y2):
     return x1, x2
 
 
+def detect_vertical_cell_spans(image, y1, y2, x1, x2):
+    """Find likely table cells inside one OCR row.
+
+    Color decisions must be made from the inside of each cell, not from a full
+    horizontal stripe. Full-stripe sampling is how a divider/header color leaks
+    into the nearest ticket row.
+    """
+    width_total = x2 - x1
+    if width_total < 30 or y2 - y1 < 8:
+        return [(x1, x2)]
+
+    height, width = image.shape[:2]
+    inner_y1 = max(0, min(height, y1 + max(1, int((y2 - y1) * 0.2))))
+    inner_y2 = max(inner_y1 + 1, min(height, y2 - max(1, int((y2 - y1) * 0.2))))
+    row = image[inner_y1:inner_y2, max(0, x1):min(width, x2)]
+    if row.size == 0:
+        return [(x1, x2)]
+
+    gray = cv2.cvtColor(row, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 40, 135)
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(6, row.shape[0] // 2)))
+    vertical = cv2.morphologyEx(edges, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
+    projection = np.count_nonzero(vertical, axis=0)
+    xs = np.where(projection >= max(2, int(row.shape[0] * 0.42)))[0]
+    runs = merge_runs(xs, gap=3)
+    line_centers = [int(round((run[0] + run[1]) / 2)) + x1 for run in runs]
+    boundaries = [x1] + [x for x in line_centers if x1 + 4 < x < x2 - 4] + [x2]
+    boundaries = sorted(set(boundaries))
+
+    spans = []
+    min_span = max(14, int(width_total * 0.035))
+    for left, right in zip(boundaries, boundaries[1:]):
+        if right - left >= min_span:
+            spans.append((int(left), int(right)))
+    if len(spans) >= 3:
+        return spans
+
+    # Some screenshots/PDF renders have weak vertical grid lines. Never fall
+    # back to full-row sampling for ticket color decisions: a nearby divider
+    # can bleed into the stripe and make a normal row look colored. Use a small
+    # equal-width cell grid instead so each row is still judged by multiple
+    # independent cells.
+    fallback_count = 7 if width_total >= 360 else 6 if width_total >= 240 else 4
+    step = width_total / fallback_count
+    fallback_spans = []
+    for idx in range(fallback_count):
+        left = int(round(x1 + idx * step))
+        right = int(round(x1 + (idx + 1) * step))
+        if right - left >= 12:
+            fallback_spans.append((left, right))
+    return fallback_spans if len(fallback_spans) >= 3 else [(x1, x2)]
+
+
+def classify_interval_by_cells(image, y1, y2, x1, x2):
+    spans = detect_vertical_cell_spans(image, y1, y2, x1, x2)
+    cell_results = []
+    for left, right in spans:
+        cell_width = right - left
+        row_height = y2 - y1
+        trim_x = max(2, min(12, int(cell_width * 0.12)))
+        trim_y = max(1, min(10, int(row_height * 0.34)))
+        cell_x1 = min(right - 1, left + trim_x)
+        cell_x2 = max(cell_x1 + 1, right - trim_x)
+        cell_y1 = min(y2 - 1, y1 + trim_y)
+        cell_y2 = max(cell_y1 + 1, y2 - trim_y)
+        result = classify_pixels(image[cell_y1:cell_y2, cell_x1:cell_x2])
+        if result.get("reason") == "too_few_pixels":
+            continue
+        result["x1"] = int(left)
+        result["x2"] = int(right)
+        result["width"] = int(cell_width)
+        cell_results.append(result)
+
+    if len(cell_results) < 3:
+        return None
+
+    white_cells = 0
+    nonwhite_cells = []
+    unknown_cells = 0
+    for result in cell_results:
+        label = result.get("label") or result.get("rawLabel") or ""
+        colored_ratio = float(result.get("coloredRatio", 0) or 0)
+        white_ratio = float(result.get("whiteRatio", 0) or 0)
+        confidence = float(result.get("confidence", 0) or 0)
+        coverage_ratio = float(result.get("coverageRatio", 0) or 0)
+
+        if label == COLOR_NAMES["white"] or (white_ratio >= 0.3 and colored_ratio <= max(0.34, white_ratio * 1.2)):
+            white_cells += 1
+        elif label and label not in (COLOR_NAMES["gray"], COLOR_NAMES["black"]) and colored_ratio >= 0.22 and confidence >= 0.32:
+            nonwhite_cells.append(label)
+        elif colored_ratio >= 0.26 and coverage_ratio >= 0.2 and colored_ratio >= white_ratio + 0.08:
+            raw = result.get("rawLabel") or label or "非白底"
+            nonwhite_cells.append(raw)
+        else:
+            unknown_cells += 1
+
+    valid_cells = max(1, len(cell_results) - unknown_cells)
+    nonwhite_count = len(nonwhite_cells)
+    dominant_nonwhite = ""
+    if nonwhite_cells:
+        counts = {}
+        for label in nonwhite_cells:
+            counts[label] = counts.get(label, 0) + 1
+        dominant_nonwhite = max(counts, key=counts.get)
+
+    # A real sold-colored row normally colors most data cells. If only the date
+    # cell, sequence cell, or a neighboring divider is colored, keep it neutral.
+    color_cell_ratio = nonwhite_count / max(1, len(cell_results))
+    white_cell_ratio = white_cells / max(1, len(cell_results))
+    if nonwhite_count >= max(2, int(np.ceil(len(cell_results) * 0.42))) and nonwhite_count >= white_cells + 1:
+        return {
+            "label": dominant_nonwhite,
+            "rawLabel": dominant_nonwhite,
+            "confidence": round(color_cell_ratio, 3),
+            "coloredRatio": round(color_cell_ratio, 3),
+            "whiteRatio": round(white_cell_ratio, 3),
+            "coverageRatio": round(color_cell_ratio, 3),
+            "validBins": int(len(cell_results)),
+            "coloredBins": int(nonwhite_count),
+            "whiteBins": int(white_cells),
+            "cellCount": int(len(cell_results)),
+            "coloredCellCount": int(nonwhite_count),
+            "whiteCellCount": int(white_cells),
+            "strong": True,
+            "reason": "cell_majority_color",
+        }
+
+    if white_cells >= max(2, int(np.ceil(len(cell_results) * 0.4))):
+        return {
+            "label": COLOR_NAMES["white"],
+            "rawLabel": "",
+            "confidence": round(max(white_cell_ratio, 1 - color_cell_ratio), 3),
+            "coloredRatio": round(color_cell_ratio, 3),
+            "whiteRatio": round(white_cell_ratio, 3),
+            "coverageRatio": round(color_cell_ratio, 3),
+            "validBins": int(len(cell_results)),
+            "coloredBins": int(nonwhite_count),
+            "whiteBins": int(white_cells),
+            "cellCount": int(len(cell_results)),
+            "coloredCellCount": int(nonwhite_count),
+            "whiteCellCount": int(white_cells),
+            "strong": True,
+            "reason": "cell_majority_white",
+        }
+
+    return {
+        "label": "",
+        "rawLabel": dominant_nonwhite,
+        "confidence": round(max(color_cell_ratio, white_cell_ratio), 3),
+        "coloredRatio": round(color_cell_ratio, 3),
+        "whiteRatio": round(white_cell_ratio, 3),
+        "coverageRatio": round(color_cell_ratio, 3),
+        "validBins": int(len(cell_results)),
+        "coloredBins": int(nonwhite_count),
+        "whiteBins": int(white_cells),
+        "cellCount": int(len(cell_results)),
+        "coloredCellCount": int(nonwhite_count),
+        "whiteCellCount": int(white_cells),
+        "strong": False,
+        "reason": "cell_mixed_or_weak",
+    }
+
+
 def classify_interval(image, interval):
     y1, y2 = interval["y1"], interval["y2"]
-    vertical_trim = max(1, int((y2 - y1) * 0.24))
+    # Sample the safest center band of the row. Seller tables often put SOLD
+    # rows directly next to normal rows; using row edges can leak yellow/red
+    # pixels from neighbors and incorrectly downlist a normal ticket.
+    vertical_trim = max(1, int((y2 - y1) * 0.32))
     inner_y1 = min(y2, y1 + vertical_trim)
     inner_y2 = max(inner_y1 + 1, y2 - vertical_trim)
     x1, x2 = find_x_bounds(image, y1, y2)
     horizontal_trim = max(3, int((x2 - x1) * 0.01))
     region = image[inner_y1:inner_y2, min(x2, x1 + horizontal_trim) : max(x1 + 1, x2 - horizontal_trim)]
-    classified = classify_pixels(region)
+    classified = classify_interval_by_cells(image, y1, y2, x1, x2) or classify_pixels(region)
     return {
         **classified,
         "y1": int(y1),
@@ -449,13 +685,8 @@ def analyze(image_path, expected_rows=0):
         raise RuntimeError("image cannot be read")
     intervals = detect_horizontal_intervals(image)
     all_rows = [classify_interval(image, interval) for interval in intervals]
-    small_rows, small_mode = choose_small_table_rows(all_rows, expected_rows)
-    if small_rows is not None:
-        rows = small_rows
-        selection_mode = small_mode
-    else:
-        selected, selection_mode = choose_data_intervals(intervals, expected_rows)
-        rows = [classify_interval(image, interval) for interval in selected]
+    selected, selection_mode = choose_data_intervals(intervals, expected_rows)
+    rows = [classify_interval(image, interval) for interval in selected]
     labels = [row["label"] for row in rows if row.get("label")]
     unique_labels = sorted(set(labels))
     if len(rows) <= 1:
@@ -468,9 +699,56 @@ def analyze(image_path, expected_rows=0):
         max_row_gap = int(max(gaps)) if gaps else 0
         contiguous = max_row_gap <= max(10, median_height * 1.65)
     exact_rows = expected_rows <= 0 or len(rows) == expected_rows
-    reliable = bool(rows) and exact_rows and (selection_mode != "segment" or contiguous)
+    # Automatic decisions are allowed only when row count matches and the
+    # selected rows are contiguous. Segment/merged-small-table are still safe
+    # after divider filtering because they no longer include tiny color bands.
+    safe_selection_modes = {
+        "all",
+        "drop_header_exact",
+        "drop_two_headers_exact",
+        "prefix_after_two_headers",
+        "prefix_after_two_headers_filtered",
+        "prefix_filtered",
+        "prefix",
+        "short",
+        "fallback",
+        "merged_small_table",
+        "global_header_0_exact",
+        "global_header_1_exact",
+        "global_header_2_exact",
+        "global_header_0",
+        "global_header_1",
+        "global_header_2",
+        "global_header_0_filtered",
+        "global_header_1_filtered",
+        "global_header_2_filtered",
+        "first_group_drop_0",
+        "first_group_drop_1",
+        "first_group_drop_2",
+        "first_group_drop_0_filtered",
+        "first_group_drop_1_filtered",
+        "first_group_drop_2_filtered",
+    }
+    # Prefix selection intentionally follows the OCR row order on long pages;
+    # divider gaps inside those rows should not make the result unusable.
+    gap_allowed_modes = {
+        "prefix_after_two_headers",
+        "prefix_after_two_headers_filtered",
+        "prefix_filtered",
+        "prefix",
+        "global_header_0",
+        "global_header_1",
+        "global_header_2",
+        "global_header_0_filtered",
+        "global_header_1_filtered",
+        "global_header_2_filtered",
+        "merged_small_table",
+    }
+    reliable = bool(rows) and exact_rows and selection_mode in safe_selection_modes and (contiguous or selection_mode in gap_allowed_modes)
     if rows and any(row.get("confidence", 0) < 0.42 for row in rows):
         reliable = False
+    for index, row in enumerate(rows):
+        row["index"] = index
     return {
         "source": "opencv",
         "expectedRows": int(expected_rows or 0),

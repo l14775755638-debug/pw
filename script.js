@@ -1,5 +1,5 @@
-const REVIEW_FLAGS_VERSION = 16;
-const ROW_COLOR_LOGIC_VERSION = 10;
+const REVIEW_FLAGS_VERSION = 31;
+const ROW_COLOR_LOGIC_VERSION = 33;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -599,12 +599,44 @@ function extendColumnsForOverflowRows(columns, rows) {
 function looksLikeTicketDataCells(cells = []) {
   const values = cells.map((cell) => String(cell || "").trim()).filter(Boolean);
   if (values.length < 2) return false;
+  if (isNonTicketFooterCells(values)) return false;
   if (looksLikeRecognizedTableHeader(values.join("\t"))) return false;
   const dateLike = values.filter(isLikelyDateValue).length;
   const priceLike = values.filter((value) => isLikelySalePriceValue(value, { minPrice: 100 })).length;
   const compositeLike = values.filter((value) => parseCompositeSeatInfo(value)).length;
   const zoneLike = values.filter((value) => extractZoneTokenFromText(value)).length;
   return priceLike >= 1 && (dateLike >= 1 || compositeLike >= 1 || zoneLike >= 1);
+}
+
+function isNonTicketFooterText(value = "") {
+  const text = normalize(String(value || ""));
+  if (!text) return false;
+  return /下单后|下单不退|售出不退|售出后不退|不退不换|不退换|延期不退|延期只退|演出延期|演出取消|取消退票面|仅退票面|只退票面|退票面|画面价|票面价|顺丰到付|连坐可拆|出售不退|售出票面|保留订单|包含理售后|不包zone/.test(text);
+}
+
+function isNonTicketFooterCells(cells = [], columns = []) {
+  const values = cells.map((cell) => String(cell || "").trim()).filter(Boolean);
+  if (!values.length) return false;
+  const joined = values.join(" ");
+  if (!isNonTicketFooterText(joined)) return false;
+  const hasPrice = values.some((value) => isLikelySalePriceValue(value, { minPrice: 100 }));
+  if (hasPrice) return false;
+  const hasDate = values.some(isLikelyDateValue);
+  const hasSeatInfo = values.some((value) => {
+    const parsed = parseCompositeSeatInfo(value);
+    return Boolean(parsed?.zone || parsed?.row || parsed?.seat || extractZoneTokenFromText(value));
+  });
+  const meaningfulValues = values.filter((value, index) => {
+    const column = columns[index] || "";
+    if (isNonTicketFooterText(value)) return false;
+    if (isQuantityColumnName(column) && /^1$/.test(value)) return false;
+    return !/^[\-/|]+$/.test(value);
+  });
+  if (!hasDate && !hasSeatInfo) return true;
+  if (meaningfulValues.length <= 1 && values.length <= 3) return true;
+  const footerTextLength = values.filter(isNonTicketFooterText).join("").length;
+  const allTextLength = values.join("").length || 1;
+  return footerTextLength / allTextLength >= 0.65 && meaningfulValues.length <= 2;
 }
 
 function inferColumnsForHeaderlessRows(rows = []) {
@@ -628,22 +660,84 @@ function inferColumnsForHeaderlessRows(rows = []) {
   return columns;
 }
 
+function addRecognizedColumnIfMissing(targetColumns, rows, column) {
+  const label = String(column || "").trim();
+  if (!label || !isStrongRecognizedHeaderName(label)) return false;
+  if (getRecognizedColumnTargetIndex(targetColumns, label) >= 0) return false;
+  targetColumns.push(label);
+  rows.forEach((row) => row.push(""));
+  return true;
+}
+
+function mapRecognizedRowToColumns(row, sourceColumns, targetColumns) {
+  if (!Array.isArray(row)) return [];
+  const mapped = Array.from({ length: targetColumns.length }, () => "");
+  if (!Array.isArray(sourceColumns) || !sourceColumns.length) {
+    return adaptRowsToColumns([row], targetColumns)[0] || mapped;
+  }
+
+  const usedIndexes = new Set();
+  sourceColumns.forEach((column, columnIndex) => {
+    const value = String(row[columnIndex] || "").trim();
+    if (!value) return;
+    const targetIndex = getRecognizedColumnTargetIndex(targetColumns, column, usedIndexes);
+    if (targetIndex < 0) return;
+    const field = getDefaultFieldForHeader(targetColumns[targetIndex]) || targetColumns[targetIndex];
+    mapped[targetIndex] = mergeCanonicalCellValue(field, mapped[targetIndex], value);
+    usedIndexes.add(targetIndex);
+  });
+
+  row.slice(sourceColumns.length).forEach((value) => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    const emptyIndex = mapped.findIndex((item, index) => !usedIndexes.has(index) && !String(item || "").trim());
+    if (emptyIndex >= 0) mapped[emptyIndex] = text;
+  });
+  return mapped;
+}
+
 function parseTableText(text) {
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
   if (lines.length < 2) return null;
-  const firstCells = splitTableLine(lines[0]).map((cell) => cell.trim());
-  const firstLineIsData = looksLikeTicketDataCells(firstCells);
-  const rows = lines
-    .slice(firstLineIsData ? 0 : 1)
-    .map((line) => splitTableLine(line).map((cell) => cell.trim()))
-    .filter((row) => row.some(Boolean));
-  const columns = firstLineIsData ? inferColumnsForHeaderlessRows(rows) : firstCells;
+  const headerIndex = lines.findIndex((line) => looksLikeRecognizedTableHeader(line));
+  const firstDataIndex = lines.findIndex((line) => looksLikeTicketDataCells(splitTableLine(line).map((cell) => cell.trim())));
+  const firstLineIsData = headerIndex < 0 && firstDataIndex >= 0;
+
+  if (firstLineIsData) {
+    const dataStartIndex = Math.max(firstDataIndex, 0);
+    const rows = lines
+      .slice(dataStartIndex)
+      .filter((line) => !looksLikeRecognizedTableHeader(line))
+      .map((line) => splitTableLine(line).map((cell) => cell.trim()))
+      .filter((row) => row.some(Boolean) && !isNonTicketFooterCells(row));
+    const columns = inferColumnsForHeaderlessRows(rows);
+    extendColumnsForOverflowRows(columns, rows);
+    if (!columns.some(Boolean) || !rows.length) return null;
+    return { columns, rows, headerless: true };
+  }
+
+  if (headerIndex < 0) return null;
+  const columns = splitTableLine(lines[headerIndex]).map((cell) => cell.trim());
+  let activeColumns = [...columns];
+  const rows = [];
+
+  lines.slice(headerIndex + 1).forEach((line) => {
+    if (looksLikeRecognizedTableHeader(line)) {
+      activeColumns = splitTableLine(line).map((cell) => cell.trim());
+      activeColumns.forEach((column) => addRecognizedColumnIfMissing(columns, rows, column));
+      return;
+    }
+    const row = splitTableLine(line).map((cell) => cell.trim());
+    if (!row.some(Boolean) || isNonTicketFooterCells(row, activeColumns)) return;
+    rows.push(mapRecognizedRowToColumns(row, activeColumns, columns));
+  });
+
   extendColumnsForOverflowRows(columns, rows);
   if (!columns.some(Boolean) || !rows.length) return null;
-  return { columns, rows, headerless: firstLineIsData };
+  return { columns, rows, headerless: false };
 }
 
 function parseContinuationRows(text, columns) {
@@ -655,17 +749,437 @@ function parseContinuationRows(text, columns) {
   return lines
     .filter((line) => !looksLikeRecognizedTableHeader(line))
     .map((line) => splitTableLine(line).map((cell) => cell.trim()))
-    .filter((row) => row.filter(Boolean).length >= Math.min(2, Math.max(2, columns.length)) || looksLikeTicketDataCells(row))
+    .filter((row) => !isNonTicketFooterCells(row, columns))
+    .filter((row) => isLikelyContinuationRowForColumns(row, columns))
+    .map((row) => adaptRowsToColumns([row], columns)[0]);
+}
+
+function getRecognizedColumnFieldCount(columns = []) {
+  return columns.map((column) => getDefaultFieldForHeader(column)).filter(Boolean).length;
+}
+
+function hasStrongRecognizedColumns(columns = []) {
+  if (!Array.isArray(columns) || columns.length < 3) return false;
+  const fieldCount = columns.filter(isStrongRecognizedHeaderName).length;
+  const hasPrice = columns.some(isSalePriceColumnName) || columns.some((column) => getDefaultFieldForHeader(column) === "售价");
+  const hasSeatCue = columns.some((column) => {
+    const field = getDefaultFieldForHeader(column);
+    return ["区域", "排", "座位号", "位置", "票面"].includes(field);
+  });
+  return fieldCount >= 3 && hasPrice && hasSeatCue;
+}
+
+function isStandaloneLogisticsValue(value = "") {
+  return /^(转寄|轉寄|转赠|自取|面交|过户|配送|现场|配送\/现场|邮寄|邮寄票|快递|物流|电子票|纸质票|实体票|delivery|transfer|pickup|shipping|courier|배송|택배|현장)$/i.test(
+    String(value || "").trim(),
+  );
+}
+
+function isLikelyDataColumnName(column = "") {
+  const text = String(column || "").trim();
+  if (!text) return false;
+  if (isLikelyDateValue(text) || isLikelyDateColumnValue(text)) return true;
+  if (isSoldText(text, { strict: true }) || isLikelyStatusValue(text)) return true;
+  if (isStandaloneLogisticsValue(text) || isGenericFaceValue(text)) return true;
+  if (isLikelySalePriceValue(text, { minPrice: 100 })) return true;
+  if (parseCompositeSeatInfo(text) || extractZoneTokenFromText(text) || isLikelyZoneCode(text)) return true;
+  if (isLikelySeatRowValue(text) || isLikelySeatNumberValue(text)) return true;
+  return false;
+}
+
+function isStrongRecognizedHeaderName(column = "") {
+  const field = getDefaultFieldForHeader(column);
+  if (!field) return false;
+  if (isLikelyDataColumnName(column)) return false;
+  return true;
+}
+
+function shouldTreatParsedTableAsHeaderless(table) {
+  const columns = Array.isArray(table?.columns) ? table.columns : [];
+  if (!columns.length) return false;
+  const strongHeaders = columns.filter(isStrongRecognizedHeaderName).length;
+  const dataLikeHeaders = columns.filter(isLikelyDataColumnName).length;
+  return dataLikeHeaders >= Math.max(2, strongHeaders + 1);
+}
+
+function coerceSourceTableForSamePageMerge(source, targetColumns = []) {
+  if (!source || !Array.isArray(source.columns) || !Array.isArray(source.rows) || !Array.isArray(targetColumns) || !targetColumns.length) {
+    return source;
+  }
+  repairMisreadDataHeaderTable(source);
+  const sourceColumns = source.columns.map((column) => String(column || "").trim());
+  const targetFieldCount = getRecognizedColumnFieldCount(targetColumns);
+  const strongCount = sourceColumns.filter(isStrongRecognizedHeaderName).length;
+  const dataLikeCount = sourceColumns.filter(isLikelyDataColumnName).length;
+  const shouldUseTargetColumns =
+    targetFieldCount >= 3 &&
+    (shouldTreatParsedTableAsHeaderless(source) ||
+      hasMisreadDataHeaderColumns(source.columns, source.rows) ||
+      (strongCount < 3 && dataLikeCount >= 2));
+  if (!shouldUseTargetColumns) return source;
+
+  const rows = [source.columns, ...source.rows]
+    .filter((row) => Array.isArray(row) && row.some((cell) => String(cell || "").trim()))
+    .filter((row) => !isNonTicketFooterCells(row, targetColumns));
+  source.columns = [...targetColumns];
+  source.rows = adaptRowsToColumns(rows, targetColumns);
+  source.originalColumns = [...source.columns];
+  source.originalRows = cloneRows(source.rows);
+  source.headerless = true;
+  source._columnRepairChanged = true;
+  return source;
+}
+
+function getDataLikeHeaderField(column = "") {
+  const text = String(column || "").trim();
+  if (!text || isStrongRecognizedHeaderName(text)) return "";
+  const composite = parseCompositeSeatInfo(text);
+  if (isLikelySerialValue(text)) return "序号";
+  if (isLikelyDateValue(text) || isLikelyDateColumnValue(text)) return "日期";
+  if (isSoldText(text, { strict: true }) || isLikelyStatusValue(text)) return "状态";
+  if (isLikelySalePriceValue(text, { minPrice: 100 })) return "售价";
+  if (isStandaloneLogisticsValue(text)) return "备注";
+  if (isGenericFaceValue(text)) return "票面";
+  if (composite?.zone || extractZoneTokenFromText(text) || isLikelyZoneCode(text)) return "区域";
+  if (composite?.row || extractSeatRowFromText(text, { allowBareRange: true }) || isLikelySeatRowValue(text)) return "排";
+  if (composite?.seat || extractSeatNumberFromText(text, { allowBareRange: true }) || isLikelySeatNumberValue(text)) return "座位号";
+  return "";
+}
+
+function hasRepeatedInferredDataHeaderFields(columns = []) {
+  const counts = new Map();
+  columns.forEach((column) => {
+    const field = getDataLikeHeaderField(column);
+    if (!field) return;
+    counts.set(field, (counts.get(field) || 0) + 1);
+  });
+  return Array.from(counts.values()).some((count) => count > 1);
+}
+
+function hasMultipleTicketValueColumnLabels(columns = []) {
+  const fields = columns
+    .map(getDataLikeHeaderField)
+    .filter((field) => field && !["备注", "状态"].includes(field));
+  return fields.length >= 2 && new Set(fields).size >= 2;
+}
+
+function rowLooksOffsetFromHeaderValues(columns = [], row = []) {
+  if (!Array.isArray(row) || !row.some((cell) => String(cell || "").trim())) return false;
+  let offsetPairs = 0;
+  columns.forEach((column, index) => {
+    if (displayPairLooksOffset(column, row[index])) offsetPairs += 1;
+  });
+  return offsetPairs >= 2;
+}
+
+function hasMisreadDataHeaderColumns(columns = [], rows = []) {
+  if (!Array.isArray(columns) || columns.length < 3) return false;
+  const filledColumns = columns.map((column) => String(column || "").trim()).filter(Boolean);
+  if (filledColumns.length < 3) return false;
+  const strongHeaders = filledColumns.filter(isStrongRecognizedHeaderName).length;
+  const dataLikeHeaders = filledColumns.filter(isLikelyDataColumnName).length;
+  const nonStrongDataHeaders = filledColumns.filter((column) => !isStrongRecognizedHeaderName(column) && isLikelyDataColumnName(column));
+  const explicitHeaders = strongHeaders;
+  const oldRule = dataLikeHeaders >= Math.max(2, strongHeaders + 1) && explicitHeaders < Math.ceil(filledColumns.length * 0.5);
+  if (oldRule) return true;
+  if (hasMultipleTicketValueColumnLabels(filledColumns) && explicitHeaders < Math.ceil(filledColumns.length * 0.5)) return true;
+
+  const hasSerialOrDateValue = nonStrongDataHeaders.some((column) => isLikelySerialValue(column) || isLikelyDateValue(column) || isLikelyDateColumnValue(column));
+  const hasSeatOrPriceValue = nonStrongDataHeaders.some((column) => {
+    const composite = parseCompositeSeatInfo(column);
+    return (
+      Boolean(composite?.zone || composite?.row || composite?.seat) ||
+      Boolean(extractZoneTokenFromText(column)) ||
+      isLikelyZoneCode(column) ||
+      isLikelySeatRowValue(column) ||
+      isLikelySeatNumberValue(column) ||
+      isLikelySalePriceValue(column, { minPrice: 100 }) ||
+      isGenericFaceValue(column)
+    );
+  });
+  if (nonStrongDataHeaders.length >= 3 && hasSerialOrDateValue && hasSeatOrPriceValue) return true;
+  if (nonStrongDataHeaders.length >= 2 && hasRepeatedInferredDataHeaderFields(filledColumns)) return true;
+  if (Array.isArray(rows) && rows.slice(0, 5).some((row) => rowLooksOffsetFromHeaderValues(columns, row))) return true;
+  return false;
+}
+
+const CANONICAL_TICKET_COLUMN_ORDER = ["序号", "日期", "票面", "区域", "排", "座位号", "数量", "售价", "备注", "状态"];
+
+function getColumnValues(rows = [], columnIndex) {
+  return (Array.isArray(rows) ? rows : []).map((row) => String(row?.[columnIndex] || "").trim()).filter(Boolean);
+}
+
+function inferFieldFromColumnValues(values = []) {
+  if (!values.length) return "";
+  const ratio = (predicate) => values.filter(predicate).length / values.length;
+  if (ratio(isLikelySerialValue) >= 0.55) return "序号";
+  if (ratio((value) => isLikelyDateValue(value) || isLikelyDateColumnValue(value)) >= 0.45) return "日期";
+  if (ratio(hasPriceOrSoldValue) >= 0.45) return "售价";
+  if (ratio(isLikelyStatusValue) >= 0.45) return "状态";
+  if (ratio(isLikelySeatCountValue) >= 0.7 && values.length > 1) return "数量";
+  if (ratio(isLikelyRemarkValue) >= 0.45 || ratio(isStandaloneLogisticsValue) >= 0.45) return "备注";
+  if (ratio(isLikelyFaceValue) >= 0.45) return "票面";
+  if (
+    ratio((value) => {
+      const parsed = parseCompositeSeatInfo(value);
+      return Boolean(parsed?.zone || extractZoneTokenFromText(value) || isLikelyZoneCode(value));
+    }) >= 0.45
+  ) {
+    return "区域";
+  }
+  if (ratio((value) => Boolean(extractSeatRowFromText(value)) || isLikelySeatRowValue(value)) >= 0.45) return "排";
+  if (ratio((value) => Boolean(extractSeatNumberFromText(value, { allowBareRange: true })) || isLikelySeatNumberValue(value)) >= 0.45) return "座位号";
+  return "";
+}
+
+function getTrustedFieldForPossiblyMisreadColumn(column = "", rows = [], columnIndex = 0) {
+  const strongField = getDefaultFieldForHeader(column);
+  if (strongField && !isLikelyDataColumnName(column)) return strongField;
+  const dataField = getDataLikeHeaderField(column);
+  if (dataField) return dataField;
+  return inferFieldFromColumnValues(getColumnValues(rows, columnIndex));
+}
+
+function mergeCanonicalCellValue(field, current = "", incoming = "") {
+  const left = String(current || "").trim();
+  const right = String(incoming || "").trim();
+  if (!right) return left;
+  if (!left) return right;
+  if (normalize(left) === normalize(right)) return left;
+
+  if (field === "售价") {
+    const leftPrice = isLikelySalePriceValue(left, { minPrice: 100 });
+    const rightPrice = isLikelySalePriceValue(right, { minPrice: 100 });
+    if (rightPrice && !leftPrice) return right;
+    if (leftPrice && !rightPrice) return left;
+  }
+  if (field === "日期") {
+    const leftDate = isLikelyDateValue(left) || isLikelyDateColumnValue(left);
+    const rightDate = isLikelyDateValue(right) || isLikelyDateColumnValue(right);
+    if (rightDate && !leftDate) return right;
+    if (leftDate && !rightDate) return left;
+  }
+  if (field === "区域") {
+    const leftZone = extractZoneTokenFromText(left) || cleanZoneToken(left);
+    const rightZone = extractZoneTokenFromText(right) || cleanZoneToken(right);
+    if (currentEvent?.zones?.some((zone) => zoneTokenMatches(rightZone, zone)) && !currentEvent.zones.some((zone) => zoneTokenMatches(leftZone, zone))) return right;
+    if (leftZone && rightZone && rightZone.length > leftZone.length && !isLikelySeatRowValue(right)) return right;
+  }
+  if (field === "排") {
+    const rightRow = extractSeatRowFromText(right) || isLikelySeatRowValue(right);
+    const leftRow = extractSeatRowFromText(left) || isLikelySeatRowValue(left);
+    if (rightRow && !leftRow) return right;
+    if (leftRow && !rightRow) return left;
+  }
+  if (field === "座位号") {
+    const rightSeat = extractSeatNumberFromText(right, { allowBareRange: true }) || isLikelySeatNumberValue(right);
+    const leftSeat = extractSeatNumberFromText(left, { allowBareRange: true }) || isLikelySeatNumberValue(left);
+    if (rightSeat && !leftSeat) return right;
+    if (leftSeat && !rightSeat) return left;
+  }
+  if (field === "数量") {
+    if (isLikelySeatCountValue(right) && !isLikelySeatCountValue(left)) return right;
+    if (isLikelySeatCountValue(left) && !isLikelySeatCountValue(right)) return left;
+  }
+  if (field === "备注") {
+    return [left, right].filter(Boolean).filter((value, index, list) => list.findIndex((item) => normalize(item) === normalize(value)) === index).join(" / ");
+  }
+  return left;
+}
+
+function rebuildMisreadColumnsWithoutPromotingHeaderRow(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows) || !table.rows.length) return false;
+  const fieldByIndex = table.columns.map((column, index) => getTrustedFieldForPossiblyMisreadColumn(column, table.rows, index));
+  const trustedCount = fieldByIndex.filter(Boolean).length;
+  if (trustedCount < 3) return false;
+
+  const orderedFields = CANONICAL_TICKET_COLUMN_ORDER.filter((field) => fieldByIndex.includes(field));
+  fieldByIndex.forEach((field, index) => {
+    if (field || orderedFields.includes(table.columns[index])) return;
+    const label = String(table.columns[index] || "").trim();
+    if (label && !isLikelyDataColumnName(label) && !looksLikeRecognizedTableHeader(label)) orderedFields.push(label);
+  });
+  if (orderedFields.length < 3) return false;
+
+  table.rows = table.rows
     .map((row) => {
-      const next = row.slice();
-      while (next.length < columns.length) next.push("");
-      return next;
-    });
+      const valuesByField = new Map();
+      (Array.isArray(row) ? row : []).forEach((cell, index) => {
+        const value = String(cell || "").trim();
+        if (!value) return;
+        const field = fieldByIndex[index];
+        if (!field) return;
+        valuesByField.set(field, mergeCanonicalCellValue(field, valuesByField.get(field), value));
+      });
+      return orderedFields.map((field) => valuesByField.get(field) || "");
+    })
+    .filter((row) => row.some(Boolean) && !isNonTicketFooterCells(row, orderedFields));
+  table.columns = orderedFields;
+  table.originalColumns = [...orderedFields];
+  table.originalRows = cloneRows(table.rows);
+  table.headerless = false;
+  table._columnRepairChanged = true;
+  return Boolean(table.rows.length);
+}
+
+function getSampleValuesForRows(rows = [], columnIndex) {
+  return rows.map((row) => String(row?.[columnIndex] || "").trim()).filter(Boolean);
+}
+
+function valueMatchCount(values = [], predicate) {
+  return values.filter(predicate).length;
+}
+
+function hasPriceOrSoldValue(value) {
+  return isLikelySalePriceValue(value, { minPrice: 100 }) || isSoldText(value, { strict: true });
+}
+
+function isLikelyFaceValue(value) {
+  const text = String(value || "").trim();
+  if (!text || isLikelyDateValue(text) || hasPriceOrSoldValue(text)) return false;
+  if (isStandaloneLogisticsValue(text) || isLogisticsOrRemarkValue(text)) return false;
+  return isGenericFaceValue(text) || /^(general|vip|cat\s*\d+|floor|standing|内场|內場|看台|看臺|121000|[134]\d{2})$/i.test(text);
+}
+
+function makeUniqueInferredColumn(label, seen) {
+  const base = label || "备注";
+  const count = seen.get(base) || 0;
+  seen.set(base, count + 1);
+  return count ? `${base}${count + 1}` : base;
+}
+
+function inferColumnsForMisreadDataRows(rows = []) {
+  const maxCellCount = Math.max(0, ...rows.map((row) => row.length));
+  const columns = Array.from({ length: maxCellCount }, () => "");
+  const used = new Set();
+  const chooseBestIndex = (label, predicate, scorer = () => 0, { threshold = 0.45, preferLast = false } = {}) => {
+    const candidates = Array.from({ length: maxCellCount }, (_, index) => {
+      if (used.has(index)) return null;
+      const values = getSampleValuesForRows(rows, index);
+      if (!values.length) return null;
+      const matches = valueMatchCount(values, predicate);
+      const ratio = matches / values.length;
+      if (ratio < threshold && matches < Math.min(2, values.length)) return null;
+      return {
+        index,
+        ratio,
+        matches,
+        score: ratio * 100 + matches * 8 + scorer(values, index) + (preferLast ? index : -index) * 0.2,
+      };
+    })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)[0];
+    if (!candidates) return -1;
+    columns[candidates.index] = label;
+    used.add(candidates.index);
+    return candidates.index;
+  };
+
+  chooseBestIndex("售价", hasPriceOrSoldValue, (values, index) => index * 3, { threshold: 0.35, preferLast: true });
+  chooseBestIndex("日期", (value) => isLikelyDateValue(value) || isLikelyDateColumnValue(value), (values, index) => (index <= 2 ? 8 : 0), { threshold: 0.45 });
+  chooseBestIndex("状态", isLikelyStatusValue, () => 0, { threshold: 0.45 });
+  chooseBestIndex("票面", isLikelyFaceValue, () => 0, { threshold: 0.45 });
+  chooseBestIndex(
+    "区域",
+    (value) => {
+      const parsed = parseCompositeSeatInfo(value);
+      return Boolean(parsed?.zone || extractZoneTokenFromText(value) || isLikelyZoneCode(value));
+    },
+    (values) => values.filter((value) => currentEvent?.zones?.some((zone) => zoneTokenMatches(value, zone))).length * 30,
+    { threshold: 0.35 },
+  );
+  chooseBestIndex("排", (value) => Boolean(extractSeatRowFromText(value)) || isLikelySeatRowValue(value), () => 0, { threshold: 0.35 });
+  chooseBestIndex("座位号", (value) => Boolean(extractSeatNumberFromText(value, { allowBareRange: true })) || isLikelySeatNumberValue(value), () => 0, {
+    threshold: 0.35,
+  });
+  chooseBestIndex("数量", isLikelySeatCountValue, (values, index) => (index > 0 ? -index : 0), { threshold: 0.55 });
+  chooseBestIndex("序号", isLikelySerialValue, (values, index) => (index === 0 ? 30 : 0), { threshold: 0.45 });
+
+  const seen = new Map();
+  return columns.map((column, index) => {
+    if (column) return makeUniqueInferredColumn(column, seen);
+    const values = getSampleValuesForRows(rows, index);
+    const label = values.some(isLogisticsOrRemarkValue) || values.some(isLikelyRemarkValue) ? "备注" : `第${index + 1}列`;
+    return makeUniqueInferredColumn(label, seen);
+  });
+}
+
+function repairMisreadDataHeaderTable(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return table;
+  const columnsMisread = hasMisreadDataHeaderColumns(table.columns, table.rows);
+  const originalColumnsMisread = hasMisreadDataHeaderColumns(table.originalColumns, table.originalRows);
+  if (!columnsMisread && !originalColumnsMisread) return table;
+
+  if (columnsMisread) {
+    if (!rebuildMisreadColumnsWithoutPromotingHeaderRow(table)) {
+      const promotedRows = [table.columns, ...table.rows]
+        .map((row) => (Array.isArray(row) ? row.map((cell) => String(cell || "").trim()) : []))
+        .filter((row) => row.some(Boolean) && !isNonTicketFooterCells(row));
+      if (promotedRows.length) {
+        table.columns = inferColumnsForMisreadDataRows(promotedRows);
+        table.rows = promotedRows.map((row) => adaptRowsToColumns([row], table.columns)[0]);
+        table.originalColumns = [...table.columns];
+        table.originalRows = cloneRows(table.rows);
+        table.headerless = true;
+        table._columnRepairChanged = true;
+      }
+    }
+  } else if (originalColumnsMisread) {
+    table.originalColumns = [...table.columns];
+    table.originalRows = cloneRows(table.rows);
+    table._columnRepairChanged = true;
+  }
+  if (table._columnRepairChanged) table.reviewFlagsVersion = 0;
+  return table;
+}
+
+function isLikelyContinuationRowForColumns(row = [], columns = []) {
+  if (!Array.isArray(row) || !row.some((cell) => String(cell || "").trim())) return false;
+  if (looksLikeRecognizedTableHeader(row.join("\t"))) return false;
+  if (isNonTicketFooterCells(row, columns)) return false;
+  const values = row.map((cell) => String(cell || "").trim()).filter(Boolean);
+  if (values.length < 2) return false;
+  const hasPriceOrSold = values.some((value) => isLikelySalePriceValue(value) || isSoldText(value, { strict: true }));
+  const hasDate = values.some((value) => isLikelyDateValue(value) || isLikelyDateColumnValue(value));
+  const hasSeat = values.some(
+    (value) =>
+      Boolean(extractZoneTokenFromText(value)) ||
+      Boolean(parseCompositeSeatInfo(value)) ||
+      isLikelySeatRowValue(value) ||
+      isLikelySeatNumberValue(value),
+  );
+  const hasStatus = values.some(isLikelyStatusValue);
+  if (hasPriceOrSold && (hasDate || hasSeat || hasStatus)) return true;
+  if (hasStatus && (hasDate || hasSeat)) return true;
+  if (looksLikeTicketDataCells(row)) return true;
+  const fieldCount = getRecognizedColumnFieldCount(columns);
+  const minimumCells = Math.min(4, Math.max(2, columns.length - 2));
+  return fieldCount >= 3 && values.length >= minimumCells && (hasDate || hasSeat);
+}
+
+function canTreatAsContinuationTable(previous, next) {
+  if (!previous || !next) return false;
+  if (previous.sourcePage !== next.sourcePage) return false;
+  if (!hasStrongRecognizedColumns(previous.columns)) return false;
+  if (!next.headerless && !shouldTreatParsedTableAsHeaderless(next) && hasStrongRecognizedColumns(next.columns)) return false;
+  const rows = Array.isArray(next.rows) ? next.rows : [];
+  if (!rows.length) return false;
+  const continuationRows = rows.filter((row) => isLikelyContinuationRowForColumns(row, previous.columns)).length;
+  if (!continuationRows) return false;
+  const compatibleLength = rows.some((row) => row.length <= previous.columns.length + 2);
+  return compatibleLength && continuationRows / rows.length >= 0.5;
+}
+
+function appendContinuationRows(previous, rows = []) {
+  if (!previous || !rows.length) return;
+  previous.rows.push(...adaptRowsToColumns(rows, previous.columns));
+  extendColumnsForOverflowRows(previous.columns, previous.rows);
 }
 
 function canMergeRecognizedTables(previous, next) {
   if (!previous || !next) return false;
   if (previous.sourcePage !== next.sourcePage) return false;
+  if (shouldTreatParsedTableAsHeaderless(next)) return false;
   const compatibleColumns = areRecognizedColumnsCompatible(previous.columns, next.columns);
   if (compatibleColumns) return true;
   if (!next.headerless) return false;
@@ -712,35 +1226,102 @@ function adaptRowsToColumns(rows, columns) {
   });
 }
 
+function getRecognizedColumnTargetIndex(columns, column, usedIndexes = new Set()) {
+  const field = getDefaultFieldForHeader(column);
+  const exact = normalize(column);
+  let index = columns.findIndex((candidate, candidateIndex) => !usedIndexes.has(candidateIndex) && normalize(candidate) === exact);
+  if (index >= 0) return index;
+  if (!field) return -1;
+  index = columns.findIndex(
+    (candidate, candidateIndex) => !usedIndexes.has(candidateIndex) && getDefaultFieldForHeader(candidate) === field,
+  );
+  return index;
+}
+
+function mergeRecognizedTableInto(previous, next) {
+  if (!previous || !next) return;
+  if (shouldTreatParsedTableAsHeaderless(next)) {
+    appendContinuationRows(previous, next.rows);
+    return;
+  }
+  next.columns.forEach((column) => {
+    if (isStrongRecognizedHeaderName(column) && getRecognizedColumnTargetIndex(previous.columns, column) < 0) {
+      previous.columns.push(column);
+      previous.rows.forEach((row) => row.push(""));
+    }
+  });
+  const mappedRows = next.rows.map((row) => {
+    const mapped = Array.from({ length: previous.columns.length }, () => "");
+    const usedIndexes = new Set();
+    next.columns.forEach((column, columnIndex) => {
+      const targetIndex = getRecognizedColumnTargetIndex(previous.columns, column, usedIndexes);
+      if (targetIndex < 0) return;
+      mapped[targetIndex] = row[columnIndex] || "";
+      usedIndexes.add(targetIndex);
+    });
+    row.slice(next.columns.length).forEach((value) => {
+      const emptyIndex = mapped.findIndex((item) => !String(item || "").trim());
+      if (emptyIndex >= 0) mapped[emptyIndex] = value;
+    });
+    return mapped;
+  });
+  previous.rows.push(...mappedRows);
+  extendColumnsForOverflowRows(previous.columns, previous.rows);
+}
+
+function isRecognizedHeaderCueCell(cell = "") {
+  const text = String(cell || "").trim();
+  const normalized = normalize(text);
+  if (!normalized) return false;
+  if (
+    isLikelyDateValue(text) ||
+    isLikelyDateColumnValue(text) ||
+    isLikelySalePriceValue(text) ||
+    isSoldText(text, { strict: true }) ||
+    isLikelyStatusValue(text) ||
+    isStandaloneLogisticsValue(text) ||
+    parseCompositeSeatInfo(text) ||
+    isLikelySeatRowValue(text) ||
+    isLikelySeatNumberValue(text)
+  ) {
+    return false;
+  }
+  if (/^(no|no\.|num|number|id|date|day|price|ask|block|section|zone|area|row|seat|qty|count|status)$/i.test(text)) return true;
+  if (
+    /^(序号|编号|日期|演出日期|时间|门票时间|票面|票价|价位|价格|售价|单价|区域|区|位置|席位|座席|排|排数|行|行数|座位|座位号|座号|号数|号段|票面位置|票面号段|座位图|数量|张数|连坐|备注|说明|状态)$/.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  return /(date|day|price|ask|block|section|zone|area|row|seat|qty|status|구역|열|좌석|가격|매수|수량)/i.test(text);
+}
+
 function looksLikeRecognizedTableHeader(line) {
   const cells = splitTableLine(line).map((cell) => cell.trim()).filter(Boolean);
   if (cells.length < 2) return false;
-  const cueCount = cells.filter((cell) =>
-    /(序号|编号|日期|演出日期|时间|票面|票价|价位|价格|售价|区域|区|位置|席位|排|行|座位|号段|数量|张数|连坐|备注|状态|date|day|price|ask|block|section|row|seat|qty|status|구역|열|좌석|가격|매수)/i.test(cell),
+  const valueLikeCount = cells.filter(
+    (cell) =>
+      isLikelyDateValue(cell) ||
+      isLikelyDateColumnValue(cell) ||
+      isLikelySalePriceValue(cell) ||
+      isSoldText(cell, { strict: true }) ||
+      isStandaloneLogisticsValue(cell) ||
+      parseCompositeSeatInfo(cell),
   ).length;
+  const hasDateAndPrice =
+    cells.some((cell) => isLikelyDateValue(cell) || isLikelyDateColumnValue(cell)) &&
+    cells.some((cell) => isLikelySalePriceValue(cell) || isSoldText(cell, { strict: true }));
+  if (hasDateAndPrice && valueLikeCount >= Math.max(2, Math.floor(cells.length * 0.35))) return false;
+  const cueCount = cells.filter(isRecognizedHeaderCueCell).length;
   if (cueCount < 2) return false;
-  const valueLikeCount = cells.filter((cell) => isLikelyDateValue(cell) || isLikelySalePriceValue(cell) || parseCompositeSeatInfo(cell)).length;
-  return valueLikeCount < cells.length - 1;
+  const canonicalFields = new Set(cells.map((cell) => getDefaultFieldForHeader(cell)).filter(Boolean));
+  const hasKeyField = canonicalFields.has("日期") || canonicalFields.has("售价") || canonicalFields.has("区域") || canonicalFields.has("排");
+  return hasKeyField && valueLikeCount <= Math.max(1, Math.floor(cells.length * 0.25));
 }
 
 function splitRecognizedTableSections(block) {
-  const lines = String(block || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length < 2) return [block];
-  const sections = [];
-  let current = [];
-  lines.forEach((line) => {
-    if (looksLikeRecognizedTableHeader(line) && current.length >= 2) {
-      sections.push(current.join("\n"));
-      current = [line];
-      return;
-    }
-    current.push(line);
-  });
-  if (current.length) sections.push(current.join("\n"));
-  return sections.length ? sections : [block];
+  return [block];
 }
 
 function extractSourcePageFromBlock(block) {
@@ -783,44 +1364,46 @@ function splitRecognizedPageBlocks(text) {
 function splitRecognizedTables(text) {
   const parsedBlocks = [];
   splitRecognizedPageBlocks(text).forEach((source) => {
-      splitRecognizedTableSections(source.text).forEach((section) => {
-        const parsed = parseTableText(section);
-        const sourcePage = source.sourcePage || null;
-        const firstLine = String(section || "")
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)[0];
-        const hasHeader = looksLikeRecognizedTableHeader(firstLine || "");
-        const previous = parsedBlocks[parsedBlocks.length - 1];
-        if (parsed && hasHeader) {
-          const nextTable = { ...parsed, sourcePage };
-          if (canMergeRecognizedTables(previous, nextTable)) {
-            previous.rows.push(...adaptRowsToColumns(nextTable.rows, previous.columns));
-            extendColumnsForOverflowRows(previous.columns, previous.rows);
-            return;
-          }
-          parsedBlocks.push(nextTable);
+    splitRecognizedTableSections(source.text).forEach((section) => {
+      const parsed = parseTableText(section);
+      const sourcePage = source.sourcePage || null;
+      const sectionLines = String(section || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const hasHeader = sectionLines.some((line) => looksLikeRecognizedTableHeader(line));
+      const previous = parsedBlocks[parsedBlocks.length - 1];
+      if (parsed && hasHeader) {
+        const nextTable = { ...parsed, sourcePage };
+        if (canMergeRecognizedTables(previous, nextTable)) {
+          mergeRecognizedTableInto(previous, nextTable);
           return;
         }
-        if (previous && previous.sourcePage === sourcePage) {
-          const continuationRows = parseContinuationRows(section, previous.columns);
-          if (continuationRows.length) {
-            previous.rows.push(...continuationRows);
-            extendColumnsForOverflowRows(previous.columns, previous.rows);
-            return;
-          }
+        parsedBlocks.push(nextTable);
+        return;
+      }
+      if (previous && previous.sourcePage === sourcePage) {
+        const continuationRows = parseContinuationRows(section, previous.columns);
+        if (continuationRows.length) {
+          previous.rows.push(...continuationRows);
+          extendColumnsForOverflowRows(previous.columns, previous.rows);
+          return;
         }
-        if (parsed) {
-          const nextTable = { ...parsed, sourcePage };
-          if (canMergeRecognizedTables(previous, nextTable)) {
-            previous.rows.push(...adaptRowsToColumns(nextTable.rows, previous.columns));
-            extendColumnsForOverflowRows(previous.columns, previous.rows);
-            return;
-          }
-          parsedBlocks.push(nextTable);
+      }
+      if (parsed) {
+        const nextTable = { ...parsed, sourcePage };
+        if (canTreatAsContinuationTable(previous, nextTable)) {
+          appendContinuationRows(previous, nextTable.rows);
+          return;
         }
-      });
+        if (canMergeRecognizedTables(previous, nextTable)) {
+          mergeRecognizedTableInto(previous, nextTable);
+          return;
+        }
+        parsedBlocks.push(nextTable);
+      }
     });
+  });
   const pagePartCounts = {};
   parsedBlocks.forEach((table) => {
     const pageKey = String(table.sourcePage || "single");
@@ -903,14 +1486,14 @@ function isEmailDeliveryValue(value) {
 }
 
 function isShippingDeliveryValue(value) {
-  return /(邮寄票|邮寄|快递|物流|配送|送达|送下|转寄|轉寄|寄送|发货|到付|纸质票|實體票|实体票|shipping|ship|courier|delivery|택배|배송|배달)/i.test(String(value || ""));
+  return /(邮寄票|邮寄|郵寄|邮件|郵件|邮箱|郵箱|快递|物流|配送|送达|送下|转寄|轉寄|寄送|发货|到付|纸质票|實體票|实体票|shipping|ship|courier|delivery|택배|배송|배달)/i.test(String(value || ""));
 }
 
 function isLikelyRemarkValue(value) {
   const text = String(value || "").trim();
   return Boolean(
     text &&
-      /连|视阻|rv|restricted|自取|邮寄票|邮寄|寄送|转寄|轉寄|转赠|配送|送达|送下|配合|面交|过户|靠过道|靠過道|过道|過道|电子票|纸质票|实体票|實體票|快递|物流|酒店|地址|卡|权益|备注|说明|实际|避雷|可拆|不可拆|包含|배송|배달|택배|양도|전달|수령|현장|직거래|비고|메모|참고/i.test(
+      /连|视阻|rv|restricted|自取|邮寄票|邮寄|郵寄|邮件|郵件|邮箱|郵箱|寄送|转寄|轉寄|转赠|配送|送达|送下|配合|面交|过户|過戶|邮\/过户|邮寄\/过户|靠过道|靠過道|过道|過道|电子票|纸质票|实体票|實體票|快递|物流|酒店|地址|卡|权益|备注|说明|实际|避雷|可拆|不可拆|包含|배송|배달|택배|양도|전달|수령|현장|직거래|비고|메모|참고/i.test(
         text,
       ),
   );
@@ -919,19 +1502,19 @@ function isLikelyRemarkValue(value) {
 function isLogisticsOrRemarkValue(value) {
   const text = String(value || "").trim();
   if (!text || isSoldText(text, { strict: true })) return false;
-  return /(配送|送达|送下|配合|可协助|转寄|轉寄|转赠|转客|转让|自取|面交|过户|电子票|纸质票|实体票|實體票|快递|物流|邮寄票|邮寄|寄送|酒店|地址|取票|交付|发货|到付|面交|delivery|transfer|pickup|shipping|ship|courier|배송|배달|택배|양도|전달|수령|현장|직거래)/i.test(
+  return /(配送|送达|送下|配合|可协助|转寄|轉寄|转赠|转客|转让|自取|面交|过户|過戶|邮\/过户|邮寄\/过户|电子票|纸质票|实体票|實體票|快递|物流|邮寄票|邮寄|郵寄|邮件|郵件|邮箱|郵箱|寄送|酒店|地址|取票|交付|发货|到付|面交|delivery|transfer|pickup|shipping|ship|courier|배송|배달|택배|양도|전달|수령|현장|직거래)/i.test(
     text,
   );
 }
 
 function isDeliveryColumnName(column = "") {
-  return /(交付|取票|配送|送达|送下|转寄|轉寄|转赠|自取|面交|过户|物流|快递|邮寄票|邮寄|寄送|发货|delivery|transfer|pickup|shipping|ship|courier|배송|배달|택배|양도|전달|수령|현장|직거래)/i.test(
+  return /(交付|取票|配送|送达|送下|转寄|轉寄|转赠|自取|面交|过户|過戶|邮\/过户|邮寄\/过户|物流|快递|邮寄票|邮寄|郵寄|邮件|郵件|邮箱|郵箱|寄送|发货|delivery|transfer|pickup|shipping|ship|courier|배송|배달|택배|양도|전달|수령|현장|직거래)/i.test(
     String(column || ""),
   );
 }
 
 function isRemarkColumnName(column = "") {
-  return /(备注|说明|remark|note|标记|交付|取票|配送|送达|送下|转寄|轉寄|转赠|自取|面交|过户|物流|快递|邮寄票|邮寄|寄送|发货|delivery|transfer|pickup|shipping|ship|courier|비고|메모|참고|배송|배달|택배|양도|전달|수령|현장|직거래)/i.test(
+  return /(备注|说明|remark|note|标记|交付|取票|配送|送达|送下|转寄|轉寄|转赠|自取|面交|过户|過戶|邮\/过户|邮寄\/过户|物流|快递|邮寄票|邮寄|郵寄|邮件|郵件|邮箱|郵箱|寄送|发货|delivery|transfer|pickup|shipping|ship|courier|비고|메모|참고|배송|배달|택배|양도|전달|수령|현장|직거래)/i.test(
     String(column || ""),
   );
 }
@@ -1296,7 +1879,7 @@ function confirmFieldMappingImport() {
   selectedPendingTableId = tables[0]?.id || selectedPendingTableId;
   fieldMappingDraft = null;
   renderFieldMappingPreview();
-  setUploadStatus(`已按字段映射生成 ${tables.length} 张待确认表${removedSoldRows ? `，已跳过 ${removedSoldRows} 条已售票` : ""}。`, "success");
+  setUploadStatus(`已按字段映射生成 ${tables.length} 张待确认表${removedSoldRows ? `，已跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。`, "success");
   showToast("字段映射已保存，表格已进入待确认。", "success");
   saveAppState();
   renderUploadRecords();
@@ -1936,7 +2519,8 @@ function isProtectedNonPriceColumnName(column = "") {
 
 function extractSalePriceText(value, { minPrice = 1000 } = {}) {
   const raw = String(value || "").trim();
-  if (!raw || isSoldText(raw, { strict: true }) || isLikelyDateValue(raw) || isLikelyRowColorValue(raw)) return "";
+  const hasCurrency = /[￥¥$€£₩]/.test(raw);
+  if (!raw || isSoldText(raw, { strict: true }) || (!hasCurrency && isLikelyDateValue(raw)) || isLikelyRowColorValue(raw)) return "";
   const minDigits = Number(minPrice) < 1000 ? 3 : 4;
   const pricePattern = new RegExp(`[￥¥$€£₩]?\\s*\\d{1,3}(?:[,，]\\d{3})+(?:\\.\\d+)?|[￥¥$€£₩]?\\s*\\d{${minDigits},7}(?:\\.\\d+)?`, "g");
   const matches = raw.match(pricePattern) || [];
@@ -1950,7 +2534,7 @@ function extractSalePriceText(value, { minPrice = 1000 } = {}) {
 function isLikelySalePriceValue(value, options = {}) {
   const text = String(value || "").trim();
   if (!text || isSoldText(text, { strict: true })) return false;
-  if (isLikelyDateValue(text)) return false;
+  if (!/[￥¥$€£₩]/.test(text) && isLikelyDateValue(text)) return false;
   const minPrice = Number(options.minPrice || 1000);
   const priceText = extractSalePriceText(text, { minPrice });
   const number = extractNumber(priceText);
@@ -1959,7 +2543,7 @@ function isLikelySalePriceValue(value, options = {}) {
 
 function isSalePriceCandidateValue(value) {
   const text = String(value || "").trim();
-  if (!text || isSoldText(text, { strict: true }) || isLikelyDateValue(text) || isLikelyRowColorValue(text)) return false;
+  if (!text || isSoldText(text, { strict: true }) || (!/[￥¥$€£₩]/.test(text) && isLikelyDateValue(text)) || isLikelyRowColorValue(text)) return false;
   const priceText = extractSalePriceText(text, { minPrice: 100 });
   const number = extractNumber(priceText);
   return number !== null && number >= 100;
@@ -2376,7 +2960,10 @@ function getSalePriceCandidateFromRow(table, row, { afterIndex = -1, excludeInde
       if (!value || excludeIndexes.has(index) || isInternalColorColumn(column) || isLikelyRowColorValue(value)) return false;
       if (!isSalePriceCandidateValue(value)) return false;
       const protectedColumn = isProtectedNonPriceColumnName(column);
-      if (protectedColumn && !isSalePriceColumnName(column) && !isRemarkColumnName(column) && !isDeliveryColumnName(column)) return false;
+      const hasExplicitCurrencyPrice = /[￥¥$€£₩]/.test(value) && Boolean(extractSalePriceText(value, { minPrice: 100 }));
+      if (protectedColumn && !hasExplicitCurrencyPrice && !isSalePriceColumnName(column) && !isRemarkColumnName(column) && !isDeliveryColumnName(column)) {
+        return false;
+      }
       return true;
     })
     .map((item) => {
@@ -2388,7 +2975,8 @@ function getSalePriceCandidateFromRow(table, row, { afterIndex = -1, excludeInde
       let score = 0;
       if (saleHeader) score += 130;
       if (hasCurrency) score += 55;
-      if (remarkHeader) score += 35;
+      if (remarkHeader && hasCurrency) score += 12;
+      if (remarkHeader && !hasCurrency) score -= 45;
       if (item.index > afterIndex) score += 30;
       if (item.index >= Math.max(0, row.length - 3)) score += 16;
       if (item.index === row.length - 1) score += 35;
@@ -2419,12 +3007,81 @@ function moveValueIntoRemarkColumn(table, row, value) {
   return false;
 }
 
-function shouldClearMovedPriceSource(table, sourceIndex, priceIndex) {
+function shouldClearMovedPriceSource(table, sourceIndex, priceIndex, sourceValue = "") {
   if (sourceIndex < 0 || sourceIndex === priceIndex) return false;
   const column = table.columns?.[sourceIndex] || "";
   if (isSalePriceColumnName(column) || isFaceValueColumnName(column)) return false;
+  const hasExplicitCurrencyPrice = /[￥¥$€£₩]/.test(String(sourceValue || "")) && Boolean(extractSalePriceText(sourceValue, { minPrice: 100 }));
+  if (hasExplicitCurrencyPrice) return true;
   if (isRemarkColumnName(column) || isDeliveryColumnName(column)) return true;
   return !isProtectedNonPriceColumnName(column);
+}
+
+function isExplicitCurrencySalePrice(value) {
+  const text = String(value || "").trim();
+  return /[￥¥$€£₩]/.test(text) && Boolean(extractSalePriceText(text, { minPrice: 100 }));
+}
+
+function findExplicitCurrencySalePriceInRow(table, row) {
+  if (!table || !Array.isArray(row)) return "";
+  const columns = table.columns || [];
+  const candidates = row
+    .map((value, index) => ({
+      value: String(value || "").trim(),
+      index,
+      column: columns[index] || "",
+      price: extractSalePriceText(value, { minPrice: 100 }),
+    }))
+    .filter((item) => item.value && item.price && isExplicitCurrencySalePrice(item.value))
+    .filter((item) => !isFaceValueColumnName(item.column) && !isInternalColorColumn(item.column))
+    .filter((item) => !isBusinessStatusRemarkValue(item.value) && !isSoldText(item.value, { strict: true }))
+    .sort((a, b) => {
+      const aSaleHeader = isSalePriceColumnName(a.column) ? 1 : 0;
+      const bSaleHeader = isSalePriceColumnName(b.column) ? 1 : 0;
+      return bSaleHeader - aSaleHeader || b.index - a.index;
+    });
+  return candidates[0]?.price || "";
+}
+
+function repairExplicitCurrencyPriceInWrongColumn(table, row, rowIndex = -1) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(row)) return false;
+  let priceIndex = findSalePriceColumnIndex(table.columns);
+  const directPrice = priceIndex >= 0 ? extractSalePriceText(row[priceIndex], { minPrice: 100 }) : "";
+  const priceCellText = priceIndex >= 0 ? String(row[priceIndex] || "").trim() : "";
+  const priceCellIsWrong =
+    priceCellText &&
+    !directPrice &&
+    (isLikelyRemarkValue(priceCellText) || isLogisticsOrRemarkValue(priceCellText) || isLikelyDateValue(priceCellText));
+  const explicitPriceCell = row
+    .map((value, index) => ({
+      value: String(value || "").trim(),
+      index,
+      column: table.columns[index] || "",
+      price: extractSalePriceText(value, { minPrice: 100 }),
+    }))
+    .filter((item) => item.value && item.index !== priceIndex && item.price && isExplicitCurrencySalePrice(item.value))
+    .filter((item) => !isFaceValueColumnName(item.column) && !isInternalColorColumn(item.column))
+    .sort((a, b) => {
+      const aSaleHeader = isSalePriceColumnName(a.column) ? 1 : 0;
+      const bSaleHeader = isSalePriceColumnName(b.column) ? 1 : 0;
+      return bSaleHeader - aSaleHeader || b.index - a.index;
+    })[0];
+
+  if (!explicitPriceCell || (directPrice && !priceCellIsWrong)) return false;
+
+  let changed = false;
+  priceIndex = ensureSalePriceColumn(table);
+  if (priceCellText && priceCellIsWrong && moveValueIntoRemarkColumn(table, row, priceCellText)) changed = true;
+  if (row[priceIndex] !== explicitPriceCell.price) {
+    row[priceIndex] = explicitPriceCell.price;
+    changed = true;
+  }
+  if (shouldClearMovedPriceSource(table, explicitPriceCell.index, priceIndex, explicitPriceCell.value)) {
+    row[explicitPriceCell.index] = "";
+    changed = true;
+  }
+  if (changed && rowIndex >= 0) syncOriginalRowFromCurrentRow(table, rowIndex, row);
+  return changed;
 }
 
 function repairShiftedSalePriceAndRemark(table, row) {
@@ -2438,7 +3095,7 @@ function repairShiftedSalePriceAndRemark(table, row) {
   const candidate = getSalePriceCandidateFromRow(table, row, { afterIndex: priceIndex, excludeIndexes: excluded });
 
   if (priceCellIsRemark && candidate) {
-    if (shouldClearMovedPriceSource(table, candidate.index, priceIndex)) {
+    if (shouldClearMovedPriceSource(table, candidate.index, priceIndex, candidate.value)) {
       row[candidate.index] = "";
       changed = true;
     }
@@ -2462,11 +3119,84 @@ function repairShiftedSalePriceAndRemark(table, row) {
       row[priceIndex] = candidate.price;
       changed = true;
     }
-    if (shouldClearMovedPriceSource(table, candidate.index, priceIndex)) {
+    if (shouldClearMovedPriceSource(table, candidate.index, priceIndex, candidate.value)) {
       row[candidate.index] = "";
       changed = true;
     }
   }
+
+  return changed;
+}
+
+function rowHasTicketContentOutsideDate(table, row, dateIndex) {
+  const zoneIndex = findColumnIndex(table.columns || [], ["区域", "区", "block", "section", "구역"]);
+  const rowIndex = findSeatRowColumnIndexes(table.columns || [])[0] ?? -1;
+  const seatIndex = findSeatNumberColumnIndexes(table.columns || [])[0] ?? -1;
+  return row.some((cell, index) => {
+    if (index === dateIndex) return false;
+    const text = String(cell || "").trim();
+    if (!text || isPlaceholderOrSeparatorText(text)) return false;
+    if (index === zoneIndex && isLikelyZoneCode(text)) return true;
+    if (index === rowIndex && isLikelySeatRowValue(text)) return true;
+    if (index === seatIndex && isLikelySeatNumberValue(text)) return true;
+    return isExplicitCurrencySalePrice(text) || isSalePriceCandidateValue(text);
+  });
+}
+
+function repairMisplacedDateAndPriceValues(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  const dateIndexes = findColumnIndexes(table.columns, ["日期", "演出日期", "date", "day", "일자"]);
+  if (!dateIndexes.length) return false;
+  let changed = false;
+
+  dateIndexes.forEach((dateIndex) => {
+    let lastDate = "";
+    table.rows.forEach((row, rowIndex) => {
+      while (row.length < table.columns.length) row.push("");
+      if (table.userEditedRows?.[rowIndex]) {
+        const editedDate = String(row[dateIndex] || "").trim();
+        if (editedDate && isLikelyDateColumnValue(editedDate)) lastDate = editedDate;
+        return;
+      }
+
+      let rowChanged = false;
+      const currentDate = String(row[dateIndex] || "").trim();
+      if (currentDate && isExplicitCurrencySalePrice(currentDate)) {
+        const priceIndex = ensureSalePriceColumn(table);
+        const existingPrice = getDirectSalePriceFromRow(table, row);
+        const movedPrice = extractSalePriceText(currentDate, { minPrice: 100 });
+        const priceCellText = String(row[priceIndex] || "").trim();
+        const priceCellIsRemark =
+          Boolean(priceCellText && !extractSalePriceText(priceCellText, { minPrice: 100 })) &&
+          (isLikelyRemarkValue(priceCellText) || isLogisticsOrRemarkValue(priceCellText));
+        if (priceCellIsRemark && moveValueIntoRemarkColumn(table, row, priceCellText)) {
+          changed = true;
+          rowChanged = true;
+        }
+        if ((!existingPrice || priceCellIsRemark) && movedPrice && row[priceIndex] !== movedPrice) {
+          row[priceIndex] = movedPrice;
+          changed = true;
+          rowChanged = true;
+        }
+        row[dateIndex] = "";
+        changed = true;
+        rowChanged = true;
+        if (lastDate && rowHasTicketContentOutsideDate(table, row, dateIndex)) {
+          row[dateIndex] = lastDate;
+        }
+      }
+
+      const nextDate = String(row[dateIndex] || "").trim();
+      if (nextDate && isLikelyDateColumnValue(nextDate)) {
+        lastDate = nextDate;
+      } else if (!nextDate && lastDate && rowHasTicketContentOutsideDate(table, row, dateIndex)) {
+        row[dateIndex] = lastDate;
+        changed = true;
+        rowChanged = true;
+      }
+      if (rowChanged) syncOriginalRowFromCurrentRow(table, rowIndex, row);
+    });
+  });
 
   return changed;
 }
@@ -2727,6 +3457,58 @@ function parseEnglishCompositeSeatInfo(value) {
   return { zone, row, seat };
 }
 
+function parseEnglishSideRowPosition(value) {
+  const text = normalizeCompositeSeatValue(value);
+  if (!/(?:side|row)/i.test(text)) return null;
+  const normalized = text
+    .replace(/\bSide\b/gi, " Side ")
+    .replace(/\bRow\b/gi, " Row ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const patterns = [
+    /(?:^|\s)(?:\d+\s*F\s*[-\s]*)?Side\s*([A-Z]{0,3}\d{2,4}[A-Z]?|[A-Z]\d?)[.。,\s-]+Row\s*([A-Z]|\d{1,3})[.。,\s-]*((?:\d+\s*)?X|\d{1,4}\s*[-到至]\s*\d{1,4}|\d{1,4}\s*(?:号|號))?/i,
+    /(?:^|\s)(?:\d+\s*F\s*[-\s]*)?Side\s*([A-Z]{0,3}\d{2,4}[A-Z]?|[A-Z]\d?)\s*Row\s*([A-Z]|\d{1,3})[.。,\s-]*((?:\d+\s*)?X|\d{1,4}\s*[-到至]\s*\d{1,4}|\d{1,4}\s*(?:号|號))?/i,
+    /(?:^|\s)(?:\d+\s*F\s*[-\s]*)?([A-Z]{0,3}\d{2,4}[A-Z]?|[A-Z]\d?)\s*Side[.。,\s-]+([A-Z]|\d{1,3})\s*Row[.。,\s-]*((?:\d+\s*)?X|\d{1,4}\s*[-到至]\s*\d{1,4}|\d{1,4}\s*(?:号|號))?/i,
+    /(?:^|\s)(?:\d+\s*F\s*[-\s]*)?([A-Z]{0,3}\d{2,4}[A-Z]?|[A-Z]\d?)\s+Row\s*([A-Z]|\d{1,3})[.。,\s-]*((?:\d+\s*)?X|\d{1,4}\s*[-到至]\s*\d{1,4}|\d{1,4}\s*(?:号|號))?/i,
+  ];
+  const match = patterns.map((pattern) => normalized.match(pattern)).find(Boolean);
+  if (!match) return null;
+  const zone = normalizeExtractedZoneToken(match[1], text);
+  if (!zone || !isLikelyZoneCode(zone)) return null;
+  const rowValue = String(match[2] || "").trim().toUpperCase();
+  const row = rowValue ? `${rowValue}排` : "";
+  const seat = String(match[3] || "").replace(/\s+/g, "").toUpperCase();
+  return { zone, row, seat };
+}
+
+function parseHybridCompositeSeatInfo(value) {
+  const text = normalizeCompositeSeatValue(value);
+  if (!text) return null;
+  const normalized = text
+    .replace(/[.。,:：]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const zonePattern = "(?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})\\d+[A-Z]?|\\d{2,4}[A-Z]?|FE|FW";
+  const rowUnitPattern = "[A-Z]?\\d{1,3}|[A-Z]|[一二三四五六七八九十]+";
+  const rowPattern = `${rowUnitPattern}(?:\\s*[-到至~—]\\s*${rowUnitPattern})?`;
+  const seatPattern = "(?:\\d+\\s*)?X|X|\\d{1,4}\\s*[-到至]\\s*\\d{1,4}\\s*(?:号|號)?|\\d{1,4}\\s*(?:号|號)?";
+  const explicitZoneRow = normalized.match(
+    new RegExp(`(${zonePattern})\\s*(?:区|區|구역|구)?\\s*(${rowPattern})\\s*(?:排|row|열)\\s*(${seatPattern})?`, "i"),
+  );
+  if (!explicitZoneRow) return null;
+  const zone = normalizeExtractedZoneToken(explicitZoneRow[1], text);
+  if (!zone || !isLikelyZoneCode(zone)) return null;
+  const rowRaw = String(explicitZoneRow[2] || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s*[-到至~—]\s*/g, "-");
+  const row = rowRaw ? `${rowRaw}排` : "";
+  const tail = normalized.slice((explicitZoneRow.index || 0) + explicitZoneRow[0].length);
+  const tailSeat = extractSeatNumberFromText(tail, { allowBareRange: true });
+  const seat = String(explicitZoneRow[3] || tailSeat || "").replace(/\s+/g, "").toUpperCase();
+  return { zone, row, seat };
+}
+
 function parseCompactCompositeSeatInfo(value) {
   const text = normalizeCompositeSeatValue(value);
   const match = text.match(
@@ -2742,6 +3524,30 @@ function parseCompactCompositeSeatInfo(value) {
   return { zone, row, seat };
 }
 
+function parseLooseCompositeSeatInfo(value) {
+  const text = normalizeCompositeSeatValue(value);
+  if (!text) return null;
+  const normalized = text
+    .replace(/(?:看臺|看台|內場|内场|场内|場內|floor|층|层)/gi, " ")
+    .replace(/\bSide\b/gi, " ")
+    .replace(/[.。,:：]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const explicitZoneRow =
+    normalized.match(
+      /((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})\d+[A-Z]?|\d{2,4}[A-Z]?|FE|FW)\s*(?:区|區|구역|구)?\s*([A-Z]?\d{1,3}(?:\s*[-到至]\s*[A-Z]?\d{1,3})?|[A-Z]|[一二三四五六七八九十]+)\s*(?:排|row|열)\s*((?:\d+\s*)?X|X|\d{1,4}\s*[-到至]\s*\d{1,4}\s*(?:号|號)?|\d{1,4}\s*(?:号|號)?)?/i,
+    ) ||
+    normalized.match(
+      /((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})\d+[A-Z]?|\d{2,4}[A-Z]?|FE|FW)\s+([A-Z])\s*((?:\d+\s*)?X|X|\d{1,4}\s*[-到至]\s*\d{1,4}\s*(?:号|號)?|\d{1,4}\s*(?:号|號)?)\b/i,
+    );
+  if (!explicitZoneRow) return null;
+  const zone = normalizeExtractedZoneToken(explicitZoneRow[1], text);
+  if (!zone || !isLikelyZoneCode(zone)) return null;
+  const row = explicitZoneRow[2] ? `${String(explicitZoneRow[2]).trim().toUpperCase()}排` : "";
+  const seat = String(explicitZoneRow[3] || "").replace(/\s+/g, "").toUpperCase();
+  return { zone, row, seat };
+}
+
 function parseCompositeSeatInfo(value) {
   const text = normalizeCompositeSeatValue(value);
   if (!text) return null;
@@ -2752,7 +3558,12 @@ function parseCompositeSeatInfo(value) {
     .replace(/(?:^|[^\d])\d{1,2}[./\-月]\d{1,2}\s*(?:日|号)?(?=$|[^\d])/, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const parsedLocation = parseEnglishCompositeSeatInfo(withoutDate) || parseCompactCompositeSeatInfo(withoutDate);
+  const parsedLocation =
+    parseEnglishSideRowPosition(withoutDate) ||
+    parseHybridCompositeSeatInfo(withoutDate) ||
+    parseLooseCompositeSeatInfo(withoutDate) ||
+    parseEnglishCompositeSeatInfo(withoutDate) ||
+    parseCompactCompositeSeatInfo(withoutDate);
   if (parsedLocation?.zone) {
     return {
       date,
@@ -2822,7 +3633,9 @@ function repairCompositeSeatInfo(table, row, indexes) {
   let changed = false;
   const sourceColumn = table.columns[sourceIndex] || "";
   const sourceIsCompositeZoneRow = isCompositeZoneRowColumnName(sourceColumn);
-  const sourceNeedsDedicatedSplit = sourceIsCompositeZoneRow || (parsed.zone && parsed.row && isSeatLocationColumnName(sourceColumn));
+  const sourceIsSeatStructureColumn =
+    isSeatLocationColumnName(sourceColumn) || isSeatRowColumnName(sourceColumn) || isSeatNumberColumnName(sourceColumn);
+  const sourceNeedsDedicatedSplit = sourceIsCompositeZoneRow || (parsed.zone && parsed.row && sourceIsSeatStructureColumn);
   if (parsed.date) {
     const dateIndex = ensureDateColumn(table);
     const currentDate = String(row[dateIndex] || "").trim();
@@ -2878,7 +3691,11 @@ function repairCompositeSeatInfo(table, row, indexes) {
       changed = true;
     }
   }
-  if (sourceIndex !== zoneIndex && isFaceValueColumnName(sourceColumn) && String(row[sourceIndex] || "").trim()) {
+  if (
+    sourceIndex !== zoneIndex &&
+    (isFaceValueColumnName(sourceColumn) || (sourceNeedsDedicatedSplit && !isRemarkColumnName(sourceColumn))) &&
+    String(row[sourceIndex] || "").trim()
+  ) {
     row[sourceIndex] = "";
     changed = true;
   }
@@ -3145,7 +3962,7 @@ function repairSalePriceAndQuantity(table, row) {
     if (fallbackPrice?.price) {
       const priceIndex = ensureSalePriceColumn(table);
       row[priceIndex] = fallbackPrice.price;
-      if (shouldClearMovedPriceSource(table, fallbackPrice.index, priceIndex)) row[fallbackPrice.index] = "";
+      if (shouldClearMovedPriceSource(table, fallbackPrice.index, priceIndex, fallbackPrice.value)) row[fallbackPrice.index] = "";
       changed = true;
     }
   }
@@ -3307,6 +4124,11 @@ function normalizePendingTableColumns(table) {
       quantityIndex = findQuantityColumnIndex(table.columns);
       priceIndex = findSalePriceColumnIndex(table.columns);
     }
+    if (!manuallyEdited && repairExplicitCurrencyPriceInWrongColumn(table, row, rowIndex)) {
+      changed = true;
+      quantityIndex = findQuantityColumnIndex(table.columns);
+      priceIndex = findSalePriceColumnIndex(table.columns);
+    }
 
     const priceMissing = priceIndex < 0 || !hasTicketSalePrice({ table, row, index: -1 });
     if (!manuallyEdited && priceMissing && colorIndex >= 0 && isLikelySalePriceValue(row[colorIndex], { minPrice: 100 })) {
@@ -3344,16 +4166,39 @@ function normalizePendingTableColumns(table) {
 
   });
 
+  if (repairMisplacedDateAndPriceValues(table)) {
+    changed = true;
+    quantityIndex = findQuantityColumnIndex(table.columns);
+    priceIndex = findSalePriceColumnIndex(table.columns);
+  }
+
   if (repairMergedContextValues(table)) {
     changed = true;
     table.rows.forEach((row, rowIndex) => {
       if (table.userEditedRows?.[rowIndex]) return;
       if (repairSalePriceAndQuantity(table, row)) changed = true;
+      if (repairExplicitCurrencyPriceInWrongColumn(table, row, rowIndex)) changed = true;
     });
+    if (repairMisplacedDateAndPriceValues(table)) changed = true;
   }
 
   if (mergeDuplicateColumnsByName(table)) {
     changed = true;
+    if (repairSemanticColumnRoles(table)) changed = true;
+    table.rows.forEach((row, rowIndex) => {
+      if (table.userEditedRows?.[rowIndex]) return;
+      const repairedComposite = repairCompositeSeatInfoFromCandidateColumns(table, row);
+      const repairedCompositeAnyCell = repairCompositeSeatInfoFromAnyCell(table, row);
+      const repairedSeparatedPosition = repairSeparatedSeatPositionFields(table, row);
+      const repairedZone = repairZoneFromPosition(table, row);
+      if (repairedComposite || repairedCompositeAnyCell || repairedSeparatedPosition || repairedZone) {
+        changed = true;
+      }
+      if (repairSalePriceAndQuantity(table, row)) changed = true;
+      if (repairExplicitCurrencyPriceInWrongColumn(table, row, rowIndex)) changed = true;
+    });
+    if (repairMergedContextValues(table)) changed = true;
+    if (repairMisplacedDateAndPriceValues(table)) changed = true;
   }
 
   table.autoRepairedColumns = Boolean(table.autoRepairedColumns || changed);
@@ -3393,7 +4238,95 @@ function normalizeRowColorLabel(value) {
   if (/purple|violet|紫/.test(text)) return "紫底";
   if (/black|黑/.test(text)) return "黑底";
   if (/cyan|青|湖蓝|天蓝/.test(text)) return "青底";
+  if (/非白|有色|彩色|colored|colour/.test(text)) return "非白底";
   return "";
+}
+
+function getOpenCvCellStats(item) {
+  const cellCount = Number(item?.cellCount || 0);
+  const coloredCellCount = Number(item?.coloredCellCount || 0);
+  const whiteCellCount = Number(item?.whiteCellCount || 0);
+  return {
+    cellCount,
+    coloredCellCount,
+    whiteCellCount,
+    coloredCellRatio: cellCount ? coloredCellCount / cellCount : 0,
+    whiteCellRatio: cellCount ? whiteCellCount / cellCount : 0,
+  };
+}
+
+function isOpenCvCellMajorityWhite(item) {
+  const { cellCount, coloredCellCount, whiteCellCount, whiteCellRatio } = getOpenCvCellStats(item);
+  if (cellCount < 3) return false;
+  const neededWhite = Math.max(2, Math.ceil(cellCount * 0.4));
+  return whiteCellCount >= neededWhite && whiteCellRatio >= 0.42 && coloredCellCount <= Math.max(1, Math.floor(cellCount * 0.35));
+}
+
+function isOpenCvCellMajorityNonWhite(item) {
+  const { cellCount, coloredCellCount, whiteCellCount, coloredCellRatio } = getOpenCvCellStats(item);
+  if (cellCount < 3) return false;
+  const neededColor = Math.max(2, Math.ceil(cellCount * 0.42));
+  return coloredCellCount >= neededColor && coloredCellRatio >= 0.42 && coloredCellCount >= whiteCellCount + 1;
+}
+
+function isOpenCvCellNonWhiteTicketSignal(item) {
+  if (!item || item.userCleared || item.source === "ai_row_color") return false;
+  if (isOpenCvCellMajorityWhite(item)) return false;
+  if (isOpenCvCellMajorityNonWhite(item)) return true;
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return false;
+  const { cellCount, coloredCellCount, whiteCellCount, coloredCellRatio } = getOpenCvCellStats(item);
+  if (cellCount < 3) return false;
+  // Judge by independent data cells, not by one full-row stripe. A sold row can
+  // still include one neutral/date cell, so "all cells colored" is too strict.
+  const clearColoredMajority =
+    coloredCellCount >= Math.max(2, Math.ceil(cellCount * 0.42)) &&
+    coloredCellRatio >= 0.42 &&
+    coloredCellCount >= whiteCellCount + 1;
+  const onlyColoredDataCells = coloredCellCount >= 1 && whiteCellCount === 0 && coloredCellRatio >= 0.12;
+  const dominantColoredPixels =
+    Boolean(item.strong) &&
+    Number(item.confidence || 0) >= 0.5 &&
+    Number(item.coverageRatio || 0) >= 0.38 &&
+    Number(item.coloredRatio || 0) >= Math.max(0.42, Number(item.whiteRatio || 0) + 0.18);
+  return clearColoredMajority || onlyColoredDataCells || dominantColoredPixels;
+}
+
+function getStrictRowLocalOpenCvColorLabel(item) {
+  if (!item || item.userCleared || item.source === "ai_row_color") return "";
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  const { cellCount, coloredCellCount, whiteCellCount, coloredCellRatio, whiteCellRatio } = getOpenCvCellStats(item);
+  const coloredRatio = Number(item.coloredRatio || 0);
+  const whiteRatio = Number(item.whiteRatio || 0);
+  const coverageRatio = Number(item.coverageRatio || 0);
+
+  if (isOpenCvCellMajorityWhite(item)) return "白底";
+  if (rawLabel && isAvailableRowColorLabel(rawLabel)) {
+    const enoughWhiteCells = cellCount >= 3 && whiteCellCount >= Math.max(2, coloredCellCount + 1) && whiteCellRatio >= 0.42;
+    const weakColorBleed = coloredRatio <= Math.max(0.34, whiteRatio + 0.12) && coverageRatio <= 0.62;
+    return enoughWhiteCells || weakColorBleed ? "白底" : "";
+  }
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return "";
+
+  // Only auto-drop when this exact row's own cells are clearly non-white.
+  // Pixel-level labels alone can bleed from separators or adjacent sold rows.
+  const strongCellColor =
+    cellCount >= 3 &&
+    coloredCellCount >= Math.max(2, Math.ceil(cellCount * 0.55)) &&
+    coloredCellRatio >= 0.55 &&
+    coloredCellCount >= whiteCellCount + 2;
+  if (strongCellColor) return rawLabel;
+
+  return "";
+}
+
+function isStrictRowLocalOpenCvNonWhite(item) {
+  const label = getStrictRowLocalOpenCvColorLabel(item);
+  return Boolean(label && !isAvailableRowColorLabel(label));
+}
+
+function isStrictRowLocalOpenCvWhite(item) {
+  return isAvailableRowColorLabel(getStrictRowLocalOpenCvColorLabel(item));
 }
 
 function getRowColorColumnIndex(table) {
@@ -3427,6 +4360,30 @@ function hasTrustedRowColorSource(table) {
   );
 }
 
+function hasExactOpenCvRowAlignment(table) {
+  return (
+    table?.rowColorSource === "opencv" &&
+    Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
+    Array.isArray(table.rows) &&
+    Array.isArray(table.rowColorRows) &&
+    table.rows.length > 0 &&
+    table.rowColorRows.length === table.rows.length &&
+    table.rowColorExactRowAligned === true
+  );
+}
+
+function hasExactVisualRowColorAlignment(table) {
+  if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
+  if (table.rowColorSource === "opencv") return hasExactOpenCvRowAlignment(table);
+  return (
+    table.rowColorSource === "ai_row_color" &&
+    Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
+    Array.isArray(table.rowColorRows) &&
+    table.rowColorRows.length === table.rows.length &&
+    (table.rowColorReliable === true || table.rowColorConfirmed === true)
+  );
+}
+
 function hasOpenCvRowColorPreview(table) {
   return (
     isVisualRowColorSource(table) &&
@@ -3434,6 +4391,31 @@ function hasOpenCvRowColorPreview(table) {
     Array.isArray(table.rowColorRows) &&
     table.rowColorRows.length > 0
   );
+}
+
+function hasOneToOneOpenCvRowColorCoverage(table) {
+  if (
+    table?.rowColorSource !== "opencv" ||
+    Number(table.rowColorLogicVersion || 0) !== ROW_COLOR_LOGIC_VERSION ||
+    !Array.isArray(table.rows) ||
+    !Array.isArray(table.rowColorRows) ||
+    table.rows.length === 0 ||
+    table.rowColorRows.length !== table.rows.length
+  ) {
+    return false;
+  }
+  const effectiveRows = table.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => {
+      const ticket = { table, row, index };
+      return isEffectiveTicketRowForColorDecision(ticket) && !isSoldTicket(ticket);
+    });
+  if (!effectiveRows.length) return false;
+  return effectiveRows.every(({ row, index }) => hasUsableOpenCvColorSignalForEffectiveTicket(table, row, index, table.rowColorRows[index]));
+}
+
+function hasOpenCvColorDecisionAlignment(table) {
+  return hasExactVisualRowColorAlignment(table) || hasOneToOneOpenCvRowColorCoverage(table);
 }
 
 function getOpenCvRawRowColorLabel(table, rowIndex) {
@@ -3449,6 +4431,8 @@ function getOpenCvItemRawColorLabel(item) {
 function getOpenCvItemDecisionColorLabel(item) {
   const label = getOpenCvItemRawColorLabel(item);
   if (!label) return "";
+  const cellMajorityWhite = isOpenCvCellMajorityWhite(item);
+  const cellMajorityNonWhite = isOpenCvCellMajorityNonWhite(item);
   const confidence = Number(item?.confidence || 0);
   if (item?.source === "ai_row_color") {
     if (isAvailableRowColorLabel(label)) return confidence >= 0.55 ? "白底" : "";
@@ -3459,10 +4443,15 @@ function getOpenCvItemDecisionColorLabel(item) {
   const coverageRatio = Number(item?.coverageRatio || 0);
 
   if (isAvailableRowColorLabel(label)) {
+    if (cellMajorityWhite) return "白底";
+    if (cellMajorityNonWhite) return "";
     const looksWhite = whiteRatio >= 0.3 && (coloredRatio <= 0.36 || coloredRatio <= whiteRatio * 1.25);
     const explicitlyWhite = confidence >= 0.52 && coloredRatio <= 0.42 && coverageRatio <= 0.68;
     return looksWhite || explicitlyWhite ? "白底" : "";
   }
+
+  if (cellMajorityNonWhite) return label;
+  if (cellMajorityWhite) return "白底";
 
   const whiteLooksDominant =
     whiteRatio >= 0.28 &&
@@ -3470,31 +4459,118 @@ function getOpenCvItemDecisionColorLabel(item) {
     coverageRatio <= 0.72;
   if (whiteLooksDominant) return "";
 
-  const strongByModel = item?.strong === true && confidence >= 0.5 && coloredRatio >= 0.42 && coverageRatio >= 0.38;
-  const strongByRatios =
-    confidence >= 0.56 &&
-    coloredRatio >= 0.48 &&
-    coverageRatio >= 0.42 &&
-    (whiteRatio <= 0.24 || coloredRatio >= whiteRatio * 1.7);
-  return strongByModel || strongByRatios ? label : "";
+  return getAutoSkipOpenCvColorLabel(item);
 }
 
-function isStrongOpenCvNonWhiteColorItem(item) {
-  const label = getOpenCvItemRawColorLabel(item);
-  if (!label || isAvailableRowColorLabel(label) || item?.userCleared) return false;
+function getOpenCvItemStrictSignalLabel(item) {
+  if (!item || item.userCleared) return "";
   const decisionLabel = getOpenCvItemDecisionColorLabel(item);
-  if (decisionLabel && !isAvailableRowColorLabel(decisionLabel)) return true;
+  if (decisionLabel) return decisionLabel;
+
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (!rawLabel) return "";
+
   const confidence = Number(item?.confidence || 0);
   const coloredRatio = Number(item?.coloredRatio || 0);
   const whiteRatio = Number(item?.whiteRatio || 0);
   const coverageRatio = Number(item?.coverageRatio || 0);
-  return (
-    item?.strong === true &&
-    confidence >= 0.68 &&
-    coloredRatio >= 0.55 &&
-    coverageRatio >= 0.6 &&
-    (whiteRatio <= 0.2 || coloredRatio >= whiteRatio * 2.4)
-  );
+
+  if (isAvailableRowColorLabel(rawLabel)) {
+    const safeWhite =
+      confidence >= 0.38 &&
+      (whiteRatio >= 0.22 || coloredRatio <= 0.4 || coverageRatio <= 0.68) &&
+      coloredRatio <= Math.max(0.46, whiteRatio * 1.55);
+    return safeWhite ? "白底" : "";
+  }
+
+  if (isPartialOpenCvNonWhiteSignal(item)) return rawLabel;
+
+  return getAutoSkipOpenCvColorLabel(item);
+}
+
+function getOpenCvItemConflictSignalLabel(item) {
+  if (!item || item.userCleared) return "";
+  const strictLabel = getOpenCvItemStrictSignalLabel(item);
+  if (strictLabel) return strictLabel;
+  if (isOpenCvCellMajorityWhite(item)) return "白底";
+
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  const confidence = Number(item?.confidence || 0);
+  const coloredRatio = Number(item?.coloredRatio || 0);
+  const whiteRatio = Number(item?.whiteRatio || 0);
+  const coverageRatio = Number(item?.coverageRatio || 0);
+
+  if (rawLabel && isAvailableRowColorLabel(rawLabel)) {
+    const looksLikeWhiteTicketRow =
+      whiteRatio >= 0.18 &&
+      coloredRatio <= Math.max(0.5, whiteRatio * 1.7) &&
+      coverageRatio <= 0.72;
+    return looksLikeWhiteTicketRow ? "白底" : "";
+  }
+
+  if (rawLabel && !isAvailableRowColorLabel(rawLabel)) {
+    if (isOpenCvCellMajorityNonWhite(item)) return rawLabel;
+    const looksLikeColoredTicketRow =
+      isPartialOpenCvNonWhiteSignal(item) ||
+      (confidence >= 0.48 &&
+        coloredRatio >= 0.22 &&
+        coverageRatio >= 0.2 &&
+        coloredRatio >= whiteRatio + 0.08);
+    return looksLikeColoredTicketRow ? rawLabel : "";
+  }
+
+  if (!rawLabel && whiteRatio >= 0.38 && coloredRatio <= 0.24 && coverageRatio <= 0.5) return "白底";
+  return "";
+}
+
+function getOpenCvItemConflictActionLabel(item) {
+  if (!item || item.userCleared) return "";
+  if (isOpenCvCellMajorityWhite(item)) return "白底";
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return "";
+  if (item.strong === true) return rawLabel;
+  return isOpenCvCellNonWhiteTicketSignal(item) ? rawLabel : "";
+}
+
+function getOpenCvConflictNonWhiteLabel(item) {
+  if (!item || item.userCleared) return "";
+  if (isOpenCvCellMajorityWhite(item)) return "";
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return "";
+  if (item?.source === "ai_row_color") return "";
+  return isOpenCvCellNonWhiteTicketSignal(item) ? rawLabel : "";
+}
+
+function isStrongOpenCvNonWhiteColorItem(item) {
+  return Boolean(getOpenCvConflictNonWhiteLabel(item));
+}
+
+function hasUsableOpenCvColorSignalForEffectiveTicket(table, row, rowIndex, colorItem) {
+  const ticket = { table, row, index: rowIndex };
+  if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return true;
+  const actionLabel = getOpenCvItemConflictActionLabel(colorItem);
+  const rawLabel = getOpenCvItemRawColorLabel(colorItem);
+  const confidence = Number(colorItem?.confidence || 0);
+  const coloredRatio = Number(colorItem?.coloredRatio || 0);
+  const whiteRatio = Number(colorItem?.whiteRatio || 0);
+  const coverageRatio = Number(colorItem?.coverageRatio || 0);
+  return Boolean(actionLabel || rawLabel || confidence >= 0.25 || coloredRatio >= 0.08 || whiteRatio >= 0.12 || coverageRatio >= 0.08);
+}
+
+function getAutoSkipOpenCvColorLabel(item) {
+  const label = getOpenCvItemRawColorLabel(item);
+  if (!label || isAvailableRowColorLabel(label) || item?.userCleared) return "";
+  if (item?.source === "ai_row_color") return "";
+  if (isOpenCvCellMajorityWhite(item)) return "";
+  return isOpenCvCellNonWhiteTicketSignal(item) ? label : "";
+}
+
+function isPartialOpenCvNonWhiteSignal(item) {
+  const label = getOpenCvItemRawColorLabel(item);
+  if (!label || isAvailableRowColorLabel(label) || item?.userCleared) return false;
+  if (item?.source === "ai_row_color") return false;
+  if (isOpenCvCellMajorityWhite(item)) return false;
+  return isOpenCvCellNonWhiteTicketSignal(item);
 }
 
 function getTrustedOpenCvRowColorLabel(table, rowIndex) {
@@ -3523,41 +4599,26 @@ function getAutoOpenCvRowColorLabel(table, rowIndex) {
   const coverageRatio = Number(item?.coverageRatio || 0);
   const fullRowEnough =
     confidence >= 0.72 &&
-    (coloredRatio >= 0.34 || coverageRatio >= 0.5) &&
-    (whiteRatio <= 0.28 || coloredRatio >= whiteRatio * 1.55);
+    coloredRatio >= 0.62 &&
+    coverageRatio >= 0.68 &&
+    (whiteRatio <= 0.2 || coloredRatio >= whiteRatio * 2.8);
   return fullRowEnough ? rawLabel : "";
 }
 
 function hasActionableOpenCvColorSource(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
-  if (table.rowColorRows.length !== table.rows.length) return false;
-  if (table.rowColorReliable === true || table.rowColorConfirmed === true) {
-    return hasOpenCvWhiteAndColoredConflict(table) || hasOpenCvRawColorDifference(table);
-  }
-  return hasOpenCvRawWhiteAndColoredConflict(table);
+  if (!hasOpenCvColorDecisionAlignment(table)) return false;
+  return hasConfirmedOpenCvWhiteAndColoredConflict(table);
 }
 
 function isStrictRowColorActionable(table, rowIndex) {
   if (!hasActionableOpenCvColorSource(table)) return false;
   if (table.rowColorRows.length !== table.rows.length) return false;
+  const ticket = { table, row: table.rows?.[rowIndex], index: rowIndex };
+  if (!isEffectiveTicketRowForColorDecision(ticket)) return false;
   const item = table.rowColorRows[rowIndex];
   if (!item || item.userCleared) return false;
-  if (item.source === "ai_row_color") {
-    return false;
-  }
-  const label = getDecisionOpenCvRowColorLabel(table, rowIndex);
-  if (!label || isAvailableRowColorLabel(label)) return false;
-  const confidence = Number(item.confidence || 0);
-  const coloredRatio = Number(item.coloredRatio || 0);
-  const whiteRatio = Number(item.whiteRatio || 0);
-  const coverageRatio = Number(item.coverageRatio || 0);
-  return (
-    item.strong === true &&
-    confidence >= 0.68 &&
-    coloredRatio >= 0.58 &&
-    coverageRatio >= 0.72 &&
-    (whiteRatio <= 0.16 || coloredRatio >= whiteRatio * 2.8)
-  );
+  return isStrictRowLocalOpenCvNonWhite(item);
 }
 
 function getStrictWhiteOnlyOpenCvRowColorLabel(table, rowIndex) {
@@ -3570,14 +4631,17 @@ function getStrictWhiteOnlyOpenCvRowColorLabel(table, rowIndex) {
 }
 
 function getOpenCvNonSoldColorLabels(table) {
-  if (!hasOpenCvRowColorPreview(table)) return [];
+  if (!hasOpenCvColorDecisionAlignment(table)) return [];
   const nonSoldRows = table.rows
     .map((row, index) => ({ row, index }))
-    .filter(({ row, index }) => !isSoldTicket({ table, row, index }));
-  const labels = nonSoldRows.map(({ index }) => getAutoOpenCvRowColorLabel(table, index)).filter(Boolean);
+    .filter(({ row, index }) => {
+      const ticket = { table, row, index };
+      return isEffectiveTicketRowForColorDecision(ticket) && !isSoldTicket(ticket);
+    });
+  const labels = nonSoldRows.map(({ index }) => getOpenCvItemConflictActionLabel(table.rowColorRows?.[index])).filter(Boolean);
   const hasNonWhiteColor = labels.some((label) => label && !isAvailableRowColorLabel(label));
   const hasNeutralCandidate = nonSoldRows.some(({ index }) => {
-    const decisionLabel = getAutoOpenCvRowColorLabel(table, index);
+    const decisionLabel = getOpenCvItemConflictActionLabel(table.rowColorRows?.[index]);
     const rawLabel = getOpenCvRawRowColorLabel(table, index);
     return !decisionLabel && (!rawLabel || isAvailableRowColorLabel(rawLabel));
   });
@@ -3591,15 +4655,17 @@ function hasOpenCvWhiteAndColoredConflict(table) {
 }
 
 function getOpenCvRawNonSoldColorLabels(table) {
-  if (!hasOpenCvRowColorPreview(table)) return [];
+  if (!hasOpenCvColorDecisionAlignment(table)) return [];
   const labels = (table.rows || [])
     .map((row, index) => {
-      if (isSoldTicket({ table, row, index })) return "";
+      const ticket = { table, row, index };
+      if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return "";
       return getOpenCvItemRawColorLabel(table.rowColorRows?.[index]);
     })
     .filter(Boolean);
   const hasNeutralCandidate = (table.rows || []).some((row, index) => {
-    if (isSoldTicket({ table, row, index })) return false;
+    const ticket = { table, row, index };
+    if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return false;
     const rawLabel = getOpenCvItemRawColorLabel(table.rowColorRows?.[index]);
     const decisionLabel = getDecisionOpenCvRowColorLabel(table, index);
     return !rawLabel || isAvailableRowColorLabel(rawLabel) || isAvailableRowColorLabel(decisionLabel);
@@ -3613,24 +4679,26 @@ function hasOpenCvRawColorDifference(table) {
 }
 
 function hasOpenCvRawWhiteAndColoredConflict(table) {
-  if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || table.rowColorRows.length !== table.rows.length) return false;
+  if (!hasOpenCvColorDecisionAlignment(table) || !Array.isArray(table.rows)) return false;
   const labels = table.rows
     .map((row, index) => {
-      if (isSoldTicket({ table, row, index })) return "";
-      return getOpenCvItemRawColorLabel(table.rowColorRows?.[index]) || getDecisionOpenCvRowColorLabel(table, index);
+      const ticket = { table, row, index };
+      if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return "";
+      return getOpenCvItemConflictActionLabel(table.rowColorRows?.[index]);
     })
     .filter(Boolean);
   return labels.some(isAvailableRowColorLabel) && labels.some((label) => label && !isAvailableRowColorLabel(label));
 }
 
 function hasStrongOpenCvWhiteAndColoredConflict(table) {
-  if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || table.rowColorRows.length !== table.rows.length) return false;
+  if (!hasOpenCvColorDecisionAlignment(table) || !Array.isArray(table.rows)) return false;
   let hasWhite = false;
   let hasStrongNonWhite = false;
   table.rows.forEach((row, index) => {
-    if (isSoldTicket({ table, row, index })) return;
+    const ticket = { table, row, index };
+    if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
     const item = table.rowColorRows?.[index];
-    const label = getOpenCvItemDecisionColorLabel(item);
+    const label = getOpenCvItemConflictActionLabel(item);
     if (label && isAvailableRowColorLabel(label)) hasWhite = true;
     if (label && !isAvailableRowColorLabel(label)) hasStrongNonWhite = true;
     if (!label && isStrongOpenCvNonWhiteColorItem(item)) hasStrongNonWhite = true;
@@ -3638,26 +4706,92 @@ function hasStrongOpenCvWhiteAndColoredConflict(table) {
   return hasWhite && hasStrongNonWhite;
 }
 
+function getOpenCvEffectiveColorState(table) {
+  const state = {
+    hasWhite: false,
+    hasNonWhite: false,
+    whiteCount: 0,
+    nonWhiteCount: 0,
+    labels: [],
+  };
+  if (!hasOpenCvColorDecisionAlignment(table) || !Array.isArray(table.rows)) return state;
+
+  table.rows.forEach((row, index) => {
+    const ticket = { table, row, index };
+    if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
+    const item = table.rowColorRows?.[index];
+    if (!item || item.userCleared) return;
+
+    const localLabel = getStrictRowLocalOpenCvColorLabel(item);
+    if (isAvailableRowColorLabel(localLabel)) {
+      state.hasWhite = true;
+      state.whiteCount += 1;
+      state.labels.push("白底");
+    }
+    if (localLabel && !isAvailableRowColorLabel(localLabel)) {
+      state.hasNonWhite = true;
+      state.nonWhiteCount += 1;
+      state.labels.push(localLabel);
+    }
+  });
+
+  state.labels = uniqueCleanValues(state.labels);
+  return state;
+}
+
+function hasConfirmedOpenCvWhiteAndColoredConflict(table) {
+  const state = getOpenCvEffectiveColorState(table);
+  return state.hasWhite && state.hasNonWhite;
+}
+
+function getOpenCvColorReferenceMessage(table) {
+  const state = getOpenCvEffectiveColorState(table);
+  const engineName = getRowColorEngineName(table);
+  if (state.hasWhite && state.hasNonWhite) {
+    return `${engineName} 检测到白底有效票 ${state.whiteCount} 条、非白底有效票 ${state.nonWhiteCount} 条：以白底为参照，非白底会自动下架。`;
+  }
+  if (state.hasNonWhite && !state.hasWhite) {
+    return `${engineName} 仅检测到非白底有效票 ${state.nonWhiteCount} 条，没有白底有效票作参照，按整表带色处理，不因颜色自动下架。`;
+  }
+  if (state.hasWhite) {
+    return `${engineName} 仅检测到白底有效票 ${state.whiteCount} 条，未发现需要按颜色下架的票。`;
+  }
+  return `${engineName} 未检测到可用于颜色下架判断的有效票底色。`;
+}
+
+function hasAnyOpenCvWhiteAndColoredConflict(table) {
+  return hasConfirmedOpenCvWhiteAndColoredConflict(table);
+}
+
 function getWhiteVsColoredConflictLabel(table, rowIndex) {
-  if (!hasOpenCvRowColorPreview(table) || !(hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table))) return "";
+  if (!hasOpenCvRowColorPreview(table) || !hasConfirmedOpenCvWhiteAndColoredConflict(table)) return "";
   const item = table.rowColorRows?.[rowIndex];
   if (item?.userCleared) return "";
-  const decisionLabel = getOpenCvItemDecisionColorLabel(item);
-  if (decisionLabel) return decisionLabel;
-  if (isStrongOpenCvNonWhiteColorItem(item)) return getOpenCvItemRawColorLabel(item);
-  return "";
+  return getStrictRowLocalOpenCvColorLabel(item);
 }
 
 function getOpenCvColorDecisionText(table, rowIndex) {
+  const ticket = { table, row: table?.rows?.[rowIndex], index: rowIndex };
+  if (!isEffectiveTicketRowForColorDecision(ticket)) return "无售价/占位行，忽略颜色";
   const action = table?.rowColorRows?.[rowIndex]?.action || "";
   if (action === "skip") return "AI 判断不发布";
   if (action === "publish") return "AI 判断发布";
   if (action === "uncertain") return "AI 不确定";
-  const label = getOpenCvRawRowColorLabel(table, rowIndex);
-  if (!label) return "未识别";
-  if (isSoldTicket({ table, row: table.rows[rowIndex], index: rowIndex })) return "文字已售";
-  if ((hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table)) && !isAvailableRowColorLabel(label)) return "自动下架";
-  if ((hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table)) && isAvailableRowColorLabel(label)) return "自动保留";
+  if (isSoldTicket(ticket)) return "文字已售";
+  const item = table?.rowColorRows?.[rowIndex];
+  const label = getOpenCvItemConflictActionLabel(item);
+  const rawLabel = getOpenCvRawRowColorLabel(table, rowIndex);
+  const conflictLabel = getWhiteVsColoredConflictLabel(table, rowIndex);
+  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && conflictLabel && !isAvailableRowColorLabel(conflictLabel)) return "自动下架";
+  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && conflictLabel && isAvailableRowColorLabel(conflictLabel)) return "自动保留";
+  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && label && !isAvailableRowColorLabel(label)) return "颜色不够确定，需确认";
+  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && label && isAvailableRowColorLabel(label)) return "自动保留";
+  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && rawLabel && !isAvailableRowColorLabel(rawLabel)) return "非白底未达自动阈值，需确认";
+  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && rawLabel && isAvailableRowColorLabel(rawLabel)) return "自动保留";
+  const colorState = getOpenCvEffectiveColorState(table);
+  if (colorState.hasNonWhite && !colorState.hasWhite) return "整表带色，不因颜色下架";
+  if (colorState.hasWhite && isAvailableRowColorLabel(label || rawLabel)) return "白底保留";
+  if (!label && !rawLabel) return "未识别";
   if (!getAutoOpenCvRowColorLabel(table, rowIndex)) return "不确定，不使用";
   return "不因颜色下架";
 }
@@ -3677,6 +4811,10 @@ function applyAiRowColorActionDecision(table) {
     const ticket = { table, row, index };
     const manuallySet = table.userEditedRows?.[index] === true;
     if (manuallySet) return;
+    if (!isEffectiveTicketRowForColorDecision(ticket)) {
+      table.publishRows[index] = false;
+      return;
+    }
     if (isSoldTicket(ticket)) {
       table.publishRows[index] = false;
       return;
@@ -3703,7 +4841,12 @@ function applyAiRowColorActionDecision(table) {
 function applyOpenCvWhiteVsColoredAutoDecision(table) {
   if (!table || !hasOpenCvRowColorPreview(table)) return 0;
   if (table.rowColorSource === "ai_row_color") return applyAiRowColorActionDecision(table);
-  const hasWhiteVsColoredConflict = hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table);
+  if (!hasOpenCvColorDecisionAlignment(table)) {
+    table.rowColorAutoApplied = false;
+    table.rowColorAutoSkipCount = 0;
+    return 0;
+  }
+  const hasWhiteVsColoredConflict = hasConfirmedOpenCvWhiteAndColoredConflict(table);
   if (!hasActionableOpenCvColorSource(table) && !hasWhiteVsColoredConflict) return 0;
 
   table.publishRows = table.publishRows || {};
@@ -3714,30 +4857,29 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
   let whiteKeepCount = 0;
   table.rows.forEach((row, index) => {
     const label = getStrictWhiteOnlyOpenCvRowColorLabel(table, index);
-    const conflictLabel = getWhiteVsColoredConflictLabel(table, index);
+    const colorItem = table.rowColorRows?.[index];
+    const localColorLabel = getStrictRowLocalOpenCvColorLabel(colorItem);
 
     const ticket = { table, row, index };
     const manuallySet = table.publishRows[index] !== undefined && table.userEditedRows?.[index] === true;
     const manuallyRestored = manuallySet && table.publishRows[index] === true && table.rowColorRows?.[index]?.userCleared;
     if (manuallyRestored) return;
-    if (isSoldTicket(ticket) || isStrictRowColorActionable(table, index)) {
-      if (!isSoldTicket(ticket) && isStrictRowColorActionable(table, index)) colorSkipCount += 1;
+    if (!isEffectiveTicketRowForColorDecision(ticket)) {
       table.publishRows[index] = false;
       return;
     }
-    if (hasWhiteVsColoredConflict && conflictLabel && !isAvailableRowColorLabel(conflictLabel) && !manuallySet) {
+    const shouldSkipByColor =
+      hasWhiteVsColoredConflict &&
+      localColorLabel &&
+      !isAvailableRowColorLabel(localColorLabel);
+    if (isSoldTicket(ticket) || shouldSkipByColor) {
+      if (!isSoldTicket(ticket) && shouldSkipByColor) colorSkipCount += 1;
       table.publishRows[index] = false;
-      colorSkipCount += 1;
       return;
     }
-    if (hasWhiteVsColoredConflict && isAvailableRowColorLabel(conflictLabel) && !manuallySet) {
+    if (hasWhiteVsColoredConflict && isAvailableRowColorLabel(localColorLabel) && !manuallySet) {
       whiteKeepCount += 1;
       table.publishRows[index] = isCustomerPublishableTicket(ticket);
-      return;
-    }
-    if (hasWhiteVsColoredConflict && label && !isAvailableRowColorLabel(label) && !manuallySet) {
-      table.publishRows[index] = false;
-      colorSkipCount += 1;
       return;
     }
     if (isAvailableRowColorLabel(label) && !manuallySet) {
@@ -3760,56 +4902,51 @@ function getLastOcrColorAnalysisForPage(page) {
   return analyses[String(page)] || analyses[page] || null;
 }
 
-function scoreOpenCvColorSliceForTable(table, rows, startIndex, expectedStart) {
-  let score = -Math.abs(startIndex - expectedStart) * 0.45;
-  table.rows.forEach((row, index) => {
-    const item = rows[startIndex + index];
-    if (!item) {
-      score -= 6;
-      return;
-    }
-    const label = getOpenCvItemDecisionColorLabel(item);
-    const rawLabel = getOpenCvItemRawColorLabel(item);
-    const ticket = { table, row, index };
-    const soldByText = isSoldTicket(ticket);
-    const white = isAvailableRowColorLabel(label) || (!label && isAvailableRowColorLabel(rawLabel));
-    const colored = label && !isAvailableRowColorLabel(label);
-    if (soldByText) {
-      if (colored) score += 6;
-      else if (white) score -= 1.5;
-      else score += 0.6;
-    } else if (white) {
-      score += 4;
-    } else if (colored) {
-      score -= 0.4;
-    } else {
-      score += 1.2;
-    }
-  });
-  return score;
-}
-
-function getAlignedOpenCvRowsForTable(table, availableRows, startIndex) {
+function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   const length = table?.rows?.length || 0;
-  if (!length || !availableRows.length) return { rows: [], startIndex };
-  if (availableRows.length === length) return { rows: availableRows.slice(0, length), startIndex: 0 };
-  const maxStart = Math.max(0, availableRows.length - length);
-  const expectedStart = Math.min(Math.max(0, startIndex), maxStart);
-  const searchStart = Math.max(0, expectedStart - 3);
-  const searchEnd = Math.min(maxStart, expectedStart + 3);
-  let bestStart = expectedStart;
-  let bestScore = -Infinity;
-  for (let candidateStart = searchStart; candidateStart <= searchEnd; candidateStart += 1) {
-    const score = scoreOpenCvColorSliceForTable(table, availableRows, candidateStart, expectedStart);
-    if (score > bestScore) {
-      bestScore = score;
-      bestStart = candidateStart;
+  const rows = Array.isArray(availableRows) ? availableRows.filter(Boolean) : [];
+  const start = Math.max(0, Math.floor(Number(startIndex) || 0));
+  if (!length || !rows.length) return { rows: [], startIndex: start, exact: false };
+
+  const sourceIndexes = Array.isArray(table?.rowColorSourceIndexes)
+    ? table.rowColorSourceIndexes
+        .slice(0, length)
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value >= 0)
+    : [];
+  if (sourceIndexes.length === length) {
+    const rowsByIndex = new Map(
+      rows.map((row, index) => [Number.isFinite(Number(row?.index)) ? Number(row.index) : index, row]),
+    );
+    const mappedRows = sourceIndexes.map((sourceIndex) => rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null);
+    if (mappedRows.every(Boolean)) {
+      return {
+        rows: mappedRows,
+        startIndex: sourceIndexes[0] || 0,
+        exact: true,
+        sourceIndexes,
+      };
     }
   }
-  return {
-    rows: availableRows.slice(bestStart, bestStart + length),
-    startIndex: bestStart,
-  };
+
+  const directRows = rows.slice(start, start + length);
+  if (directRows.length === length) {
+    return {
+      rows: directRows,
+      startIndex: start,
+      exact: true,
+      sourceIndexes: directRows.map((row, index) => (Number.isFinite(Number(row?.index)) ? Number(row.index) : start + index)),
+    };
+  }
+  if (rows.length === length) {
+    return {
+      rows: rows.slice(0, length),
+      startIndex: 0,
+      exact: true,
+      sourceIndexes: rows.slice(0, length).map((row, index) => (Number.isFinite(Number(row?.index)) ? Number(row.index) : index)),
+    };
+  }
+  return { rows: [], startIndex: start, exact: false };
 }
 
 function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
@@ -3822,6 +4959,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
   table.rowColorMessage = "";
   table.rowColorRows = [];
+  table.rowColorExactRowAligned = false;
 
   if (!analysis || (analysis.source !== "opencv" && analysis.source !== "ai_row_color")) return 0;
   table.rowColorSource = analysis.source;
@@ -3848,7 +4986,13 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
       : getAlignedOpenCvRowsForTable(table, availableRows, startIndex);
   const assignedRows = aligned.rows;
   table.rowColorAlignedStart = aligned.startIndex;
-  table.rowColorRows = assignedRows.map((row) => ({
+  table.rowColorExactRowAligned = Boolean(
+    analysis.source === "ai_row_color" ||
+      (analysis.source === "opencv" && aligned.exact === true && assignedRows.length === table.rows.length),
+  );
+  const alignedSourceIndexes = Array.isArray(aligned.sourceIndexes) ? aligned.sourceIndexes : [];
+  table.rowColorSourceIndexes = alignedSourceIndexes.length === table.rows.length ? [...alignedSourceIndexes] : table.rowColorSourceIndexes;
+  table.rowColorRows = assignedRows.map((row, index) => ({
     source: analysis.source,
     label: row?.label || "",
     rawLabel: row?.rawLabel || "",
@@ -3856,22 +5000,34 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
     coloredRatio: row?.coloredRatio || 0,
     whiteRatio: row?.whiteRatio || 0,
     coverageRatio: row?.coverageRatio || 0,
+    coloredBins: row?.coloredBins || 0,
+    whiteBins: row?.whiteBins || 0,
+    cellCount: row?.cellCount || 0,
+    coloredCellCount: row?.coloredCellCount || 0,
+    whiteCellCount: row?.whiteCellCount || 0,
     strong: row?.strong === true,
     action: row?.action || "",
     reason: row?.reason || "",
-    sourceIndex: row?.index ?? "",
+    sourceIndex: alignedSourceIndexes[index] ?? row?.index ?? "",
     y: row?.y ?? "",
   }));
 
   const exactRowCount = assignedRows.length === table.rows.length;
-  const labels = table.rowColorRows.map((row, index) => getDecisionOpenCvRowColorLabel(table, index)).filter(Boolean);
-  const allConfident = assignedRows.every((row) => Number(row?.confidence || 0) >= 0.42);
-  table.rowColorReliable = Boolean(analysis.reliable && exactRowCount && allConfident);
-  const hasColorConflict = hasOpenCvWhiteAndColoredConflict(table);
+  const labels = table.rowColorRows.map((row) => getOpenCvItemConflictActionLabel(row) || getOpenCvItemRawColorLabel(row)).filter(Boolean);
+  const allEffectiveRowsHaveSignal = assignedRows.every((colorItem, rowIndex) =>
+    hasUsableOpenCvColorSignalForEffectiveTicket(table, table.rows[rowIndex], rowIndex, colorItem),
+  );
+  table.rowColorReliable = Boolean(analysis.reliable && exactRowCount && allEffectiveRowsHaveSignal && table.rowColorExactRowAligned);
+  const colorState = getOpenCvEffectiveColorState(table);
+  const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
   const autoSkipCount = applyOpenCvWhiteVsColoredAutoDecision(table);
   const engineName = getRowColorEngineName(table);
   if (autoSkipCount) {
     table.rowColorMessage = `${engineName} 已逐行应用颜色规则：非白底自动下架 ${autoSkipCount} 条，白底保留。`;
+  } else if (table.rowColorReliable && colorState.hasNonWhite && !colorState.hasWhite) {
+    table.rowColorMessage = `${engineName} 已匹配 ${table.rows.length} 行底色：只有非白底有效票，没有白底有效票作参照，按整表带色处理。`;
+  } else if (table.rowColorReliable && colorState.hasWhite && !colorState.hasNonWhite) {
+    table.rowColorMessage = `${engineName} 已匹配 ${table.rows.length} 行底色：只有白底有效票，未发现需要按颜色下架的票。`;
   } else if (table.rowColorReliable) {
     table.rowColorMessage = `${engineName} 已匹配 ${table.rows.length} 行底色`;
   } else if (hasColorConflict) {
@@ -3879,7 +5035,9 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
       analysis.error || `${engineName} 行底色未能可靠对齐：识别 ${assignedRows.length}/${table.rows.length} 行${table.rowColorSelectionMode ? `，模式 ${table.rowColorSelectionMode}` : ""}`;
   } else {
     table.rowColorMessage = labels.length
-      ? `${engineName} 已识别 ${assignedRows.length}/${table.rows.length} 行底色，未发现颜色冲突`
+      ? `${engineName} 已识别 ${assignedRows.length}/${table.rows.length} 行底色，未发现白底+非白底有效票冲突`
+      : analysis.source === "opencv" && availableRows.length !== table.rows.length
+        ? `${engineName} 行数未一一对应：识别 ${availableRows.length}/${table.rows.length} 行，已停止自动套色，避免误下架。`
       : `${engineName} 未识别到会影响上架的颜色冲突`;
   }
   return Math.max(assignedRows.length, aligned.startIndex + assignedRows.length - startIndex);
@@ -3890,6 +5048,11 @@ function confirmOpenCvRowColorResult(table) {
     showToast("这张表没有可确认的逐行颜色结果。", "error");
     return;
   }
+  const exactRowCount = Array.isArray(table.rows) && Array.isArray(table.rowColorRows) && table.rowColorRows.length === table.rows.length;
+  if (table.rowColorSource === "opencv" && !exactRowCount) {
+    showToast("颜色行数没有和票源一一对应，不能直接套用。请人工逐票确认。", "error");
+    return;
+  }
   pushReviewSnapshot(table, "确认使用颜色结果前");
   let appliedCount = 0;
   table.rows.forEach((row, index) => {
@@ -3897,6 +5060,7 @@ function confirmOpenCvRowColorResult(table) {
     if (table.rowColorRows?.[index]) table.rowColorRows[index].userCleared = false;
     if (label) appliedCount += 1;
   });
+  if (table.rowColorSource === "opencv" && exactRowCount) table.rowColorExactRowAligned = true;
   table.rowColorReliable = true;
   table.rowColorConfirmed = true;
   table.showOpenCvColorPreview = false;
@@ -3913,9 +5077,10 @@ function confirmOpenCvRowColorResult(table) {
       table.publishRows[index] = isCustomerPublishableTicket(ticket);
     }
   });
+  colorSkipCount = Math.max(colorSkipCount, applyOpenCvWhiteVsColoredAutoDecision(table));
   table.aiReviewStatus = colorSkipCount
     ? `已确认颜色结果：文字 sold 仍按原逻辑跳过；未 sold 票里检测到白底和其他底色并存，已把 ${colorSkipCount} 条非白底票设为不发布。`
-    : "已确认颜色结果：没有发现需要按颜色自动下架的未 sold 票。";
+    : `已确认颜色结果：${getOpenCvColorReferenceMessage(table)}`;
   updatePendingTableReviewFlags(table);
   pendingReviewFocusRowIndex = getVisibleReviewRowIndexes(table)[0] ?? null;
   renderUploadRecords();
@@ -3962,10 +5127,7 @@ function getTicketRowColorLabels(table, options = {}) {
       if (options.excludeSold && isSoldTicket({ table, row, index })) return "";
       return getAutoOpenCvRowColorLabel(table, index);
     });
-    const filledLabels = labels.filter(Boolean);
-    if (!filledLabels.length) return [];
-    const hasBlankRows = labels.some((label) => !label);
-    return uniqueCleanValues([...filledLabels, ...(hasBlankRows ? ["白底"] : [])]);
+    return uniqueCleanValues(labels.filter(Boolean));
   }
   const colorIndex = getRowColorColumnIndex(table);
   if (colorIndex < 0) return [];
@@ -3978,6 +5140,11 @@ function getTicketRowColorLabels(table, options = {}) {
   if (!filledLabels.length) return [];
   const hasBlankRows = labels.some((label) => !label);
   return uniqueCleanValues([...filledLabels, ...(hasBlankRows ? ["白底"] : [])]);
+}
+
+function hasWhiteAndNonWhiteRowColorLabels(labels = []) {
+  const cleanLabels = uniqueCleanValues(labels);
+  return cleanLabels.some(isAvailableRowColorLabel) && cleanLabels.some((label) => label && !isAvailableRowColorLabel(label));
 }
 
 function getTicketRowColorLabel(ticket) {
@@ -3993,13 +5160,13 @@ function isAvailableRowColorLabel(label) {
 }
 
 function hasWhiteOnlyRowColorRule(table) {
-  if (hasOpenCvRowColorPreview(table) && (hasOpenCvWhiteAndColoredConflict(table) || hasStrongOpenCvWhiteAndColoredConflict(table))) return true;
+  if (hasOpenCvRowColorPreview(table)) return hasAnyOpenCvWhiteAndColoredConflict(table);
   const labels = getTicketRowColorLabels(table, { excludeSold: true });
-  return labels.some(isAvailableRowColorLabel) && labels.some((label) => label && !isAvailableRowColorLabel(label));
+  return hasWhiteAndNonWhiteRowColorLabels(labels);
 }
 
 function getWhiteOnlyRuleRowColorLabel(ticket) {
-  if (hasOpenCvRowColorPreview(ticket.table) && (hasOpenCvWhiteAndColoredConflict(ticket.table) || hasStrongOpenCvWhiteAndColoredConflict(ticket.table))) {
+  if (hasOpenCvRowColorPreview(ticket.table) && hasAnyOpenCvWhiteAndColoredConflict(ticket.table)) {
     return getWhiteVsColoredConflictLabel(ticket.table, ticket.index) || getTicketRowColorLabel(ticket);
   }
   return getTicketRowColorLabel(ticket);
@@ -4012,8 +5179,7 @@ function isColorMarkedSoldTicket(ticket) {
   if (rowColorItem?.action === "publish") return false;
   if (hasWhiteOnlyRowColorRule(ticket.table)) {
     const conflictLabel = getWhiteVsColoredConflictLabel(ticket.table, ticket.index);
-    const label = conflictLabel || getWhiteOnlyRuleRowColorLabel(ticket);
-    if (label && !isAvailableRowColorLabel(label)) return true;
+    if (conflictLabel && !isAvailableRowColorLabel(conflictLabel)) return true;
   }
   if (!hasTrustedRowColorSource(ticket.table) && !hasActionableOpenCvColorSource(ticket.table) && !hasWhiteOnlyRowColorRule(ticket.table)) return false;
   if (!isStrictRowColorActionable(ticket.table, ticket.index)) return false;
@@ -4045,24 +5211,29 @@ function isInternalColorColumn(column = "") {
 }
 
 function analyzePendingTableRisk(table) {
+  pruneNonTicketRowsFromTable(table);
   normalizePendingTableColumns(table);
   ensureDefaultQuantityColumn(table);
   const autoColorApplied = applyOpenCvWhiteVsColoredAutoDecision(table);
   const reasons = [];
   const columns = table.columns || [];
   const rows = table.rows || [];
-  const reviewRows = rows.filter((row, index) => !isUnavailableTicket({ table, row, index }));
+  const reviewTickets = rows.map((row, index) => ({ table, row, index })).filter((ticket) => !isUnavailableTicket(ticket));
+  const reviewRows = reviewTickets.map((ticket) => ticket.row);
   const dateIndex = findColumnIndex(columns, ["日期", "演出日期", "date", "day", "일자"]);
   const zoneIndex = findColumnIndex(columns, ["区域", "区", "block", "section", "구역"]);
   const priceIndex = findColumnIndex(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]);
+  const hasDerivedDate = reviewTickets.some((ticket) => getTicketDateValues(ticket).length > 0);
+  const hasDerivedZone = reviewTickets.some((ticket) => Boolean(getTicketZoneValue(ticket)));
+  const hasDerivedPrice = reviewTickets.some((ticket) => hasTicketSalePrice(ticket));
 
   if (columns.length < 4) reasons.push("识别到的列数偏少");
   if (rows.length < 1) reasons.push("没有识别到票源行");
-  if (dateIndex < 0) reasons.push("缺少日期列");
-  if (zoneIndex < 0) reasons.push("缺少区域列");
-  if (priceIndex < 0) reasons.push("缺少售价列");
+  if (dateIndex < 0 && !hasDerivedDate) reasons.push("缺少日期列");
+  if (zoneIndex < 0 && !hasDerivedZone) reasons.push("缺少区域列");
+  if (priceIndex < 0 && !hasDerivedPrice) reasons.push("缺少售价列");
 
-  const missingPriceRows = reviewRows.filter((row, index) => !hasTicketSalePrice({ table, row, index })).length;
+  const missingPriceRows = reviewTickets.filter((ticket) => !hasTicketSalePrice(ticket)).length;
   if (missingPriceRows) reasons.push(`${missingPriceRows} 行缺少售价`);
 
   const sparseRows = rows.filter((row) => row.filter((cell) => String(cell || "").trim()).length < Math.min(3, columns.length)).length;
@@ -4075,13 +5246,15 @@ function analyzePendingTableRisk(table) {
     reasons.push("旧版小表颜色识别缓存，请重新识别本页以按新规则处理红底/白底");
   } else if (reviewRows.length && hasActionableOpenCvColorSource(table)) {
     if (!autoColorApplied) applyOpenCvWhiteVsColoredAutoDecision(table);
-  } else if (!table.rowColorAutoApplied && reviewRows.length && isVisualRowColorSource(table) && hasOpenCvRawColorDifference(table)) {
-    reasons.push(`${rowColorEngineName} 检测到未售候选票源存在弱颜色差异，需人工确认是否为已售标色`);
-  } else if (!table.rowColorAutoApplied && reviewRows.length && hasTrustedRowColorSource(table) && rowColorLabels.length > 1) {
+  } else if (!table.rowColorAutoApplied && reviewRows.length && table.rowColorSource === "opencv" && hasOpenCvRowColorPreview(table) && !hasExactOpenCvRowAlignment(table)) {
+    reasons.push(table.rowColorMessage || `${rowColorEngineName} 行底色没有和票源行一对一对齐，需人工确认原图颜色`);
+  } else if (!table.rowColorAutoApplied && reviewRows.length && isVisualRowColorSource(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) {
+    reasons.push(`${rowColorEngineName} 检测到未售候选票源同时存在白底和其他底色，需确认其他底色是否为已售标色`);
+  } else if (!table.rowColorAutoApplied && reviewRows.length && hasTrustedRowColorSource(table) && hasWhiteAndNonWhiteRowColorLabels(rowColorLabels)) {
     reasons.push(`${rowColorEngineName} 检测到未售候选票源颜色不一致：${rowColorLabels.join(" / ")}，需人工确认`);
-  } else if (!table.rowColorAutoApplied && reviewRows.length && isVisualRowColorSource(table) && table.rowColorReliable === false && hasOpenCvWhiteAndColoredConflict(table)) {
+  } else if (!table.rowColorAutoApplied && reviewRows.length && isVisualRowColorSource(table) && table.rowColorReliable === false && hasConfirmedOpenCvWhiteAndColoredConflict(table)) {
     reasons.push(table.rowColorMessage || `${rowColorEngineName} 行底色未能可靠对齐，需人工确认原图颜色`);
-  } else if (reviewRows.length && !hasTrustedRowColorSource(table) && getTicketRowColorLabels(colorCheckTable).length > 1) {
+  } else if (reviewRows.length && !hasTrustedRowColorSource(table) && hasWhiteAndNonWhiteRowColorLabels(getTicketRowColorLabels(colorCheckTable))) {
     reasons.push("AI 返回的行底色仅供参考，需人工确认原图颜色");
   }
 
@@ -4099,6 +5272,26 @@ function analyzePendingTableRisk(table) {
 }
 
 function updatePendingTableReviewFlags(table) {
+  if (!table) return table;
+  repairMisreadDataHeaderTable(table);
+  normalizePendingTableColumns(table);
+  let rowRepairChanged = false;
+  (table.rows || []).forEach((row, rowIndex) => {
+    const changedThisRow =
+      repairExplicitCurrencyPriceInWrongColumn(table, row, rowIndex) ||
+      repairShiftedSalePriceAndRemark(table, row);
+    if (changedThisRow) {
+      rowRepairChanged = true;
+      syncOriginalRowFromCurrentRow(table, rowIndex, row);
+    }
+  });
+  if (repairMisplacedDateAndPriceValues(table)) {
+    rowRepairChanged = true;
+  }
+  if (rowRepairChanged) table._columnRepairChanged = true;
+  if (table._columnRepairChanged === true) {
+    forceCanonicalOriginalDisplay(table);
+  }
   const risk = analyzePendingTableRisk(table);
   table.needsManualReview = risk.needsManualReview;
   table.reviewReasons = risk.reasons;
@@ -4108,6 +5301,7 @@ function updatePendingTableReviewFlags(table) {
 
 function ensurePendingTableReviewFlags(table) {
   if (!table) return table;
+  repairMisreadDataHeaderTable(table);
   if (
     table.reviewFlagsVersion === REVIEW_FLAGS_VERSION &&
     typeof table.needsManualReview === "boolean" &&
@@ -4166,15 +5360,21 @@ function getDateKeysFromValues(values) {
   return [...new Set(values.flatMap((value) => getDateKeysFromText(value)))];
 }
 
-function normalizeDateCellValue(value) {
+function normalizeDateCellValue(value, { allowDayOnly = true } = {}) {
   const text = String(value || "").trim();
   if (!text) return "";
-  return extractDateFromCompositeSeatText(text) || text;
+  const extracted = extractDateFromCompositeSeatText(text);
+  if (extracted) return extracted;
+  if (isLikelyDateValue(text)) return text;
+  return allowDayOnly && isLikelyDayOnlyDateValue(text) ? text : "";
 }
 
 function getTicketDateValues(ticket) {
   const dateIndexes = findColumnIndexes(ticket.table.columns || [], ["日期", "演出日期", "date", "day", "일자"]);
-  return dateIndexes.length ? dateIndexes.map((index) => normalizeDateCellValue(ticket.row[index])).filter(Boolean) : [];
+  const dateValues = dateIndexes.map((index) => normalizeDateCellValue(ticket.row[index], { allowDayOnly: true })).filter(Boolean);
+  if (dateValues.length) return dateValues;
+  if (dateIndexes.length) return [];
+  return (ticket.row || []).map((value) => normalizeDateCellValue(value, { allowDayOnly: false })).filter(Boolean);
 }
 
 function getSelectedDateDebugInfo() {
@@ -4551,6 +5751,7 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable.rowColorSource = "";
     normalizedTable.rowColorReliable = false;
     normalizedTable.rowColorConfirmed = false;
+    normalizedTable.rowColorExactRowAligned = false;
     normalizedTable.rowColorAutoApplied = false;
     normalizedTable.rowColorAutoSkipCount = 0;
     normalizedTable.rowColorRows = [];
@@ -4560,48 +5761,78 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable._rowColorRepairTried = false;
   }
   normalizedTable.rowColorLogicVersion = Number(normalizedTable.rowColorLogicVersion || 0);
+  repairMisreadDataHeaderTable(normalizedTable);
   return normalizedTable;
 }
 
 function mergeFragmentedPendingTables(tables = []) {
-  const sourceCounts = tables.reduce((counts, table) => {
-    const key = `${table.eventId || ""}::${table.sourceFileName || table.sourceName || ""}::${table.sourcePage || ""}`;
-    counts[key] = (counts[key] || 0) + 1;
-    return counts;
-  }, {});
   const merged = [];
+  const mergedByPdfPage = new Map();
   tables.forEach((table) => {
-    const previous = merged[merged.length - 1];
-    const previousSourceName = previous ? previous.sourceFileName || previous.sourceName || "" : "";
     const tableSourceName = table.sourceFileName || table.sourceName || "";
-    const sameSource =
-      previous &&
-      previous.eventId === table.eventId &&
-      previous.sourcePage === table.sourcePage &&
-      previousSourceName === tableSourceName;
-    const sourceKey = `${table.eventId || ""}::${table.sourceFileName || table.sourceName || ""}::${table.sourcePage || ""}`;
-    const manySamePageFragments = sameSource && Number(table.sourcePage || 0) > 0 && Number(sourceCounts[sourceKey] || 0) >= 6;
-    const tinyFragment = table.rows?.length <= 2 && table.columns?.length <= 3;
-    const headerlessFragment = tinyFragment && table.rows?.some((row) => looksLikeTicketDataCells(row));
-    if (
-      sameSource &&
-      (manySamePageFragments ||
-        ((headerlessFragment || areRecognizedColumnsCompatible(previous.columns, table.columns)) &&
-          canMergeRecognizedTables(previous, { ...table, headerless: headerlessFragment })))
-    ) {
-      const previousRowCount = previous.rows.length;
-      previous.rows.push(...adaptRowsToColumns(table.rows, previous.columns));
-      if (Array.isArray(table.originalRows)) {
-        previous.originalRows = Array.isArray(previous.originalRows) ? previous.originalRows : previous.rows.slice(0, previousRowCount).map((row) => [...row]);
-        previous.originalRows.push(...adaptRowsToColumns(table.originalRows, previous.originalColumns || previous.columns));
-      }
-      previous.title = previous.title.replace(/\s*·\s*第\s*\d+\s*块表\s*/g, "");
-      previous._columnRepairChanged = true;
+    const sourcePage = Number(table.sourcePage || 0) || 0;
+    const canMergePdfPage = sourcePage > 0 && tableSourceName;
+    const sourceKey = `${table.eventId || ""}::${tableSourceName}::${sourcePage}`;
+    if (canMergePdfPage && mergedByPdfPage.has(sourceKey)) {
+      appendParsedTableOnSamePdfPage(mergedByPdfPage.get(sourceKey), table);
       return;
     }
+    if (canMergePdfPage) mergedByPdfPage.set(sourceKey, table);
     merged.push(table);
   });
-  return merged;
+  return merged.map((table) => {
+    table.title = String(table.title || "").replace(/\s*·\s*第\s*\d+\s*块表\s*/g, "");
+    repairMisreadDataHeaderTable(table);
+    if (Number(table.sourcePage || 0) > 0) forceCanonicalOriginalDisplay(table);
+    return table;
+  });
+}
+
+function getPendingTableRuntimeSignature(table) {
+  const rowPreview = Array.isArray(table?.rows)
+    ? table.rows
+        .slice(0, 3)
+        .map((row) => (Array.isArray(row) ? row.join("|") : ""))
+        .join(";;")
+    : "";
+  return [
+    table?.id || "",
+    table?.eventId || "",
+    table?.sourceFileName || table?.sourceName || "",
+    Number(table?.sourcePage || 0) || 0,
+    Number(table?.sourcePart || 0) || 0,
+    table?.title || "",
+    Array.isArray(table?.columns) ? table.columns.join("|") : "",
+    Array.isArray(table?.originalColumns) ? table.originalColumns.join("|") : "",
+    Array.isArray(table?.rows) ? table.rows.length : 0,
+    rowPreview,
+    table?._forceCanonicalDisplay === true ? "canonical" : "original",
+  ].join("::");
+}
+
+function normalizePendingTablesInMemory({ save = false } = {}) {
+  if (!pendingTables.length) return false;
+  const selectedBefore = pendingTables.find((table) => table.id === selectedPendingTableId) || null;
+  const selectedSourceKey = selectedBefore
+    ? `${selectedBefore.eventId || ""}::${selectedBefore.sourceFileName || selectedBefore.sourceName || ""}::${Number(selectedBefore.sourcePage || 0) || 0}`
+    : "";
+  const beforeSignature = pendingTables.map(getPendingTableRuntimeSignature).join("\n");
+  const normalizedTables = mergeFragmentedPendingTables(pendingTables.map(normalizeLoadedPendingTable));
+  const afterSignature = normalizedTables.map(getPendingTableRuntimeSignature).join("\n");
+  const needsPdfCanonicalDisplay = pendingTables.some((table) => Number(table.sourcePage || 0) > 0 && table._forceCanonicalDisplay !== true);
+  if (beforeSignature === afterSignature && !needsPdfCanonicalDisplay) return false;
+
+  pendingTables.splice(0, pendingTables.length, ...normalizedTables);
+  if (selectedBefore && !pendingTables.some((table) => table.id === selectedBefore.id)) {
+    const replacement =
+      pendingTables.find((table) => {
+        const sourceKey = `${table.eventId || ""}::${table.sourceFileName || table.sourceName || ""}::${Number(table.sourcePage || 0) || 0}`;
+        return sourceKey === selectedSourceKey;
+      }) || pendingTables.find((table) => table.eventId === currentEvent.id);
+    selectedPendingTableId = replacement?.id || null;
+  }
+  if (save) scheduleAppStateSave();
+  return true;
 }
 
 function loadAppState() {
@@ -4775,7 +6006,13 @@ function isCustomerPublishableTicket(ticket) {
   return !isUnavailableTicket(ticket) && hasTicketSalePrice(ticket);
 }
 
-function removeSoldRowsFromTable(table) {
+function isNonTicketFooterRow(table, row) {
+  if (!table || !Array.isArray(row)) return false;
+  if (!isNonTicketFooterCells(row, table.columns || [])) return false;
+  return !hasTicketSalePrice({ table, row, index: -1 });
+}
+
+function removeRowsFromTable(table, shouldRemove) {
   if (!table?.rows?.length) return 0;
   ensureOriginalTableSnapshot(table);
   const keptRows = [];
@@ -4786,7 +6023,7 @@ function removeSoldRowsFromTable(table) {
   const nextRowColorRows = [];
   let removed = 0;
   table.rows.forEach((row, rowIndex) => {
-    if (isUnavailableTicket({ table, row, index: rowIndex })) {
+    if (shouldRemove(row, rowIndex)) {
       removed += 1;
       return;
     }
@@ -4807,6 +6044,17 @@ function removeSoldRowsFromTable(table) {
     table.reviewedRows = nextReviewedRows;
     table.userEditedRows = nextUserEditedRows;
     if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
+  }
+  return removed;
+}
+
+function pruneNonTicketRowsFromTable(table) {
+  return removeRowsFromTable(table, (row) => isNonTicketFooterRow(table, row));
+}
+
+function removeSoldRowsFromTable(table) {
+  const removed = removeRowsFromTable(table, (row, rowIndex) => isUnavailableTicket({ table, row, index: rowIndex }) || isNonTicketFooterRow(table, row));
+  if (removed) {
     updatePendingTableReviewFlags(table);
   }
   return removed;
@@ -4910,6 +6158,7 @@ function getSeatmapTestProgress(event = currentEvent) {
     total: uniqueZoneKeys.length,
     testedCount,
     missingZones,
+    uniqueZoneKeys: uniqueZoneKeys.map((key) => ({ key, label: (event.zones || []).find((zone) => getSeatmapZoneTestKey(zone) === key)?.label || key })),
     passed: uniqueZoneKeys.length > 0 && testedCount === uniqueZoneKeys.length && event.seatmapTestRequired !== true,
   };
 }
@@ -4952,21 +6201,44 @@ function markSeatmapZoneTested(zone) {
   renderAdminChecklist();
 }
 
+function markSeatmapTestComplete() {
+  if (!IS_ADMIN_PAGE || !currentEvent) return;
+  const uniqueZones = getSeatmapTestProgress().uniqueZoneKeys || [];
+  if (!currentEvent.zones.length || !uniqueZones.length) {
+    const message = "当前座位图还没有热区，不能确认测试完成。";
+    seatmapStatus.textContent = message;
+    showToast(message, "error");
+    return;
+  }
+  currentEvent.seatmapTestedZoneIds = uniqueZones.map((item) => item.key);
+  currentEvent.seatmapTestRequired = false;
+  currentEvent.seatmapTestedAt = new Date().toISOString();
+  currentEvent.seatmapTestReason = "";
+  seatmapHotspotVisible = false;
+  seatmapEditingZoneId = "";
+  seatmapEditDraftPolygon = null;
+  seatmapEditDragging = null;
+  const progress = getSeatmapTestProgress();
+  seatmapStatus.textContent = `座位图测试已确认完成：${progress.testedCount}/${progress.total}。后续上传/发布票源不会再弹出测试要求。`;
+  zoneMarkingStatus.textContent = "座位图热区已确认可用。客户视角不会显示线框，只保留点击效果。";
+  saveAppState();
+  renderSeatmap();
+  renderAdminChecklist();
+  showToast("座位图测试已确认完成。", "success");
+}
+
 function requireSeatmapTestBeforePublish() {
   const progress = getSeatmapTestProgress();
   if (!currentEvent.zones.length) {
-    const message = "当前座位图没有热区，不能发布票源。请先扫描/保存热区并前台测试。";
+    const message = "当前座位图没有热区，不能发布票源。请先扫描/保存座位图热区。";
     setUploadStatus(message, "error");
     showToast(message, "error");
     return false;
   }
   if (!progress.passed) {
-    const missingText = progress.missingZones.slice(0, 8).map((zone) => zone.label).join("、");
-    const message = `座位图热区还没有全部经过前台点击测试：已测 ${progress.testedCount}/${progress.total}${missingText ? `，未测：${missingText}${progress.missingZones.length > 8 ? "…" : ""}` : ""}。已阻止发布票源。`;
-    setUploadStatus(message, "error");
-    showToast("请先逐区测试座位图热区。", "error");
-    openSeatmapTest();
-    return false;
+    const message = `座位图测试尚未点“确认测试完成”（${progress.testedCount}/${progress.total}），本次继续发布票源，不再自动弹出前台测试。`;
+    setUploadStatus(message, "idle");
+    showToast("座位图未确认测试完成，已继续发布票源。", "idle");
   }
   return true;
 }
@@ -5041,16 +6313,81 @@ function rowHasNumericSalePrice(table, row) {
   return findSalePriceColumnIndexes(table.columns || []).some((index) => isLikelySalePriceValue(row[index], { minPrice: 100 }));
 }
 
-function getTicketSalePriceValue(ticket) {
-  const priceIndexes = findPreferredSalePriceColumnIndexes(ticket.table.columns || []);
-  const numericIndex = priceIndexes.find((index) => extractSalePriceText(ticket.row[index], { minPrice: 100 }));
-  if (numericIndex >= 0) return extractSalePriceText(ticket.row[numericIndex], { minPrice: 100 });
-  const bestPrice = getBestSalePriceFromRow(ticket.table, ticket.row);
+function getTicketRowsForSalePrice(ticket) {
+  const table = ticket?.table || {};
+  const sources = [];
+  const seenRows = new Set();
+  const add = (row, columns) => {
+    if (!Array.isArray(row) || seenRows.has(row)) return;
+    seenRows.add(row);
+    sources.push({ table: { ...table, columns: columns || table.columns || [] }, row });
+  };
+  add(ticket?.row, table.columns || []);
+  const index = Number.isInteger(ticket?.index) ? ticket.index : -1;
+  if (index >= 0) {
+    add(Array.isArray(table.rows) ? table.rows[index] : null, table.columns || []);
+    add(Array.isArray(table.originalRows) ? table.originalRows[index] : null, table.originalColumns || table.columns || []);
+  }
+  return sources;
+}
+
+function findRightmostSalePriceInRow(table, row) {
+  if (!table || !Array.isArray(row)) return "";
+  const columns = table.columns || [];
+  for (let index = row.length - 1; index >= 0; index -= 1) {
+    const value = String(row[index] || "").trim();
+    const column = String(columns[index] || "").trim();
+    if (!value || isInternalColorColumn(column) || isLikelyRowColorValue(value)) continue;
+    if (isSoldText(value, { strict: true }) || isBusinessStatusRemarkValue(value) || isFaceValueColumnName(column)) continue;
+    const hasCurrency = /[￥¥$€£₩]/.test(value);
+    if (!hasCurrency && (isLikelyDateColumnValue(value) || isLikelyDateValue(value))) continue;
+    const price = extractSalePriceText(value, { minPrice: hasCurrency ? 100 : 1000 });
+    if (!price) continue;
+    const trustedPriceColumn =
+      isSalePriceColumnName(column) ||
+      isGenericPriceColumnName(column) ||
+      /售价|售價|价格|價格|单价|單價|报价|報價|金额|金額|price|ask/i.test(column);
+    const trailingColumn = index >= Math.max(0, row.length - 3);
+    if (!hasCurrency && !trustedPriceColumn && !trailingColumn) continue;
+    if (!hasCurrency && isProtectedNonPriceColumnName(column) && !trustedPriceColumn) continue;
+    return price;
+  }
+  return "";
+}
+
+function getSalePriceFromRowSource(source) {
+  const table = source?.table || {};
+  const row = source?.row || [];
+  const priceIndexes = findPreferredSalePriceColumnIndexes(table.columns || []);
+  const numericIndex = priceIndexes.find((index) => extractSalePriceText(row[index], { minPrice: 100 }));
+  if (numericIndex >= 0) return extractSalePriceText(row[numericIndex], { minPrice: 100 });
+  const explicitCurrencyPrice = findExplicitCurrencySalePriceInRow(table, row);
+  if (explicitCurrencyPrice) return explicitCurrencyPrice;
+  const bestPrice = getBestSalePriceFromRow(table, row);
   if (bestPrice) return bestPrice;
+  const rightmostPrice = findRightmostSalePriceInRow(table, row);
+  if (rightmostPrice) return rightmostPrice;
   const index = priceIndexes[0];
   if (index < 0) return "";
-  const value = ticket.row[index];
+  const value = row[index];
   return isLikelyRowColorValue(value) || isSoldText(value, { strict: true }) || isBusinessStatusRemarkValue(value) ? "" : value;
+}
+
+function getTicketSalePriceValue(ticket) {
+  return getTicketRowsForSalePrice(ticket).map(getSalePriceFromRowSource).find(Boolean) || "";
+}
+
+function getExplicitCurrencySalePriceFromTicket(ticket) {
+  return getTicketRowsForSalePrice(ticket)
+    .map((source) => findExplicitCurrencySalePriceInRow(source.table, source.row))
+    .find(Boolean) || "";
+}
+
+function getExplicitCurrencySalePriceFromFields(fields = []) {
+  return fields
+    .map((field) => String(field?.value || ""))
+    .map((value) => (isExplicitCurrencySalePrice(value) ? extractSalePriceText(value, { minPrice: 100 }) : ""))
+    .find(Boolean) || "";
 }
 
 function findSalePriceColumnIndex(columns = []) {
@@ -5124,9 +6461,36 @@ function ensureDateColumn(table) {
 
 function hasTicketSalePrice(ticket) {
   const value = String(getTicketSalePriceValue(ticket) || "").trim();
-  if (!value || value === "/" || value === "-" || /^无$/i.test(value)) return false;
-  if (isSoldText(value, { strict: true })) return false;
-  return extractNumber(value) !== null;
+  const missingLike = !value || value === "/" || value === "-" || /^无$/i.test(value);
+  if (!missingLike && !isSoldText(value, { strict: true }) && extractNumber(value) !== null) return true;
+  return Boolean(getExplicitCurrencySalePriceFromTicket(ticket));
+}
+
+function getTicketRowPlainText(ticket) {
+  return (ticket?.row || [])
+    .map((cell) => String(cell || "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isPlaceholderOrSeparatorText(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /(分割线|分隔线|日期分割|日期分隔|注意|须知|温馨提示|友情提示|说明行|表尾|表头)/i.test(text);
+}
+
+function isNonTicketPlaceholderRow(ticket) {
+  if (!ticket?.table || !Array.isArray(ticket.row)) return true;
+  const rowText = getTicketRowPlainText(ticket);
+  if (!rowText) return true;
+  if (isPlaceholderOrSeparatorText(rowText)) return true;
+  const hasPrice = hasTicketSalePrice(ticket);
+  if (!hasPrice) return true;
+  return false;
+}
+
+function isEffectiveTicketRowForColorDecision(ticket) {
+  return hasTicketSalePrice(ticket) && !isNonTicketPlaceholderRow(ticket);
 }
 
 function getFirstNonEmptyColumnValue(table, row, names) {
@@ -5318,6 +6682,16 @@ function normalizeOriginalDisplayFields(ticket, field, { preserveOriginal = true
   const saleNumber = extractNumber(salePrice);
 
   if (isInternalColorColumn(label)) return [];
+  const explicitCurrencyPrice = /[￥¥$€£₩]/.test(value) ? extractSalePriceText(value, { minPrice: 100 }) : "";
+  if (
+    !preserveOriginal &&
+    explicitCurrencyPrice &&
+    !isSalePriceColumnName(label) &&
+    !isFaceValueColumnName(label) &&
+    !isLikelyDateColumnValue(value)
+  ) {
+    return [{ label: "售价", value: explicitCurrencyPrice }];
+  }
   if (!preserveOriginal && /(区域|^区$|區|block|section|zone|area|구역|구)/i.test(label) && !isSalePriceColumnName(label)) {
     return [{ label: "区域", value: getZoneTokenFromCell(value) || value }];
   }
@@ -5432,21 +6806,107 @@ function dedupeTicketFields(fields = [], { canonical = false } = {}) {
   });
 }
 
+function isMisreadDataHeaderField(field = {}) {
+  const label = String(field.label || "").trim();
+  if (!label || isStrongRecognizedHeaderName(label)) return false;
+  return isLikelyDataColumnName(label);
+}
+
+function displayLabelLooksLikeTicketData(label = "") {
+  const text = String(label || "").trim();
+  if (!text || isStrongRecognizedHeaderName(text)) return false;
+  if (isLikelyDataColumnName(text)) return true;
+  if (isLikelySerialValue(text)) return true;
+  if (isLikelySalePriceValue(text, { minPrice: 100 })) return true;
+  if (parseCompositeSeatInfo(text) || extractZoneTokenFromText(text) || isLikelyZoneCode(text)) return true;
+  if (extractSeatRowFromText(text, { allowBareRange: true }) || isLikelySeatRowValue(text)) return true;
+  if (extractSeatNumberFromText(text, { allowBareRange: true }) || isLikelySeatNumberValue(text)) return true;
+  return false;
+}
+
+function displayPairLooksOffset(label = "", value = "") {
+  const left = String(label || "").trim();
+  const right = String(value || "").trim();
+  if (!left || !right || isStrongRecognizedHeaderName(left)) return false;
+  const leftComposite = parseCompositeSeatInfo(left);
+  const rightComposite = parseCompositeSeatInfo(right);
+  return (
+    (isLikelySerialValue(left) && isLikelySerialValue(right)) ||
+    ((isLikelyDateValue(left) || isLikelyDateColumnValue(left)) && (isLikelyDateValue(right) || isLikelyDateColumnValue(right))) ||
+    (isLikelySalePriceValue(left, { minPrice: 100 }) && isLikelySalePriceValue(right, { minPrice: 100 })) ||
+    ((leftComposite?.zone || extractZoneTokenFromText(left) || isLikelyZoneCode(left) || isGenericFaceValue(left)) &&
+      (rightComposite?.zone || extractZoneTokenFromText(right) || isLikelyZoneCode(right) || isGenericFaceValue(right))) ||
+    ((leftComposite?.row || extractSeatRowFromText(left, { allowBareRange: true }) || isLikelySeatRowValue(left)) &&
+      (rightComposite?.row || extractSeatRowFromText(right, { allowBareRange: true }) || isLikelySeatRowValue(right))) ||
+    ((leftComposite?.seat || extractSeatNumberFromText(left, { allowBareRange: true }) || isLikelySeatNumberValue(left)) &&
+      (rightComposite?.seat || extractSeatNumberFromText(right, { allowBareRange: true }) || isLikelySeatNumberValue(right)))
+  );
+}
+
+function originalDisplayFieldsLookOffset(fields = []) {
+  const visibleFields = fields.filter(
+    (field) => String(field?.label || "").trim() && String(field?.value || "").trim() && !isInternalColorColumn(field.label),
+  );
+  if (visibleFields.length < 2) return false;
+  const strongLabelCount = visibleFields.filter((field) => isStrongRecognizedHeaderName(field.label)).length;
+  const dataLabelCount = visibleFields.filter((field) => displayLabelLooksLikeTicketData(field.label)).length;
+  const offsetPairCount = visibleFields.filter((field) => displayPairLooksOffset(field.label, field.value)).length;
+  if (dataLabelCount >= Math.max(2, strongLabelCount + 1)) return true;
+  if (offsetPairCount >= 2) return true;
+  if (dataLabelCount >= 1 && offsetPairCount >= 2) return true;
+  if (strongLabelCount === 0 && dataLabelCount >= 1 && offsetPairCount >= 1) return true;
+  return dataLabelCount >= 2 && offsetPairCount >= 1;
+}
+
+function shouldUseOriginalTableDisplay(table) {
+  if (!Array.isArray(table?.originalColumns) || !Array.isArray(table.originalRows)) return false;
+  if (table._forceCanonicalDisplay) return false;
+  if (hasMisreadDataHeaderColumns(table.originalColumns, table.originalRows)) return false;
+  const sampleFields = table.originalRows.slice(0, 5).flatMap((row) =>
+    table.originalColumns.map((column, columnIndex) => ({
+      label: String(column || "").trim(),
+      value: String(row?.[columnIndex] || "").trim(),
+    })),
+  );
+  return !originalDisplayFieldsLookOffset(sampleFields);
+}
+
+function forceCanonicalOriginalDisplay(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return table;
+  table.originalColumns = [...table.columns];
+  table.originalRows = cloneRows(table.rows);
+  table._forceCanonicalDisplay = true;
+  return table;
+}
+
 function getOriginalTicketFields(ticket, options = {}) {
+  repairMisreadDataHeaderTable(ticket?.table);
+  if (!ticket?.table) return [];
   const preserveOriginal = options.preserveOriginal !== false;
   const columns = preserveOriginal ? ticket.table.originalColumns || ticket.table.columns || [] : ticket.table.columns || ticket.table.originalColumns || [];
+  if (preserveOriginal && hasMisreadDataHeaderColumns(columns, ticket.table.originalRows || ticket.table.rows)) {
+    return getOriginalTicketFields(ticket, { ...options, preserveOriginal: false });
+  }
   const originalRow =
     preserveOriginal && Array.isArray(ticket.table.originalRows) && ticket.table.originalRows[ticket.index]
       ? ticket.table.originalRows[ticket.index]
-      : ticket.row;
+      : Array.isArray(ticket.table.rows) && ticket.table.rows[ticket.index]
+        ? ticket.table.rows[ticket.index]
+        : ticket.row || [];
   if (preserveOriginal) {
-    return dedupeTicketFields(columns
+    const originalFields = columns
       .map((column, columnIndex) => ({
         label: String(column || "").trim(),
         value: String(originalRow[columnIndex] || "").trim(),
       }))
       .filter((field) => field.label && field.value)
-      .filter((field) => !isInternalColorColumn(field.label)));
+      .filter((field) => !isInternalColorColumn(field.label));
+    if (originalDisplayFieldsLookOffset(originalFields)) {
+      return getOriginalTicketFields(ticket, { ...options, preserveOriginal: false });
+    }
+    return dedupeTicketFields(
+      originalFields.filter((field) => !isMisreadDataHeaderField(field) && !displayLabelLooksLikeTicketData(field.label)),
+    );
   }
   const salePrice = getTicketSalePriceValue(ticket);
   const saleNumber = extractNumber(salePrice);
@@ -5480,16 +6940,27 @@ function getOriginalTicketFields(ticket, options = {}) {
     })
     .flatMap((field) => normalizeOriginalDisplayFields(ticket, field, options))
     .filter(Boolean);
-  const hasVisibleSalePrice = fields.some((field) => isSalePriceColumnName(field.label));
-  if (movedPriceFromQuantity && movedPriceValue && !hasVisibleSalePrice) {
-    fields.push({ label: "售价", value: movedPriceValue });
+  const fallbackSalePriceValue = movedPriceValue || salePrice;
+  const cleanedFields = fields.filter((field) => !isMisreadDataHeaderField(field) && !displayLabelLooksLikeTicketData(field.label));
+  const visibleSalePriceField = cleanedFields.find((field) => isSalePriceColumnName(field.label));
+  const visibleSalePriceIsNumeric = visibleSalePriceField
+    ? Boolean(extractSalePriceText(visibleSalePriceField.value, { minPrice: 100 }))
+    : false;
+  if (visibleSalePriceField && fallbackSalePriceValue && !visibleSalePriceIsNumeric) {
+    visibleSalePriceField.value = fallbackSalePriceValue;
   }
-  const hasVisibleQuantity = fields.some((field) => isQuantityColumnName(field.label));
+  const hasVisibleSalePrice = cleanedFields.some(
+    (field) => isSalePriceColumnName(field.label) && extractSalePriceText(field.value, { minPrice: 100 }),
+  );
+  if ((movedPriceFromQuantity || salePrice) && fallbackSalePriceValue && !hasVisibleSalePrice) {
+    cleanedFields.push({ label: "售价", value: fallbackSalePriceValue });
+  }
+  const hasVisibleQuantity = cleanedFields.some((field) => isQuantityColumnName(field.label));
   const quantityValue = getTicketQuantityValue(ticket);
   if (!hasVisibleQuantity && quantityValue) {
-    fields.push({ label: "数量", value: quantityValue });
+    cleanedFields.push({ label: "数量", value: quantityValue });
   }
-  return dedupeTicketFields(fields, { canonical: true });
+  return dedupeTicketFields(cleanedFields, { canonical: true });
 }
 
 function getTicketPrice(ticket) {
@@ -6212,12 +7683,15 @@ function renderSeatmapAdminTools() {
   if (!tools || !IS_ADMIN_PAGE) return;
   const editingZone = getSeatmapEditingZone();
   const canEditSelected = selectedZone && currentEvent.zones.some((zone) => zone.id === selectedZone.id);
+  const progress = getSeatmapTestProgress();
   tools.innerHTML = `
     <div class="seatmap-tool-copy">
       <strong>座位图热区校准</strong>
       <span>${
         editingZone
           ? `正在修改 ${editingZone.label}，可拖动边框、角点或多边形顶点。`
+          : progress.passed
+            ? `已确认测试完成：${progress.testedCount}/${progress.total}，后续发布票源不会再要求测试。`
           : seatmapHotspotVisible
             ? "已显示全部热区，先点击要检查的区域，再点“修改选中热区”。"
             : "客户视角不会显示热区线框，只保留点击效果。"
@@ -6226,6 +7700,9 @@ function renderSeatmapAdminTools() {
     <div class="seatmap-tool-actions">
       <button type="button" class="secondary-button" data-seatmap-tool="show-hotspots">显示全部热区</button>
       <button type="button" class="secondary-button" data-seatmap-tool="customer-test">客户视角测试</button>
+      <button type="button" class="primary-button compact" data-seatmap-tool="confirm-tested" ${currentEvent.zones.length ? "" : "disabled"}>
+        ${progress.passed ? "已确认测试完成" : "确认测试完成"}
+      </button>
       <button type="button" class="secondary-button" data-seatmap-tool="edit-selected" ${canEditSelected || editingZone ? "" : "disabled"}>
         ${editingZone ? `继续修改 ${editingZone.label}` : canEditSelected ? `修改 ${selectedZone.label} 热区` : "先点一个区域再修改"}
       </button>
@@ -6560,10 +8037,12 @@ function renderTicketCard(ticket, title, rank) {
 
 function renderRecognizedTableCard(group) {
   const { table, hitRows } = group;
+  repairMisreadDataHeaderTable(table);
   const pageText = getTablePageText(table);
   const customerTitle = pageText ? `匹配票源 · ${pageText}` : "匹配票源表";
-  const displayColumns = Array.isArray(table.originalColumns) ? table.originalColumns : table.columns;
-  const displayRows = Array.isArray(table.originalRows) ? table.originalRows : table.rows;
+  const useOriginalDisplay = shouldUseOriginalTableDisplay(table);
+  const displayColumns = useOriginalDisplay ? table.originalColumns : table.columns;
+  const displayRows = useOriginalDisplay ? table.originalRows : table.rows;
   const visibleColumns = displayColumns
     .map((column, columnIndex) => ({ column, columnIndex }))
     .filter((field) => !isInternalColorColumn(field.column));
@@ -6903,6 +8382,7 @@ async function refreshAiStatus() {
 }
 
 function renderUploadRecords() {
+  normalizePendingTablesInMemory({ save: true });
   const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
   const repairedTables = allCurrentPending.filter((table) => table._columnRepairChanged);
   if (repairedTables.length) {
@@ -7090,6 +8570,7 @@ function cloneReviewState(table) {
     rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
     rowColorReliable: Boolean(table.rowColorReliable),
     rowColorConfirmed: Boolean(table.rowColorConfirmed),
+    rowColorExactRowAligned: Boolean(table.rowColorExactRowAligned),
     rowColorAutoApplied: Boolean(table.rowColorAutoApplied),
     rowColorAutoSkipCount: Number(table.rowColorAutoSkipCount || 0),
     rowColorMessage: table.rowColorMessage || "",
@@ -7138,6 +8619,7 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.rowColorLogicVersion = Number(state.rowColorLogicVersion || 0);
   table.rowColorReliable = Boolean(state.rowColorReliable);
   table.rowColorConfirmed = Boolean(state.rowColorConfirmed);
+  table.rowColorExactRowAligned = Boolean(state.rowColorExactRowAligned);
   table.rowColorAutoApplied = Boolean(state.rowColorAutoApplied);
   table.rowColorAutoSkipCount = Number(state.rowColorAutoSkipCount || 0);
   table.rowColorMessage = state.rowColorMessage || "";
@@ -7429,6 +8911,7 @@ function createPublishedTableFromRows(table, rows, suffix = "") {
     rowColorRows: rowColorRows.length === rows.length ? rowColorRows : [],
     rowColorReliable: rowColorRows.length === rows.length ? table.rowColorReliable : false,
     rowColorConfirmed: rowColorRows.length === rows.length ? table.rowColorConfirmed : false,
+    rowColorExactRowAligned: rowColorRows.length === rows.length ? table.rowColorExactRowAligned : false,
     rowColorAutoApplied: rowColorRows.length === rows.length ? table.rowColorAutoApplied : false,
     needsManualReview: false,
     reviewReasons: [],
@@ -7477,6 +8960,88 @@ function blobToDataUrl(blob) {
   });
 }
 
+const reviewSourceAvailableUrls = new Set();
+const reviewSourceMissingUrls = new Set();
+const reviewSourceCheckingUrls = new Set();
+const reviewSourceCheckedAt = new Map();
+const REVIEW_SOURCE_CHECK_TTL = 8000;
+
+function getReviewSourceCheckUrl(sourceUrl) {
+  const url = String(sourceUrl || "").trim().split("#")[0];
+  return url && !url.startsWith("data:") ? url : "";
+}
+
+async function assertReviewSourceReadable(response, url) {
+  if (!response.ok) throw new Error(`source ${response.status}`);
+  const contentType = String(response.headers.get("content-type") || "");
+  if (!/text\/plain|text\/html|application\/json/i.test(contentType)) return;
+  const bodyResponse = await fetch(url, { method: "GET", cache: "no-store" });
+  if (!bodyResponse.ok) throw new Error(`source ${bodyResponse.status}`);
+  const text = await bodyResponse.text().catch(() => "");
+  if (/^\s*Not found\b/i.test(text.slice(0, 256))) throw new Error("source not found body");
+}
+
+function ensureReviewSourceAvailability(sourceUrl) {
+  const url = getReviewSourceCheckUrl(sourceUrl);
+  if (!url || reviewSourceCheckingUrls.has(url)) return;
+  const lastCheckedAt = reviewSourceCheckedAt.get(url) || 0;
+  if (reviewSourceAvailableUrls.has(url) && Date.now() - lastCheckedAt < REVIEW_SOURCE_CHECK_TTL) return;
+  reviewSourceAvailableUrls.delete(url);
+  reviewSourceCheckingUrls.add(url);
+  fetch(url, { method: "HEAD", cache: "no-store" })
+    .then((response) => assertReviewSourceReadable(response, url))
+    .then(() => {
+      reviewSourceMissingUrls.delete(url);
+      reviewSourceCheckedAt.set(url, Date.now());
+      if (!reviewSourceAvailableUrls.has(url)) {
+        reviewSourceAvailableUrls.add(url);
+        renderReviewPanel(pendingReviewFocusRowIndex);
+      }
+    })
+    .catch(() => {
+      reviewSourceAvailableUrls.delete(url);
+      reviewSourceCheckedAt.set(url, Date.now());
+      if (!reviewSourceMissingUrls.has(url)) {
+        reviewSourceMissingUrls.add(url);
+        renderReviewPanel(pendingReviewFocusRowIndex);
+      }
+    })
+    .finally(() => {
+      reviewSourceCheckingUrls.delete(url);
+    });
+}
+
+function isReviewSourceMissing(sourceUrl) {
+  const url = getReviewSourceCheckUrl(sourceUrl);
+  return !sourceUrl || (url && reviewSourceMissingUrls.has(url));
+}
+
+function isReviewSourceWaiting(sourceUrl) {
+  const url = getReviewSourceCheckUrl(sourceUrl);
+  return Boolean(url && !reviewSourceAvailableUrls.has(url) && !reviewSourceMissingUrls.has(url));
+}
+
+function renderReviewSourceChecking(sourceUrl) {
+  const source = String(sourceUrl || "").split("#")[0];
+  return `
+    <div class="review-source-missing checking">
+      <strong>正在检查原始文件</strong>
+      <p>当前记录指向 ${escapeHtml(source || "空地址")}，正在确认本地开发服务器能不能读取。</p>
+    </div>
+  `;
+}
+
+function renderReviewSourceMissing(table, sourceUrl) {
+  const source = String(sourceUrl || table?.originalImage || "").split("#")[0];
+  return `
+    <div class="review-source-missing">
+      <strong>原始文件暂时找不到</strong>
+      <p>当前记录指向 ${escapeHtml(source || "空地址")}，但本地开发服务器没有读到这个文件。</p>
+      <p>常见原因是 PDF 被移动、清理，或者 iCloud 把 uploads 里的原文件变成了 .icloud 占位文件。请把这份 PDF 下载回本机，或重新上传一次。</p>
+    </div>
+  `;
+}
+
 async function getReviewSourceDataUrl(table) {
   const source = table?.originalImage || "";
   if (source.startsWith("data:")) return source;
@@ -7486,25 +9051,7 @@ async function getReviewSourceDataUrl(table) {
   return blobToDataUrl(await response.blob());
 }
 
-function getRowColorStartIndexForPendingTable(table) {
-  const sourcePage = Number(table?.sourcePage || 0);
-  const sourcePart = Number(table?.sourcePart || 0);
-  if (!sourcePage || sourcePart <= 1) return 0;
-  return pendingTables
-    .filter(
-      (item) =>
-        item !== table &&
-        item.eventId === table.eventId &&
-        item.originalImage === table.originalImage &&
-        Number(item.sourcePage || 0) === sourcePage &&
-        Number(item.sourcePart || 0) > 0 &&
-        Number(item.sourcePart || 0) < sourcePart,
-    )
-    .reduce((count, item) => count + (Array.isArray(item.rows) ? item.rows.length : 0), 0);
-}
-
 function shouldAutoRepairRowColors(table) {
-  return false;
   if (!table || !Array.isArray(table.rows) || !table.rows.length) return false;
   if (table._rowColorRepairing || table._rowColorRepairDone || table._rowColorRepairTried) return false;
   if (isVisualRowColorSource(table) && Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION) return false;
@@ -7514,16 +9061,7 @@ function shouldAutoRepairRowColors(table) {
 }
 
 function getRowColorExpectedRowsForPendingTable(table) {
-  const sourcePage = Number(table?.sourcePage || 0);
-  if (!sourcePage) return table?.rows?.length || 0;
-  const relatedTables = pendingTables.filter(
-    (item) =>
-      item.eventId === table.eventId &&
-      item.originalImage === table.originalImage &&
-      Number(item.sourcePage || 0) === sourcePage,
-  );
-  const total = relatedTables.reduce((count, item) => count + (Array.isArray(item.rows) ? item.rows.length : 0), 0);
-  return total || table.rows.length;
+  return Array.isArray(table?.rows) ? table.rows.length : 0;
 }
 
 async function repairPendingTableRowColors(table) {
@@ -7562,7 +9100,8 @@ async function repairPendingTableRowColors(table) {
     if (!response.ok) throw new Error(result.message || result.error || "行底色重新检测失败。");
     const analysis = result.rowColorAnalysis;
     if (!analysis) throw new Error("行底色重新检测没有返回结果。");
-    applyOpenCvRowColorsToTable(table, analysis, analysis.source === "ai_row_color" ? 0 : getRowColorStartIndexForPendingTable(table));
+    const rowColorStart = Math.max(0, Math.floor(Number(table.rowColorAlignedStart ?? table.rowColorPageRowOffset ?? 0) || 0));
+    applyOpenCvRowColorsToTable(table, analysis, rowColorStart);
     table._rowColorRepairDone = true;
     table._rowColorRepairError = "";
     updatePendingTableReviewFlags(table);
@@ -7657,6 +9196,7 @@ function applyReviewAiSuggestions(table) {
 }
 
 function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
+  normalizePendingTablesInMemory({ save: true });
   const table = getSelectedPendingTable();
   if (!table || table.eventId !== currentEvent.id) {
     reviewTitle.textContent = "选择一张待确认表";
@@ -7668,12 +9208,21 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
   reviewTitle.textContent = shortenFileName(table.title || "新上传票源", 36);
   reviewTitle.title = table.title || "";
   confirmReviewButton.disabled = false;
-  ensurePendingTableReviewFlags(table);
+  repairMisreadDataHeaderTable(table);
+  if (isPdfTableSource(table)) forceCanonicalOriginalDisplay(table);
+  if (table._columnRepairChanged) {
+    table.reviewFlagsVersion = 0;
+  }
   if (shouldAutoRepairRowColors(table)) {
     repairPendingTableRowColors(table);
+    repairMisreadDataHeaderTable(table);
+    if (isPdfTableSource(table)) forceCanonicalOriginalDisplay(table);
+    table.reviewFlagsVersion = 0;
   }
+  ensurePendingTableReviewFlags(table);
   if (table._columnRepairChanged) {
     delete table._columnRepairChanged;
+    scheduleAppStateSave(0);
   }
   const navigation = getReviewTableNavigation(table);
   const navigationLabel =
@@ -7697,37 +9246,52 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
     Number.isInteger(colorSamples.availableRow) ? `未售样本：第 ${colorSamples.availableRow + 1} 条` : "未售样本：未设置",
   ].join(" / ");
   const hasColorPreview = hasOpenCvRowColorPreview(table);
-  const openCvConflict = hasColorPreview && hasOpenCvWhiteAndColoredConflict(table);
+  const openCvConflict = hasColorPreview && hasAnyOpenCvWhiteAndColoredConflict(table);
   const openCvLabels = hasColorPreview ? getOpenCvNonSoldColorLabels(table) : [];
+  const openCvColorState = hasColorPreview ? getOpenCvEffectiveColorState(table) : null;
   const rowColorEngineName = getRowColorEngineName(table);
   const rowColorStatusText =
     isVisualRowColorSource(table)
       ? table.rowColorReliable
-        ? table.rowColorMessage || `${rowColorEngineName} 已匹配本表行底色`
+        ? table.rowColorMessage || getOpenCvColorReferenceMessage(table)
         : openCvConflict
           ? table.rowColorMessage || `${rowColorEngineName} 检测到颜色冲突，需人工确认原图颜色`
+          : openCvColorState?.hasNonWhite && !openCvColorState?.hasWhite
+            ? table.rowColorMessage || `${rowColorEngineName} 检测到非白底有效票，但没有白底有效票作参照，按整表带色处理。`
           : openCvLabels.length
-            ? `${rowColorEngineName} 已识别 ${table.rowColorRows.length}/${table.rows.length} 行底色，未发现颜色冲突`
+            ? `${rowColorEngineName} 已识别 ${table.rowColorRows.length}/${table.rows.length} 行底色，未发现白底+非白底有效票冲突`
             : `${rowColorEngineName} 未识别到会影响上架的颜色冲突`
       : "";
   const colorEngineHint = hasTrustedRowColorSource(table)
     ? openCvConflict
-      ? `${rowColorEngineName} 已启用：未 sold 票里白底和其他底色并存，非白底会自动下架。`
-      : `${rowColorEngineName} 已启用：未 sold 票没有白底+其他底色冲突，不会因为颜色下架。`
+      ? `${rowColorEngineName} 已启用：未 sold 票里白底和强整行色并存，强整行色会自动下架，弱颜色只提示确认。`
+      : openCvColorState?.hasNonWhite && !openCvColorState?.hasWhite
+        ? `${rowColorEngineName} 已启用：本表没有白底有效票作参照，按整表带色处理，不会因为颜色下架。`
+        : `${rowColorEngineName} 已启用：未 sold 票没有白底+其他底色冲突，不会因为颜色下架。`
     : openCvConflict
       ? "检测到颜色冲突，但当前未自动使用；请查看识别颜色，确认原图无误后再使用。"
-      : "未发现白底+其他底色冲突，不会因为颜色进入人工审核。";
+      : openCvColorState?.hasNonWhite && !openCvColorState?.hasWhite
+        ? "检测到非白底有效票，但没有白底有效票作参照，按整表带色处理，不会因为颜色进入人工审核。"
+        : "未发现白底+其他底色冲突，不会因为颜色进入人工审核。";
   const openCvPreviewRows =
     hasColorPreview && table.showOpenCvColorPreview
       ? table.rows
           .map((row, index) => {
             const item = table.rowColorRows[index] || {};
-            const label = normalizeRowColorLabel(item.label) || normalizeRowColorLabel(item.rawLabel) || "未识别";
+            const rawLabel = normalizeRowColorLabel(item.label) || normalizeRowColorLabel(item.rawLabel);
             const confidence = Math.round(Number(item.confidence || 0) * 100);
             const whiteRatio = Math.round(Number(item.whiteRatio || 0) * 100);
             const coloredRatio = Math.round(Number(item.coloredRatio || 0) * 100);
             const coverageRatio = Math.round(Number(item.coverageRatio || 0) * 100);
             const decision = getOpenCvColorDecisionText(table, index);
+            const autoSkipLabel = getAutoSkipOpenCvColorLabel(item);
+            const strictLabel = getOpenCvItemConflictActionLabel(item);
+            const label =
+              autoSkipLabel ||
+              strictLabel ||
+              (decision.includes("疑似") ? "疑似颜色" : "") ||
+              (rawLabel && !decision.includes("下架") ? rawLabel : "") ||
+              "未识别";
             return `
               <span class="opencv-color-row ${decision.includes("下架") || decision.includes("已售") ? "skip" : "keep"}">
                 <b>第 ${index + 1} 行</b>
@@ -7749,17 +9313,27 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
   const reviewZoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
   const rows = reviewRows
     .map(({ row, rowIndex }) => {
+      const currentRow = table.rows[rowIndex] || row;
       const shouldPublish = shouldPublishPendingRow(table, rowIndex);
       const aiDecision = aiDecisionByRow.get(rowIndex + 1);
-      const missingPrice = !hasTicketSalePrice({ table, row, index: rowIndex });
-      const soldLike = isSoldTicket({ table, row, index: rowIndex });
-      const colorHeld = !soldLike && isColorHeldForReviewTicket({ table, row, index: rowIndex });
+      const ticket = { table, row: currentRow, index: rowIndex };
+      const fieldObjects = getOriginalTicketFields(ticket, { preserveOriginal: false });
+      const visibleSalePrice =
+        getTicketSalePriceValue(ticket) ||
+        fieldObjects
+          .map((field) => (isSalePriceColumnName(field.label) ? extractSalePriceText(field.value, { minPrice: 100 }) : ""))
+          .find(Boolean) ||
+        getExplicitCurrencySalePriceFromFields(fieldObjects) ||
+        getExplicitCurrencySalePriceFromTicket(ticket);
+      const missingPrice = !visibleSalePrice;
+      const soldLike = isSoldTicket(ticket);
+      const colorHeld = !soldLike && isColorHeldForReviewTicket(ticket);
       const zoneUnmatched =
         !soldLike &&
         currentEvent.zones.length > 0 &&
-        !currentEvent.zones.some((zone) => zoneMatchesTicket({ table, row, index: rowIndex }, zone));
+        !currentEvent.zones.some((zone) => zoneMatchesTicket(ticket, zone));
       const editing = isReviewRowEditing(table, rowIndex);
-      const fields = getOriginalTicketFields({ table, row, index: rowIndex }, { preserveOriginal: false })
+      const fields = fieldObjects
         .map(
           (field) => `
             <span class="review-ticket-field">
@@ -7776,7 +9350,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
           (field) => `
             <label class="review-edit-field">
               <span>${escapeHtml(field.column)}</span>
-              <input type="text" value="${escapeHtml(row[field.index] || "")}" data-review-edit-input="${field.index}" />
+              <input type="text" value="${escapeHtml(currentRow[field.index] || "")}" data-review-edit-input="${field.index}" />
             </label>
           `,
         )
@@ -7838,6 +9412,9 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
   const isPdf = isPdfTableSource(table);
   const page = Number(table.sourcePage || 0);
   const sourceUrl = isPdf && page > 0 ? `${source.split("#")[0]}#page=${page}` : source;
+  ensureReviewSourceAvailability(sourceUrl);
+  const sourceMissing = isReviewSourceMissing(sourceUrl);
+  const sourceWaiting = isReviewSourceWaiting(sourceUrl);
   reviewLayout.innerHTML = `
     ${
       table.needsManualReview
@@ -7851,7 +9428,11 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
       </div>
       <strong>${escapeHtml(getTableSourceSummary(table))}</strong>
       ${
-        isPdf
+        sourceMissing
+          ? renderReviewSourceMissing(table, sourceUrl)
+          : sourceWaiting
+          ? renderReviewSourceChecking(sourceUrl)
+          : isPdf
           ? `<iframe class="review-source-frame" src="${sourceUrl}" title="${escapeHtml(getTableSourceSummary(table))}"></iframe>`
           : `<img class="review-source-image" src="${sourceUrl}" alt="${escapeHtml(getTableSourceSummary(table))}" />`
       }
@@ -7998,7 +9579,10 @@ async function getUploadImageRowColorAnalyses(parsedTables) {
   const hasImageSource = uploadedSource?.dataUrl?.startsWith("data:image/") || String(uploadedSource?.url || "").startsWith("uploads/");
   if (isImage && !hasImageSource) throw new Error("无法读取原始图片做行底色检测，请重新选择图片后再生成待确认表。");
   if (!hasImageSource) return {};
-  const expectedRows = parsedTables.reduce((count, table) => count + (Array.isArray(table.rows) ? table.rows.length : 0), 0);
+  const expectedRows = parsedTables.reduce((count, table) => {
+    const rowCount = Array.isArray(table.rows) ? table.rows.length : 0;
+    return count + rowCount + (hasMisreadDataHeaderColumns(table.columns, table.rows) ? 1 : 0);
+  }, 0);
   if (!expectedRows) return {};
   const response = await fetch("/api/tables/analyze-row-colors", {
     method: "POST",
@@ -8014,16 +9598,125 @@ async function getUploadImageRowColorAnalyses(parsedTables) {
   return result.rowColorAnalysis ? { "1": result.rowColorAnalysis } : {};
 }
 
+function cloneParsedTableForPageMerge(table) {
+  const cloned = {
+    ...table,
+    columns: Array.isArray(table?.columns) ? [...table.columns] : [],
+    rows: Array.isArray(table?.rows) ? cloneRows(table.rows) : [],
+    originalColumns: Array.isArray(table?.originalColumns) ? [...table.originalColumns] : Array.isArray(table?.columns) ? [...table.columns] : [],
+    originalRows: Array.isArray(table?.originalRows)
+      ? cloneRows(table.originalRows)
+      : Array.isArray(table?.rows)
+        ? cloneRows(table.rows)
+        : [],
+  };
+  repairMisreadDataHeaderTable(cloned);
+  const rowColorStart = Math.max(
+    0,
+    Math.floor(Number(table?.rowColorPageStartIndex ?? table?.rowColorAlignedStart ?? table?.rowColorPageRowOffset ?? 0) || 0),
+  );
+  cloned.rowColorPageRowOffset = rowColorStart;
+  cloned.rowColorSourceIndexes = cloned.rows.map((_, index) => rowColorStart + index);
+  cloned.sourcePart = 1;
+  return cloned;
+}
+
+function appendParsedTableOnSamePdfPage(target, source) {
+  if (!target || !source) return;
+  repairMisreadDataHeaderTable(target);
+  repairMisreadDataHeaderTable(source);
+  if (!Array.isArray(target.rowColorSourceIndexes) || target.rowColorSourceIndexes.length !== target.rows.length) {
+    const targetStart = Math.max(0, Math.floor(Number(target.rowColorPageRowOffset || 0) || 0));
+    target.rowColorSourceIndexes = target.rows.map((_, index) => targetStart + index);
+  }
+  coerceSourceTableForSamePageMerge(source, target.columns);
+  const existingColumnCount = target.columns.length;
+  const usedIndexes = new Set();
+  const columnMap = source.columns.map((column, columnIndex) => {
+    let targetIndex = getRecognizedColumnTargetIndex(target.columns, column, usedIndexes);
+    if (targetIndex < 0) {
+      const shouldAddColumn = isStrongRecognizedHeaderName(column);
+      if (!shouldAddColumn) return { columnIndex, targetIndex: -1 };
+      const fallbackLabel = String(column || "").trim() || `第${target.columns.length + 1}列`;
+      target.columns.push(fallbackLabel);
+      target.rows.forEach((row) => row.push(""));
+      targetIndex = target.columns.length - 1;
+    }
+    usedIndexes.add(targetIndex);
+    return { columnIndex, targetIndex };
+  });
+  const sourceRows = Array.isArray(source.rows) ? source.rows : [];
+  const targetColorIndexBase = target.rowColorSourceIndexes.length;
+  const sourceColorIndexes = Array.isArray(source.rowColorSourceIndexes)
+    ? source.rowColorSourceIndexes
+    : sourceRows.map((_, index) => targetColorIndexBase + index);
+  const mappedEntries = sourceRows
+    .map((row, sourceRowIndex) => ({ row, sourceRowIndex }))
+    .filter(({ row }) => Array.isArray(row) && row.some((cell) => String(cell || "").trim()) && !isNonTicketFooterCells(row, source.columns))
+    .map(({ row, sourceRowIndex }) => {
+      const mapped = Array.from({ length: target.columns.length }, () => "");
+      columnMap.forEach(({ columnIndex, targetIndex }) => {
+        if (targetIndex < 0) return;
+        mapped[targetIndex] = row[columnIndex] || "";
+      });
+      row.slice(source.columns.length).forEach((value) => {
+        const emptyIndex = mapped.findIndex((item, index) => index >= existingColumnCount && !String(item || "").trim());
+        if (emptyIndex >= 0) mapped[emptyIndex] = value;
+      });
+      return {
+        row: mapped,
+        sourceRowIndex,
+      };
+    });
+  const mappedRows = mappedEntries.map((entry) => entry.row);
+  target.rows.push(...mappedRows);
+  target.rowColorSourceIndexes.push(
+    ...mappedEntries.map((entry, index) => {
+      const sourceIndex = Number(sourceColorIndexes[entry.sourceRowIndex]);
+      if (Number.isFinite(sourceIndex) && sourceIndex >= 0) return sourceIndex;
+      return targetColorIndexBase + index;
+    }),
+  );
+  extendColumnsForOverflowRows(target.columns, target.rows);
+  repairMisreadDataHeaderTable(target);
+  normalizePendingTableColumns(target);
+  forceCanonicalOriginalDisplay(target);
+  target.sourcePart = 1;
+  target.headerless = Boolean(target.headerless && source.headerless);
+  target._columnRepairChanged = true;
+}
+
+function mergeParsedTablesByPdfPage(parsedTables = []) {
+  const mergedTables = [];
+  const tableByPage = new Map();
+  const nextRowColorIndexByPage = new Map();
+  parsedTables.forEach((table, index) => {
+    const sourcePage = Number(table?.sourcePage || 0) || index + 1;
+    const pageKey = String(sourcePage);
+    const startIndex = nextRowColorIndexByPage.get(pageKey) || 0;
+    const cloned = cloneParsedTableForPageMerge({ ...table, sourcePage, sourcePart: 1, rowColorPageStartIndex: startIndex });
+    nextRowColorIndexByPage.set(pageKey, startIndex + cloned.rows.length);
+    const existing = tableByPage.get(pageKey);
+    if (!existing) {
+      tableByPage.set(pageKey, cloned);
+      mergedTables.push(cloned);
+      return;
+    }
+    appendParsedTableOnSamePdfPage(existing, cloned);
+  });
+  return mergedTables;
+}
+
 function createUploadedTables(parsedTables, rowColorAnalyses = null) {
-  const count = parsedTables.length;
   const isPdf = uploadedSource.type === "application/pdf" || uploadedSource.name.toLowerCase().endsWith(".pdf");
+  const uploadTables = isPdf ? mergeParsedTablesByPdfPage(parsedTables) : parsedTables;
+  const count = uploadTables.length;
   const colorAnalyses = rowColorAnalyses || (isPdf ? lastTicketOcrJobSnapshot?.rowColorAnalyses || {} : {});
-  const pageColorCursors = {};
   return Array.from({ length: count }, (_, index) => {
-    const parsedTable = parsedTables[index];
+    const parsedTable = uploadTables[index];
     const sourcePage = Number(parsedTable.sourcePage || 0) || index + 1;
-    const sourcePart = Number(parsedTable.sourcePart || 0) || index + 1;
-    const pageText = isPdf ? `PDF 第 ${sourcePage} 页${sourcePart > 1 ? ` · 第 ${sourcePart} 块表` : ""}` : `第 ${sourcePart} 张表`;
+    const sourcePart = isPdf ? 1 : Number(parsedTable.sourcePart || 0) || index + 1;
+    const pageText = isPdf ? `PDF 第 ${sourcePage} 页` : `第 ${sourcePart} 张表`;
     const baseTitle = uploadTableTitle.value.trim() || uploadedSource.name;
     const table = {
       id: `uploaded-${Date.now()}-${index}`,
@@ -8039,13 +9732,14 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
       originalColumns: Array.isArray(parsedTable.originalColumns) ? parsedTable.originalColumns : [...parsedTable.columns],
       originalRows: Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
       rows: parsedTable.rows,
+      rowColorPageRowOffset: Math.max(0, Math.floor(Number(parsedTable.rowColorPageRowOffset || 0) || 0)),
+      rowColorSourceIndexes: Array.isArray(parsedTable.rowColorSourceIndexes) ? [...parsedTable.rowColorSourceIndexes] : null,
     };
+    repairMisreadDataHeaderTable(table);
+    if (isPdf) forceCanonicalOriginalDisplay(table);
     const colorAnalysis = colorAnalyses[String(sourcePage)] || colorAnalyses[sourcePage] || null;
     if (colorAnalysis) {
-      const pageKey = String(sourcePage);
-      const startIndex = pageColorCursors[pageKey] || 0;
-      const consumedRows = applyOpenCvRowColorsToTable(table, colorAnalysis, startIndex);
-      pageColorCursors[pageKey] = startIndex + Math.max(consumedRows, table.rows.length);
+      applyOpenCvRowColorsToTable(table, colorAnalysis, 0);
     }
     return updatePendingTableReviewFlags(table);
   });
@@ -8085,8 +9779,8 @@ async function publishUpload() {
   selectedZone = null;
   searchTerm = "";
   searchInput.value = "";
-  setUploadStatus(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，已自动跳过 ${removedSoldRows} 条已售票` : ""}。校对确认后才会发布给客户。`, "success");
-  showToast(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，跳过 ${removedSoldRows} 条已售` : ""}。`, "success");
+  setUploadStatus(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，已自动跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。校对确认后才会发布给客户。`, "success");
+  showToast(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。`, "success");
   renderUploadRecords();
   renderReviewPanel();
   renderPublishedTables();
@@ -9157,7 +10851,7 @@ function markNextZone(event) {
   if (markingIndex >= markingZones.length) {
     isMarkingZones = false;
     resetSeatmapTestStatus("手动标注热区后需要逐区测试");
-    zoneMarkingStatus.textContent = `已标注 ${markingZones.length} 个 SVG 可点击热区，发布票源前必须前台逐区测试。`;
+    zoneMarkingStatus.textContent = `已标注 ${markingZones.length} 个 SVG 可点击热区。请在座位图工具栏测试后点“确认测试完成”。`;
     showToast("区域标注完成。", "success");
     saveAppState();
     renderAdminEvent();
@@ -9207,8 +10901,8 @@ async function saveScannedSeatmapZones() {
   hoveredZone = null;
   const template = await saveCurrentSeatmapAsTemplate(true);
   zoneMarkingStatus.textContent = template
-    ? `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区，并已把座位图底图一起存入模板库“${template.name}”。已切到前台测试，必须逐区点击验证。`
-    : `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区，已切到前台测试，请逐区点击验证。`;
+    ? `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区，并已把座位图底图一起存入模板库“${template.name}”。测试无误后请点“确认测试完成”。`
+    : `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区。测试无误后请点“确认测试完成”。`;
   showToast(template ? "整套座位图模板已保存。" : "座位图热区已保存。", "success");
   saveAppState();
   renderSeatmapMarkers();
@@ -9494,6 +11188,7 @@ seatmapFrame.addEventListener("click", (event) => {
     const action = toolButton.dataset.seatmapTool;
     if (action === "show-hotspots") showSeatmapHotspots();
     if (action === "customer-test") showSeatmapCustomerTest();
+    if (action === "confirm-tested") markSeatmapTestComplete();
     if (action === "edit-selected") startSeatmapHotspotEdit();
     if (action === "save-edit") saveSeatmapHotspotEdit();
     if (action === "cancel-edit") cancelSeatmapHotspotEdit();

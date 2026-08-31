@@ -2053,6 +2053,45 @@ tr.hit-row td {
   object-fit: contain;
 }
 
+.review-source-missing {
+  display: grid;
+  align-content: center;
+  min-height: 520px;
+  padding: 28px;
+  border: 1px solid #f0c7bd;
+  border-radius: 8px;
+  background: #fff3ef;
+  color: #8f2c1f;
+  line-height: 1.55;
+}
+
+.review-source-missing.checking {
+  border-color: #bed8dd;
+  background: #f1fbfb;
+  color: #0d5058;
+}
+
+.review-source-missing strong {
+  color: #8f2c1f;
+  font-size: 18px;
+  white-space: normal;
+}
+
+.review-source-missing.checking strong {
+  color: #0d5058;
+}
+
+.review-source-missing p {
+  margin: 8px 0 0;
+  color: #6b3a32;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.review-source-missing.checking p {
+  color: #48666b;
+}
+
 .review-ticket-list {
   display: grid;
   gap: 10px;
