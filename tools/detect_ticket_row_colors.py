@@ -384,6 +384,129 @@ def choose_data_intervals(intervals, expected_rows):
     return take_in_visual_order(candidates, "prefix")
 
 
+def detect_text_row_intervals(image, expected_rows):
+    if expected_rows <= 0:
+        return [], ""
+
+    height, width = image.shape[:2]
+    if height < 80 or width < 120:
+        return [], ""
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    dark = gray < 105
+    usable = np.zeros_like(dark, dtype=bool)
+    # The date column often contains one vertically-centered value spanning
+    # several ticket rows. Excluding the likely date band prevents that value
+    # from being detected as an extra row.
+    usable[:, int(width * 0.015) : int(width * 0.145)] = dark[:, int(width * 0.015) : int(width * 0.145)]
+    usable[:, int(width * 0.29) : int(width * 0.985)] = dark[:, int(width * 0.29) : int(width * 0.985)]
+
+    projection = np.count_nonzero(usable, axis=1)
+    threshold = max(8, int(width * 0.004))
+    ys = np.where(projection >= threshold)[0]
+    runs = []
+    for run in merge_runs(ys, gap=3):
+        y1, y2 = int(run[0]), int(run[1]) + 1
+        run_height = y2 - y1
+        if run_height < 6 or run_height > max(48, int(height * 0.07)):
+            continue
+        dark_count = int(np.sum(projection[y1:y2]))
+        if dark_count < max(35, int(width * 0.018)):
+            continue
+        runs.append(
+            {
+                "textY1": y1,
+                "textY2": y2,
+                "center": int(round((y1 + y2 - 1) / 2)),
+                "darkCount": dark_count,
+                "peak": int(np.max(projection[y1:y2])),
+            }
+        )
+    if len(runs) < expected_rows:
+        return [], ""
+
+    counts = [item["darkCount"] for item in runs]
+    median_count = float(np.median(counts)) if counts else 0
+    header_bottom = 0
+    for item in runs:
+        if item["center"] > height * 0.45:
+            break
+        if median_count and item["darkCount"] >= median_count * 2.8 and item["peak"] >= threshold * 6:
+            header_bottom = max(header_bottom, item["textY2"])
+
+    candidates = [
+        item
+        for item in runs
+        if item["textY1"] > header_bottom + 3 and item["center"] > max(header_bottom + 3, height * 0.16)
+    ]
+    if len(candidates) < expected_rows:
+        candidates = [item for item in runs if item["center"] > height * 0.16]
+    if len(candidates) < expected_rows:
+        return [], ""
+
+    centers = [item["center"] for item in candidates]
+    gaps = [centers[index + 1] - centers[index] for index in range(len(centers) - 1)]
+    median_gap = float(np.median(gaps)) if gaps else max(18, height * 0.045)
+    max_reasonable_gap = max(80, median_gap * 2.7)
+
+    best_start = 0
+    best_score = None
+    max_start = len(candidates) - expected_rows
+    for start in range(max_start + 1):
+        window = candidates[start : start + expected_rows]
+        window_centers = [item["center"] for item in window]
+        window_gaps = [window_centers[index + 1] - window_centers[index] for index in range(len(window_centers) - 1)]
+        large_gap_count = sum(1 for gap in window_gaps if gap > max_reasonable_gap)
+        regularity = sum(abs(gap - median_gap) for gap in window_gaps)
+        # Prefer the earliest plausible data block after the header. The OCR
+        # text rows are in visual order, so this maps row 0 to the first real
+        # ticket row instead of a later matching-looking fragment.
+        score = large_gap_count * 10000 + regularity + start * median_gap * 0.25
+        if best_score is None or score < best_score:
+            best_score = score
+            best_start = start
+
+    selected = candidates[best_start : best_start + expected_rows]
+    selected_centers = [item["center"] for item in selected]
+    local_gaps = [selected_centers[index + 1] - selected_centers[index] for index in range(len(selected_centers) - 1)]
+    local_median_gap = float(np.median(local_gaps)) if local_gaps else median_gap
+    if local_median_gap < 14:
+        return [], ""
+
+    intervals = []
+    previous_boundary = max(header_bottom + 2, int(round(selected[0]["center"] - local_median_gap * 0.48)))
+    for index, item in enumerate(selected):
+        center = item["center"]
+        if index < len(selected) - 1:
+            next_center = selected[index + 1]["center"]
+            next_boundary = int(round((center + next_center) / 2))
+        else:
+            next_boundary = int(round(center + local_median_gap * 0.48))
+        y1 = max(0, min(height - 1, previous_boundary))
+        y2 = max(y1 + 9, min(height, next_boundary))
+        band_gray = gray[y1:y2, :]
+        dark_density = float(np.count_nonzero(band_gray < 150)) / max(1, band_gray.size)
+        dark_band = band_gray < 130
+        col_counts = np.count_nonzero(dark_band, axis=0)
+        xs = np.where(col_counts >= max(2, int((y2 - y1) * 0.45)))[0]
+        vertical_runs = [run for run in merge_runs(xs, gap=3) if run[1] - run[0] <= 8]
+        intervals.append(
+            {
+                "y1": int(y1),
+                "y2": int(y2),
+                "height": int(y2 - y1),
+                "darkDensity": round(dark_density, 4),
+                "verticalLines": int(len(vertical_runs)),
+                "textCenter": int(center),
+                "textY1": int(item["textY1"]),
+                "textY2": int(item["textY2"]),
+            }
+        )
+        previous_boundary = next_boundary
+
+    return intervals, "text_projection_exact"
+
+
 def find_x_bounds(image, y1, y2):
     height, width = image.shape[:2]
     inner_y1 = min(y2, y1 + max(1, int((y2 - y1) * 0.2)))
@@ -753,8 +876,11 @@ def analyze(image_path, expected_rows=0):
     if image is None:
         raise RuntimeError("image cannot be read")
     intervals = detect_horizontal_intervals(image)
-    all_rows = [classify_interval(image, interval) for interval in intervals]
-    selected, selection_mode = choose_data_intervals(intervals, expected_rows)
+    text_selected, text_selection_mode = detect_text_row_intervals(image, expected_rows)
+    if text_selected:
+        selected, selection_mode = text_selected, text_selection_mode
+    else:
+        selected, selection_mode = choose_data_intervals(intervals, expected_rows)
     rows = [classify_interval(image, interval) for interval in selected]
     labels = [row["label"] for row in rows if row.get("label")]
     unique_labels = sorted(set(labels))
@@ -791,6 +917,7 @@ def analyze(image_path, expected_rows=0):
         "global_header_0_filtered",
         "global_header_1_filtered",
         "global_header_2_filtered",
+        "text_projection_exact",
         "first_group_drop_0",
         "first_group_drop_1",
         "first_group_drop_2",
