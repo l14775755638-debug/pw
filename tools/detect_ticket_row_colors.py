@@ -406,6 +406,74 @@ def find_x_bounds(image, y1, y2):
     return x1, x2
 
 
+def get_row_colored_scores(image, y1, y2, x1, x2):
+    height, width = image.shape[:2]
+    y1 = max(0, min(height, int(y1)))
+    y2 = max(y1, min(height, int(y2)))
+    x1 = max(0, min(width, int(x1)))
+    x2 = max(x1, min(width, int(x2)))
+    if y2 - y1 < 3 or x2 - x1 < 20:
+        return np.array([], dtype=float)
+
+    region = image[y1:y2, x1:x2]
+    masks, non_ink, _ = build_color_masks(region)
+    if not masks:
+        return np.array([], dtype=float)
+    colored = np.zeros(non_ink.shape, dtype=bool)
+    for key in COLOR_KEYS:
+        colored |= masks[key]
+
+    scores = []
+    min_valid = max(20, int(region.shape[1] * 0.08))
+    for row_index in range(region.shape[0]):
+        valid_count = int(np.count_nonzero(non_ink[row_index, :]))
+        if valid_count < min_valid:
+            scores.append(0.0)
+        else:
+            scores.append(float(np.count_nonzero(colored[row_index, :])) / max(1, valid_count))
+    return np.array(scores, dtype=float)
+
+
+def trim_interval_against_neighbor_color(image, y1, y2, x1, x2):
+    row_height = y2 - y1
+    if row_height < 16 or x2 - x1 < 80:
+        return y1, y2
+
+    scores = get_row_colored_scores(image, y1, y2, x1, x2)
+    if scores.size < 8:
+        return y1, y2
+
+    center_start = max(0, int(scores.size * 0.35))
+    center_end = min(scores.size, max(center_start + 1, int(scores.size * 0.65)))
+    center_score = float(np.median(scores[center_start:center_end]))
+    # Only strip neighbor bleed from rows whose own center is neutral. A truly
+    # colored ticket row should keep its colored edges.
+    if center_score >= 0.34:
+        return y1, y2
+
+    strong_threshold = 0.45
+    min_run = max(2, min(5, int(row_height * 0.12)))
+    max_edge_scan = max(min_run + 1, int(row_height * 0.35))
+    guard = max(1, min(3, int(row_height * 0.08)))
+    next_y1, next_y2 = y1, y2
+
+    bottom_limit = min(scores.size - min_run, max(center_end + max_edge_scan, center_end + 1))
+    for offset in range(center_end, bottom_limit + 1):
+        if float(np.min(scores[offset : offset + min_run])) >= strong_threshold:
+            next_y2 = min(next_y2, y1 + max(center_end + 1, offset - guard))
+            break
+
+    top_limit = max(0, center_start - max_edge_scan)
+    for offset in range(center_start - min_run, top_limit - 1, -1):
+        if float(np.min(scores[offset : offset + min_run])) >= strong_threshold:
+            next_y1 = max(next_y1, y1 + min(center_start - 1, offset + min_run + guard))
+            break
+
+    if next_y2 - next_y1 >= max(10, int(row_height * 0.45)):
+        return int(next_y1), int(next_y2)
+    return y1, y2
+
+
 def detect_vertical_cell_spans(image, y1, y2, x1, x2):
     """Find likely table cells inside one OCR row.
 
@@ -571,13 +639,14 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
 
 def classify_interval(image, interval):
     y1, y2 = interval["y1"], interval["y2"]
+    x1, x2 = find_x_bounds(image, y1, y2)
+    y1, y2 = trim_interval_against_neighbor_color(image, y1, y2, x1, x2)
     # Sample the safest center band of the row. Seller tables often put SOLD
     # rows directly next to normal rows; using row edges can leak yellow/red
     # pixels from neighbors and incorrectly downlist a normal ticket.
     vertical_trim = max(1, int((y2 - y1) * 0.32))
     inner_y1 = min(y2, y1 + vertical_trim)
     inner_y2 = max(inner_y1 + 1, y2 - vertical_trim)
-    x1, x2 = find_x_bounds(image, y1, y2)
     horizontal_trim = max(3, int((x2 - x1) * 0.01))
     region = image[inner_y1:inner_y2, min(x2, x1 + horizontal_trim) : max(x1 + 1, x2 - horizontal_trim)]
     classified = classify_interval_by_cells(image, y1, y2, x1, x2) or classify_pixels(region)
