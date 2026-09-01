@@ -393,7 +393,13 @@ def detect_text_row_intervals(image, expected_rows):
         return [], ""
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    dark = gray < 105
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1].astype(np.int16)
+    value = hsv[:, :, 2].astype(np.int16)
+    # A red or green row background can be dark in grayscale and look like one
+    # huge text run. Use actual dark ink instead of grayscale darkness so
+    # colored backgrounds do not erase their own text rows.
+    dark = (value < 90) | ((value < 135) & (saturation < 110))
     usable = np.zeros_like(dark, dtype=bool)
     # The date column often contains one vertically-centered value spanning
     # several ticket rows. Excluding the likely date band prevents that value
@@ -431,16 +437,16 @@ def detect_text_row_intervals(image, expected_rows):
     for item in runs:
         if item["center"] > height * 0.45:
             break
-        if median_count and item["darkCount"] >= median_count * 2.8 and item["peak"] >= threshold * 6:
+        if median_count and item["darkCount"] >= median_count * 1.45 and item["peak"] >= threshold * 6:
             header_bottom = max(header_bottom, item["textY2"])
 
     candidates = [
         item
         for item in runs
-        if item["textY1"] > header_bottom + 3 and item["center"] > max(header_bottom + 3, height * 0.16)
+        if item["textY1"] > header_bottom + 3 and item["center"] > max(header_bottom + 3, height * 0.22)
     ]
     if len(candidates) < expected_rows:
-        candidates = [item for item in runs if item["center"] > height * 0.16]
+        candidates = [item for item in runs if item["center"] > height * 0.22]
     if len(candidates) < expected_rows:
         return [], ""
 
