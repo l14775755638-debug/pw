@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 47;
+const ROW_COLOR_LOGIC_VERSION = 48;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -5744,6 +5744,8 @@ function scheduleAppStateSave(delay = 500) {
 }
 
 function normalizeLoadedPendingTable(table) {
+  const loadedRowColorVersion = Number(table?.rowColorLogicVersion || 0);
+  const hasStaleRowColorLogic = loadedRowColorVersion !== ROW_COLOR_LOGIC_VERSION;
   const normalizedTable = {
     ...table,
     columns: Array.isArray(table.columns) ? [...table.columns] : [],
@@ -5752,7 +5754,12 @@ function normalizeLoadedPendingTable(table) {
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
   };
-  if (isVisualRowColorSource(normalizedTable) && Number(normalizedTable.rowColorLogicVersion || 0) !== ROW_COLOR_LOGIC_VERSION) {
+  if (hasStaleRowColorLogic) {
+    normalizedTable._rowColorRepairing = false;
+    normalizedTable._rowColorRepairDone = false;
+    normalizedTable._rowColorRepairTried = false;
+  }
+  if (isVisualRowColorSource(normalizedTable) && hasStaleRowColorLogic) {
     Object.keys(normalizedTable.publishRows || {}).forEach((rowIndex) => {
       if (normalizedTable.userEditedRows?.[rowIndex] !== true) delete normalizedTable.publishRows[rowIndex];
     });
@@ -9128,8 +9135,9 @@ async function getReviewSourceDataUrl(table) {
 
 function shouldAutoRepairRowColors(table) {
   if (!table || !Array.isArray(table.rows) || !table.rows.length) return false;
-  if (table._rowColorRepairing || table._rowColorRepairDone || table._rowColorRepairTried) return false;
-  if (isVisualRowColorSource(table) && Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION) return false;
+  const hasFreshRowColorLogic = Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION;
+  if (hasFreshRowColorLogic && (table._rowColorRepairing || table._rowColorRepairDone || table._rowColorRepairTried)) return false;
+  if (isVisualRowColorSource(table) && hasFreshRowColorLogic) return false;
   if (!isPdfTableSource(table) && !String(table.originalType || "").startsWith("image/")) return false;
   if (!table.originalImage) return false;
   return true;
