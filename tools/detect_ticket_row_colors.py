@@ -472,6 +472,7 @@ def detect_text_row_intervals(image, expected_rows):
             best_score = score
             best_start = start
 
+    selection_mode = "text_projection_exact" if len(candidates) == expected_rows else "text_projection_prefix"
     selected = candidates[best_start : best_start + expected_rows]
     selected_centers = [item["center"] for item in selected]
     local_gaps = [selected_centers[index + 1] - selected_centers[index] for index in range(len(selected_centers) - 1)]
@@ -510,7 +511,7 @@ def detect_text_row_intervals(image, expected_rows):
         )
         previous_boundary = next_boundary
 
-    return intervals, "text_projection_exact"
+    return intervals, selection_mode
 
 
 def find_x_bounds(image, y1, y2):

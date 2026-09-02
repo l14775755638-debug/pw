@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 37;
+const ROW_COLOR_LOGIC_VERSION = 38;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4821,7 +4821,7 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
   if (table.rowColorSource === "ai_row_color") return applyAiRowColorActionDecision(table);
   table.publishRows = table.publishRows || {};
   let skipCount = 0;
-  if (hasOpenCvColorDecisionAlignment(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) {
+  if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) {
     table.rows.forEach((row, rowIndex) => {
       if (table.userEditedRows?.[rowIndex] === true) return;
       const ticket = { table, row, index: rowIndex };
@@ -5070,6 +5070,7 @@ function getWhiteOnlyRuleRowColorLabel(ticket) {
 function isColorMarkedSoldTicket(ticket) {
   if (!ticket?.table || !Array.isArray(ticket.table.rows)) return false;
   if (isSoldTicket(ticket)) return false;
+  if (ticket.table.rowColorReliable !== true) return false;
   if (!hasOpenCvColorDecisionAlignment(ticket.table) || !hasConfirmedOpenCvWhiteAndColoredConflict(ticket.table)) return false;
   const label = getStrictRowLocalOpenCvColorLabel(ticket.table.rowColorRows?.[ticket.index]);
   return Boolean(label && !isAvailableRowColorLabel(label));
