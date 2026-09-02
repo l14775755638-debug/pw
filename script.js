@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 44;
+const ROW_COLOR_LOGIC_VERSION = 45;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4352,12 +4352,55 @@ function hasExactMixedRowColorAutoSkipSource(table) {
   );
 }
 
+function getOpenCvSoldTextColorAnchorState(table) {
+  const state = {
+    soldNonWhiteCount: 0,
+    nonSoldWhiteCount: 0,
+    labels: [],
+  };
+  if (
+    !hasOpenCvRowColorPreview(table) ||
+    table?.rowColorSource === "ai_row_color" ||
+    !Array.isArray(table.rows) ||
+    !Array.isArray(table.rowColorRows) ||
+    table.rows.length === 0 ||
+    table.rowColorRows.length !== table.rows.length
+  ) {
+    return state;
+  }
+  table.rows.forEach((row, index) => {
+    const item = table.rowColorRows[index];
+    const label = getStrictRowLocalOpenCvColorLabel(item);
+    if (!label) return;
+    const ticket = { table, row, index };
+    if (isSoldTicket(ticket) && !isAvailableRowColorLabel(label)) {
+      state.soldNonWhiteCount += 1;
+      state.labels.push(label);
+      return;
+    }
+    if (!isSoldTicket(ticket) && isEffectiveTicketRowForColorDecision(ticket) && isAvailableRowColorLabel(label)) {
+      state.nonSoldWhiteCount += 1;
+    }
+  });
+  state.labels = uniqueCleanValues(state.labels);
+  return state;
+}
+
+function hasOpenCvSoldTextColorAnchor(table) {
+  const state = getOpenCvSoldTextColorAnchorState(table);
+  return state.soldNonWhiteCount >= 2 && state.nonSoldWhiteCount >= 1 && state.labels.length === 1;
+}
+
 function shouldAutoSkipForRowColor(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
   const item = table.rowColorRows?.[rowIndex];
   const label = getStrictRowLocalOpenCvColorLabel(item);
   if (!label || isAvailableRowColorLabel(label)) return false;
   if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) return true;
+  if (hasOpenCvSoldTextColorAnchor(table)) {
+    const anchorState = getOpenCvSoldTextColorAnchorState(table);
+    return anchorState.labels.includes(label);
+  }
   return hasExactMixedRowColorAutoSkipSource(table);
 }
 
@@ -4997,7 +5040,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const colorState = getOpenCvEffectiveColorState(table);
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
   applyOpenCvWhiteVsColoredAutoDecision(table);
-  if (!table.rowColorReliable) {
+  if (!table.rowColorReliable && !hasOpenCvSoldTextColorAnchor(table)) {
     Object.keys(table.publishRows || {}).forEach((rowIndex) => {
       if (table.userEditedRows?.[rowIndex] !== true && table.publishRows[rowIndex] === false) delete table.publishRows[rowIndex];
     });
