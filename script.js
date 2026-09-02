@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 42;
+const ROW_COLOR_LOGIC_VERSION = 43;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4955,7 +4955,10 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorAlignedStart = aligned.startIndex;
   table.rowColorExactRowAligned = Boolean(
     analysis.source === "ai_row_color" ||
-      ((analysis.source === "opencv" || analysis.source === "pdf_vector") && aligned.exact === true && assignedRows.length === table.rows.length),
+      ((analysis.source === "opencv" || analysis.source === "pdf_vector") &&
+        analysis.exactRowAligned === true &&
+        aligned.exact === true &&
+        assignedRows.length === table.rows.length),
   );
   const alignedSourceIndexes = Array.isArray(aligned.sourceIndexes) ? aligned.sourceIndexes : [];
   table.rowColorSourceIndexes = alignedSourceIndexes.length === table.rows.length ? [...alignedSourceIndexes] : table.rowColorSourceIndexes;
@@ -4984,7 +4987,13 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const allEffectiveRowsHaveSignal = assignedRows.every((colorItem, rowIndex) =>
     hasUsableOpenCvColorSignalForEffectiveTicket(table, table.rows[rowIndex], rowIndex, colorItem),
   );
-  table.rowColorReliable = Boolean(analysis.reliable && exactRowCount && allEffectiveRowsHaveSignal && table.rowColorExactRowAligned);
+  table.rowColorReliable = Boolean(
+    analysis.reliable &&
+      table.rowColorExactBackendAligned &&
+      exactRowCount &&
+      allEffectiveRowsHaveSignal &&
+      table.rowColorExactRowAligned,
+  );
   const colorState = getOpenCvEffectiveColorState(table);
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
   applyOpenCvWhiteVsColoredAutoDecision(table);

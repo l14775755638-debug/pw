@@ -1002,7 +1002,7 @@ def analyze(image_path, expected_rows=0):
     warning_reasons = []
     if not contiguous:
         warning_reasons.append("row_gap")
-    reliable = bool(rows) and exact_rows and selection_mode in safe_selection_modes and not low_confidence_rows
+    reliable = bool(rows) and exact_row_aligned and selection_mode in safe_selection_modes and not low_confidence_rows
     for index, row in enumerate(rows):
         row["index"] = index
     return {
