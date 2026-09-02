@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 45;
+const ROW_COLOR_LOGIC_VERSION = 47;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4353,10 +4353,11 @@ function hasExactMixedRowColorAutoSkipSource(table) {
 }
 
 function getOpenCvSoldTextColorAnchorState(table) {
+  const storedAnchor = table?.rowColorSoldTextAnchor || {};
   const state = {
-    soldNonWhiteCount: 0,
+    soldNonWhiteCount: Math.max(0, Math.floor(Number(storedAnchor.soldNonWhiteCount || 0) || 0)),
     nonSoldWhiteCount: 0,
-    labels: [],
+    labels: Array.isArray(storedAnchor.labels) ? uniqueCleanValues(storedAnchor.labels) : [],
   };
   if (
     !hasOpenCvRowColorPreview(table) ||
@@ -4391,6 +4392,36 @@ function hasOpenCvSoldTextColorAnchor(table) {
   return state.soldNonWhiteCount >= 2 && state.nonSoldWhiteCount >= 1 && state.labels.length === 1;
 }
 
+function getOpenCvCurrentRedWhiteFallbackState(table) {
+  const state = { redCount: 0, whiteCount: 0, labels: [] };
+  if (
+    !hasOpenCvRowColorPreview(table) ||
+    table?.rowColorSource === "ai_row_color" ||
+    !Array.isArray(table.rows) ||
+    !Array.isArray(table.rowColorRows) ||
+    table.rows.length === 0 ||
+    table.rowColorRows.length !== table.rows.length
+  ) {
+    return state;
+  }
+  table.rows.forEach((row, index) => {
+    const ticket = { table, row, index };
+    if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
+    const label = getStrictRowLocalOpenCvColorLabel(table.rowColorRows[index]);
+    if (!label) return;
+    state.labels.push(label);
+    if (label === "红底") state.redCount += 1;
+    if (isAvailableRowColorLabel(label)) state.whiteCount += 1;
+  });
+  state.labels = uniqueCleanValues(state.labels);
+  return state;
+}
+
+function hasOpenCvCurrentRedWhiteFallback(table) {
+  const state = getOpenCvCurrentRedWhiteFallbackState(table);
+  return state.redCount >= 2 && state.whiteCount >= 1 && state.labels.every((label) => label === "红底" || isAvailableRowColorLabel(label));
+}
+
 function shouldAutoSkipForRowColor(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
   const item = table.rowColorRows?.[rowIndex];
@@ -4401,6 +4432,7 @@ function shouldAutoSkipForRowColor(table, rowIndex) {
     const anchorState = getOpenCvSoldTextColorAnchorState(table);
     return anchorState.labels.includes(label);
   }
+  if (label === "红底" && hasOpenCvCurrentRedWhiteFallback(table)) return true;
   return hasExactMixedRowColorAutoSkipSource(table);
 }
 
@@ -4908,6 +4940,22 @@ function getLastOcrColorAnalysisForPage(page) {
   return analyses[String(page)] || analyses[page] || null;
 }
 
+function getInferredRowColorSourceIndexesFromSequence(table, availableRowCount) {
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const columns = Array.isArray(table?.columns) ? table.columns : [];
+  if (!rows.length || !availableRowCount) return [];
+  const firstColumnName = normalizeText(columns[0] || "");
+  if (!/(^|[^a-z0-9])(序号|编号|no|number|index)([^a-z0-9]|$)/i.test(firstColumnName)) return [];
+  const indexes = rows.map((row) => {
+    const raw = String(row?.[0] || "").trim();
+    if (!/^\d{1,4}$/.test(raw)) return null;
+    const sourceIndex = Number(raw) - 1;
+    return sourceIndex >= 0 && sourceIndex < availableRowCount ? sourceIndex : null;
+  });
+  if (indexes.length !== rows.length || indexes.some((index) => index === null)) return [];
+  return indexes;
+}
+
 function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   const length = table?.rows?.length || 0;
   const rows = Array.isArray(availableRows) ? availableRows.filter(Boolean) : [];
@@ -4931,6 +4979,22 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
         startIndex: sourceIndexes[0] || 0,
         exact: true,
         sourceIndexes,
+      };
+    }
+  }
+
+  const inferredIndexes = getInferredRowColorSourceIndexesFromSequence(table, rows.length);
+  if (inferredIndexes.length === length) {
+    const rowsByIndex = new Map(
+      rows.map((row, index) => [Number.isFinite(Number(row?.index)) ? Number(row.index) : index, row]),
+    );
+    const mappedRows = inferredIndexes.map((sourceIndex) => rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null);
+    if (mappedRows.every(Boolean)) {
+      return {
+        rows: mappedRows,
+        startIndex: inferredIndexes[0] || 0,
+        exact: true,
+        sourceIndexes: inferredIndexes,
       };
     }
   }
@@ -4965,6 +5029,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
   table.rowColorMessage = "";
   table.rowColorRows = [];
+  table.rowColorSoldTextAnchor = null;
   table.rowColorExactRowAligned = false;
 
   if (!analysis || !["opencv", "ai_row_color", "pdf_vector"].includes(analysis.source)) return 0;
@@ -5040,7 +5105,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const colorState = getOpenCvEffectiveColorState(table);
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
   applyOpenCvWhiteVsColoredAutoDecision(table);
-  if (!table.rowColorReliable && !hasOpenCvSoldTextColorAnchor(table)) {
+  if (!table.rowColorReliable && !hasOpenCvSoldTextColorAnchor(table) && !hasOpenCvCurrentRedWhiteFallback(table)) {
     Object.keys(table.publishRows || {}).forEach((rowIndex) => {
       if (table.userEditedRows?.[rowIndex] !== true && table.publishRows[rowIndex] === false) delete table.publishRows[rowIndex];
     });
@@ -5565,6 +5630,13 @@ function makeCompactPendingTable(table) {
     publishRows: { ...(table.publishRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
+    rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
+    rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
+      ? {
+          soldNonWhiteCount: Number(table.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
+          labels: Array.isArray(table.rowColorSoldTextAnchor.labels) ? [...table.rowColorSoldTextAnchor.labels] : [],
+        }
+      : null,
     needsManualReview: Boolean(table.needsManualReview),
     reviewReasons: Array.isArray(table.reviewReasons) ? [...table.reviewReasons] : [],
     reviewFlagsVersion: table.reviewFlagsVersion || 0,
@@ -5691,6 +5763,7 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable.rowColorAutoApplied = false;
     normalizedTable.rowColorAutoSkipCount = 0;
     normalizedTable.rowColorRows = [];
+    normalizedTable.rowColorSoldTextAnchor = null;
     normalizedTable.rowColorMessage = "旧版颜色判断已停用，打开本页会重新逐行识别底色。";
     normalizedTable._rowColorRepairing = false;
     normalizedTable._rowColorRepairDone = false;
@@ -5957,6 +6030,7 @@ function removeRowsFromTable(table, shouldRemove) {
   const nextReviewedRows = {};
   const nextUserEditedRows = {};
   const nextRowColorRows = [];
+  const nextRowColorSourceIndexes = [];
   let removed = 0;
   table.rows.forEach((row, rowIndex) => {
     if (shouldRemove(row, rowIndex)) {
@@ -5972,6 +6046,9 @@ function removeRowsFromTable(table, shouldRemove) {
     if (table.reviewedRows?.[rowIndex] !== undefined) nextReviewedRows[nextIndex] = table.reviewedRows[rowIndex];
     if (table.userEditedRows?.[rowIndex] !== undefined) nextUserEditedRows[nextIndex] = table.userEditedRows[rowIndex];
     if (Array.isArray(table.rowColorRows) && table.rowColorRows[rowIndex]) nextRowColorRows[nextIndex] = table.rowColorRows[rowIndex];
+    if (Array.isArray(table.rowColorSourceIndexes) && table.rowColorSourceIndexes[rowIndex] !== undefined) {
+      nextRowColorSourceIndexes[nextIndex] = table.rowColorSourceIndexes[rowIndex];
+    }
   });
   if (removed) {
     table.rows = keptRows;
@@ -5980,6 +6057,7 @@ function removeRowsFromTable(table, shouldRemove) {
     table.reviewedRows = nextReviewedRows;
     table.userEditedRows = nextUserEditedRows;
     if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
+    if (Array.isArray(table.rowColorSourceIndexes)) table.rowColorSourceIndexes = nextRowColorSourceIndexes;
   }
   return removed;
 }
@@ -5988,7 +6066,36 @@ function pruneNonTicketRowsFromTable(table) {
   return removeRowsFromTable(table, (row) => isNonTicketFooterRow(table, row));
 }
 
+function rememberOpenCvSoldTextColorAnchors(table) {
+  if (
+    !hasOpenCvRowColorPreview(table) ||
+    table?.rowColorSource === "ai_row_color" ||
+    !Array.isArray(table.rows) ||
+    !Array.isArray(table.rowColorRows) ||
+    table.rows.length === 0 ||
+    table.rowColorRows.length !== table.rows.length
+  ) {
+    return;
+  }
+  const labels = [];
+  let soldNonWhiteCount = 0;
+  table.rows.forEach((row, rowIndex) => {
+    const label = getStrictRowLocalOpenCvColorLabel(table.rowColorRows[rowIndex]);
+    if (!label || isAvailableRowColorLabel(label)) return;
+    if (!isSoldTicket({ table, row, index: rowIndex })) return;
+    soldNonWhiteCount += 1;
+    labels.push(label);
+  });
+  if (!soldNonWhiteCount) return;
+  const previous = table.rowColorSoldTextAnchor || {};
+  table.rowColorSoldTextAnchor = {
+    soldNonWhiteCount: Math.max(Number(previous.soldNonWhiteCount || 0) || 0, soldNonWhiteCount),
+    labels: uniqueCleanValues([...(Array.isArray(previous.labels) ? previous.labels : []), ...labels]),
+  };
+}
+
 function removeSoldRowsFromTable(table) {
+  rememberOpenCvSoldTextColorAnchors(table);
   const removed = removeRowsFromTable(table, (row, rowIndex) => isUnavailableTicket({ table, row, index: rowIndex }) || isNonTicketFooterRow(table, row));
   if (removed) {
     updatePendingTableReviewFlags(table);
@@ -8513,6 +8620,13 @@ function cloneReviewState(table) {
     rowColorSelectionMode: table.rowColorSelectionMode || "",
     rowColorContiguous: Boolean(table.rowColorContiguous),
     rowColorMaxGap: Number(table.rowColorMaxGap || 0),
+    rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
+    rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
+      ? {
+          soldNonWhiteCount: Number(table.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
+          labels: Array.isArray(table.rowColorSoldTextAnchor.labels) ? [...table.rowColorSoldTextAnchor.labels] : [],
+        }
+      : null,
     rowColorRows: Array.isArray(table.rowColorRows) ? table.rowColorRows.map((item) => ({ ...item })) : [],
     showOpenCvColorPreview: Boolean(table.showOpenCvColorPreview),
     showSoldInReview: Boolean(table.showSoldInReview),
@@ -8562,6 +8676,13 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.rowColorSelectionMode = state.rowColorSelectionMode || "";
   table.rowColorContiguous = Boolean(state.rowColorContiguous);
   table.rowColorMaxGap = Number(state.rowColorMaxGap || 0);
+  table.rowColorSourceIndexes = Array.isArray(state.rowColorSourceIndexes) ? [...state.rowColorSourceIndexes] : null;
+  table.rowColorSoldTextAnchor = state.rowColorSoldTextAnchor
+    ? {
+        soldNonWhiteCount: Number(state.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
+        labels: Array.isArray(state.rowColorSoldTextAnchor.labels) ? [...state.rowColorSoldTextAnchor.labels] : [],
+      }
+    : null;
   table.rowColorRows = Array.isArray(state.rowColorRows) ? state.rowColorRows.map((item) => ({ ...item })) : [];
   table.showOpenCvColorPreview = Boolean(state.showOpenCvColorPreview);
   table.showSoldInReview = Boolean(state.showSoldInReview);
@@ -8833,6 +8954,13 @@ function createPublishedTableFromRows(table, rows, suffix = "") {
   const rowColorRows = sourceIndexes
     .map((sourceIndex) => (sourceIndex >= 0 && Array.isArray(table.rowColorRows) && table.rowColorRows[sourceIndex] ? { ...table.rowColorRows[sourceIndex] } : null))
     .filter(Boolean);
+  const rowColorSourceIndexes = sourceIndexes
+    .map((sourceIndex) =>
+      sourceIndex >= 0 && Array.isArray(table.rowColorSourceIndexes) && table.rowColorSourceIndexes[sourceIndex] !== undefined
+        ? table.rowColorSourceIndexes[sourceIndex]
+        : null,
+    )
+    .filter((value) => value !== null);
   return {
     ...table,
     id: `${table.id}-published-${Date.now()}${suffix}`,
@@ -8845,6 +8973,13 @@ function createPublishedTableFromRows(table, rows, suffix = "") {
     userEditedRows: {},
     aiReviewDecisions: [],
     rowColorRows: rowColorRows.length === rows.length ? rowColorRows : [],
+    rowColorSourceIndexes: rowColorSourceIndexes.length === rows.length ? rowColorSourceIndexes : null,
+    rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
+      ? {
+          soldNonWhiteCount: Number(table.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
+          labels: Array.isArray(table.rowColorSoldTextAnchor.labels) ? [...table.rowColorSoldTextAnchor.labels] : [],
+        }
+      : null,
     rowColorReliable: rowColorRows.length === rows.length ? table.rowColorReliable : false,
     rowColorConfirmed: rowColorRows.length === rows.length ? table.rowColorConfirmed : false,
     rowColorExactRowAligned: rowColorRows.length === rows.length ? table.rowColorExactRowAligned : false,
@@ -8862,10 +8997,12 @@ function keepPendingRows(table, rows) {
   const previousReviewedRows = { ...(table.reviewedRows || {}) };
   const previousUserEditedRows = { ...(table.userEditedRows || {}) };
   const previousRowColorRows = Array.isArray(table.rowColorRows) ? table.rowColorRows : [];
+  const previousRowColorSourceIndexes = Array.isArray(table.rowColorSourceIndexes) ? table.rowColorSourceIndexes : [];
   const nextPublishRows = {};
   const nextReviewedRows = {};
   const nextUserEditedRows = {};
   const nextRowColorRows = [];
+  const nextRowColorSourceIndexes = [];
   const originalRows = rows.map((row, nextIndex) => {
     const sourceIndex = previousRows.findIndex((candidate) => candidate === row);
     if (sourceIndex >= 0) {
@@ -8873,6 +9010,7 @@ function keepPendingRows(table, rows) {
       if (previousReviewedRows[sourceIndex] !== undefined) nextReviewedRows[nextIndex] = previousReviewedRows[sourceIndex];
       if (previousUserEditedRows[sourceIndex] !== undefined) nextUserEditedRows[nextIndex] = previousUserEditedRows[sourceIndex];
       if (previousRowColorRows[sourceIndex]) nextRowColorRows[nextIndex] = { ...previousRowColorRows[sourceIndex] };
+      if (previousRowColorSourceIndexes[sourceIndex] !== undefined) nextRowColorSourceIndexes[nextIndex] = previousRowColorSourceIndexes[sourceIndex];
     }
     return [...(sourceIndex >= 0 && previousOriginalRows?.[sourceIndex] ? previousOriginalRows[sourceIndex] : row)];
   });
@@ -8882,6 +9020,7 @@ function keepPendingRows(table, rows) {
   table.reviewedRows = nextReviewedRows;
   table.userEditedRows = nextUserEditedRows;
   if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
+  if (Array.isArray(table.rowColorSourceIndexes)) table.rowColorSourceIndexes = nextRowColorSourceIndexes;
   table.aiReviewDecisions = [];
   table.bulkSkipDraft = false;
   updatePendingTableReviewFlags(table);
@@ -9497,7 +9636,7 @@ function renderPublishedTables() {
 
 async function getUploadImageRowColorAnalyses(parsedTables) {
   const isPdf = uploadedSource?.type === "application/pdf" || uploadedSource?.name?.toLowerCase().endsWith(".pdf");
-  if (isPdf) return {};
+  if (isPdf) return null;
   const isImage = String(uploadedSource?.type || "").startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(uploadedSource?.name || "");
   const hasImageSource = uploadedSource?.dataUrl?.startsWith("data:image/") || String(uploadedSource?.url || "").startsWith("uploads/");
   if (isImage && !hasImageSource) throw new Error("无法读取原始图片做行底色检测，请重新选择图片后再生成待确认表。");
@@ -9519,6 +9658,10 @@ async function getUploadImageRowColorAnalyses(parsedTables) {
   const result = await response.json();
   if (!response.ok) throw new Error(result.message || result.error || "图片行底色检测失败。");
   return result.rowColorAnalysis ? { "1": result.rowColorAnalysis } : {};
+}
+
+function hasAnyRowColorAnalysis(rowColorAnalyses) {
+  return Boolean(rowColorAnalyses && typeof rowColorAnalyses === "object" && Object.keys(rowColorAnalyses).length > 0);
 }
 
 function cloneParsedTableForPageMerge(table) {
@@ -9634,7 +9777,11 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
   const isPdf = uploadedSource.type === "application/pdf" || uploadedSource.name.toLowerCase().endsWith(".pdf");
   const uploadTables = isPdf ? mergeParsedTablesByPdfPage(parsedTables) : parsedTables;
   const count = uploadTables.length;
-  const colorAnalyses = rowColorAnalyses || (isPdf ? lastTicketOcrJobSnapshot?.rowColorAnalyses || {} : {});
+  const colorAnalyses = hasAnyRowColorAnalysis(rowColorAnalyses)
+    ? rowColorAnalyses
+    : isPdf
+      ? lastTicketOcrJobSnapshot?.rowColorAnalyses || {}
+      : {};
   return Array.from({ length: count }, (_, index) => {
     const parsedTable = uploadTables[index];
     const sourcePage = Number(parsedTable.sourcePage || 0) || index + 1;
