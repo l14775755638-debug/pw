@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 49;
+const ROW_COLOR_LOGIC_VERSION = 50;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4422,6 +4422,19 @@ function hasOpenCvCurrentRedWhiteFallback(table) {
   return state.redCount >= 2 && state.whiteCount >= 1 && state.labels.every((label) => label === "红底" || isAvailableRowColorLabel(label));
 }
 
+function hasOpenCvSparseMappedRedPageSignal(table, rowIndex) {
+  if (!table?.rowColorSparseSourceRepair || !table.rowColorPartialSequenceAligned) return false;
+  const sourceIndex = Array.isArray(table.rowColorSourceIndexes) ? Number(table.rowColorSourceIndexes[rowIndex]) : -1;
+  if (!Number.isInteger(sourceIndex) || sourceIndex < 0) return false;
+  const labels = Array.isArray(table.rowColorPageLabels) ? table.rowColorPageLabels : [];
+  return labels.includes("红底") && labels.some((label) => label && label !== "红底");
+}
+
+function hasOpenCvSparseMappedRedPageSignalForTable(table) {
+  if (!Array.isArray(table?.rows)) return false;
+  return table.rows.some((_, rowIndex) => hasOpenCvSparseMappedRedPageSignal(table, rowIndex));
+}
+
 function shouldAutoSkipForRowColor(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
   const item = table.rowColorRows?.[rowIndex];
@@ -4432,6 +4445,7 @@ function shouldAutoSkipForRowColor(table, rowIndex) {
     const anchorState = getOpenCvSoldTextColorAnchorState(table);
     return anchorState.labels.includes(label);
   }
+  if (label === "红底" && hasOpenCvSparseMappedRedPageSignal(table, rowIndex)) return true;
   if (label === "红底" && hasOpenCvCurrentRedWhiteFallback(table)) return true;
   return hasExactMixedRowColorAutoSkipSource(table);
 }
@@ -4955,6 +4969,22 @@ function getInferredRowColorSourceIndexesFromSequence(table, availableRowCount) 
   return indexes;
 }
 
+function getPartialRowColorSourceIndexesFromSequence(table, availableRowCount) {
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const columns = Array.isArray(table?.columns) ? table.columns : [];
+  if (!rows.length || !availableRowCount) return [];
+  const firstColumnName = normalizeText(columns[0] || "");
+  if (!/(^|[^a-z0-9])(序号|编号|no|number|index)([^a-z0-9]|$)/i.test(firstColumnName)) return [];
+  const indexes = rows.map((row) => {
+    const raw = String(row?.[0] || "").trim();
+    if (!/^\d{1,4}$/.test(raw)) return -1;
+    const sourceIndex = Number(raw) - 1;
+    return sourceIndex >= 0 && sourceIndex < availableRowCount ? sourceIndex : -1;
+  });
+  const mappedCount = indexes.filter((index) => Number.isInteger(index) && index >= 0).length;
+  return mappedCount > 0 && mappedCount < rows.length ? indexes : [];
+}
+
 function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   const length = table?.rows?.length || 0;
   const rows = Array.isArray(availableRows) ? availableRows.filter(Boolean) : [];
@@ -4998,6 +5028,24 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
     }
   }
 
+  const partialIndexes = getPartialRowColorSourceIndexesFromSequence(table, rows.length);
+  if (partialIndexes.length === length) {
+    const rowsByIndex = new Map(
+      rows.map((row, index) => [Number.isFinite(Number(row?.index)) ? Number(row.index) : index, row]),
+    );
+    return {
+      rows: partialIndexes.map((sourceIndex) =>
+        Number.isInteger(sourceIndex) && sourceIndex >= 0
+          ? rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null
+          : { label: "", rawLabel: "", confidence: 0, reason: "未按数字序号对齐" },
+      ),
+      startIndex: Number.isInteger(partialIndexes[0]) && partialIndexes[0] >= 0 ? partialIndexes[0] : start,
+      exact: false,
+      sourceIndexes: partialIndexes,
+      partialSequenceAligned: true,
+    };
+  }
+
   const directRows = rows.slice(start, start + length);
   if (directRows.length === length) {
     return {
@@ -5029,6 +5077,8 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorMessage = "";
   table.rowColorRows = [];
   table.rowColorSoldTextAnchor = null;
+  table.rowColorPartialSequenceAligned = false;
+  table.rowColorPageLabels = [];
   table.rowColorExactRowAligned = false;
 
   if (!analysis || !["opencv", "ai_row_color", "pdf_vector"].includes(analysis.source)) return 0;
@@ -5060,6 +5110,8 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
       : getAlignedOpenCvRowsForTable(table, availableRows, startIndex);
   const assignedRows = aligned.rows;
   table.rowColorAlignedStart = aligned.startIndex;
+  table.rowColorPartialSequenceAligned = aligned.partialSequenceAligned === true;
+  table.rowColorPageLabels = uniqueCleanValues(availableRows.map((row) => getOpenCvItemRawColorLabel(row)));
   table.rowColorExactRowAligned = Boolean(
     analysis.source === "ai_row_color" ||
       ((analysis.source === "opencv" || analysis.source === "pdf_vector") &&
@@ -5104,7 +5156,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const colorState = getOpenCvEffectiveColorState(table);
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
   applyOpenCvWhiteVsColoredAutoDecision(table);
-  if (!table.rowColorReliable && !hasOpenCvSoldTextColorAnchor(table) && !hasOpenCvCurrentRedWhiteFallback(table)) {
+  if (!table.rowColorReliable && !hasOpenCvSoldTextColorAnchor(table) && !hasOpenCvCurrentRedWhiteFallback(table) && !hasOpenCvSparseMappedRedPageSignalForTable(table)) {
     Object.keys(table.publishRows || {}).forEach((rowIndex) => {
       if (table.userEditedRows?.[rowIndex] !== true && table.publishRows[rowIndex] === false) delete table.publishRows[rowIndex];
     });
@@ -5630,6 +5682,9 @@ function makeCompactPendingTable(table) {
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
     rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
+    rowColorPartialSequenceAligned: Boolean(table.rowColorPartialSequenceAligned),
+    rowColorSparseSourceRepair: Boolean(table.rowColorSparseSourceRepair),
+    rowColorPageLabels: Array.isArray(table.rowColorPageLabels) ? [...table.rowColorPageLabels] : [],
     rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
       ? {
           soldNonWhiteCount: Number(table.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
@@ -5770,6 +5825,9 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable.rowColorAutoSkipCount = 0;
     normalizedTable.rowColorRows = [];
     normalizedTable.rowColorSoldTextAnchor = null;
+    normalizedTable.rowColorPartialSequenceAligned = false;
+    normalizedTable.rowColorSparseSourceRepair = false;
+    normalizedTable.rowColorPageLabels = [];
     normalizedTable.rowColorMessage = "旧版颜色判断已停用，打开本页会重新逐行识别底色。";
     normalizedTable._rowColorRepairing = false;
     normalizedTable._rowColorRepairDone = false;
@@ -8627,6 +8685,9 @@ function cloneReviewState(table) {
     rowColorContiguous: Boolean(table.rowColorContiguous),
     rowColorMaxGap: Number(table.rowColorMaxGap || 0),
     rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
+    rowColorPartialSequenceAligned: Boolean(table.rowColorPartialSequenceAligned),
+    rowColorSparseSourceRepair: Boolean(table.rowColorSparseSourceRepair),
+    rowColorPageLabels: Array.isArray(table.rowColorPageLabels) ? [...table.rowColorPageLabels] : [],
     rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
       ? {
           soldNonWhiteCount: Number(table.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
@@ -8683,6 +8744,9 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.rowColorContiguous = Boolean(state.rowColorContiguous);
   table.rowColorMaxGap = Number(state.rowColorMaxGap || 0);
   table.rowColorSourceIndexes = Array.isArray(state.rowColorSourceIndexes) ? [...state.rowColorSourceIndexes] : null;
+  table.rowColorPartialSequenceAligned = Boolean(state.rowColorPartialSequenceAligned);
+  table.rowColorSparseSourceRepair = Boolean(state.rowColorSparseSourceRepair);
+  table.rowColorPageLabels = Array.isArray(state.rowColorPageLabels) ? [...state.rowColorPageLabels] : [];
   table.rowColorSoldTextAnchor = state.rowColorSoldTextAnchor
     ? {
         soldNonWhiteCount: Number(state.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
@@ -9143,7 +9207,9 @@ function shouldAutoRepairRowColors(table) {
 }
 
 function getRowColorExpectedRowsForPendingTable(table) {
-  return Array.isArray(table?.rows) ? table.rows.length : 0;
+  const rowCount = Array.isArray(table?.rows) ? table.rows.length : 0;
+  if (isPdfTableSource(table) && rowCount > 0 && rowCount < 8) return 24;
+  return rowCount;
 }
 
 async function repairPendingTableRowColors(table) {
@@ -9182,6 +9248,7 @@ async function repairPendingTableRowColors(table) {
     if (!response.ok) throw new Error(result.message || result.error || "行底色重新检测失败。");
     const analysis = result.rowColorAnalysis;
     if (!analysis) throw new Error("行底色重新检测没有返回结果。");
+    table.rowColorSparseSourceRepair = isPdfTableSource(table) && getRowColorExpectedRowsForPendingTable(table) > (table.rows?.length || 0);
     const rowColorStart = Math.max(0, Math.floor(Number(table.rowColorAlignedStart ?? table.rowColorPageRowOffset ?? 0) || 0));
     applyOpenCvRowColorsToTable(table, analysis, rowColorStart);
     table._rowColorRepairDone = true;
