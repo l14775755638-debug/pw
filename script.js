@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 39;
+const ROW_COLOR_LOGIC_VERSION = 41;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4342,16 +4342,13 @@ function isExactRowColorSelectionMode(table) {
   return /(^|_)exact$/i.test(String(table?.rowColorSelectionMode || ""));
 }
 
-function isRedRowColorDownlistLabel(label) {
-  return normalizeRowColorLabel(label) === "红底";
-}
-
-function hasExactRedRowColorAutoSkipSource(table) {
+function hasExactMixedRowColorAutoSkipSource(table) {
   return (
     hasOpenCvRowColorPreview(table) &&
     table?.rowColorSource !== "ai_row_color" &&
     table?.rowColorExactRowAligned === true &&
-    isExactRowColorSelectionMode(table)
+    isExactRowColorSelectionMode(table) &&
+    hasConfirmedOpenCvWhiteAndColoredConflict(table)
   );
 }
 
@@ -4361,7 +4358,7 @@ function shouldAutoSkipForRowColor(table, rowIndex) {
   const label = getStrictRowLocalOpenCvColorLabel(item);
   if (!label || isAvailableRowColorLabel(label)) return false;
   if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) return true;
-  return isRedRowColorDownlistLabel(label) && hasExactRedRowColorAutoSkipSource(table);
+  return hasExactMixedRowColorAutoSkipSource(table);
 }
 
 function getRowColorColumnIndex(table) {
@@ -4784,10 +4781,10 @@ function getOpenCvColorReferenceMessage(table) {
   const state = getOpenCvEffectiveColorState(table);
   const engineName = getRowColorEngineName(table);
   if (state.hasWhite && state.hasNonWhite) {
-    return `${engineName} 检测到白底有效票 ${state.whiteCount} 条、非白底有效票 ${state.nonWhiteCount} 条；红底行会自动设为不发布。`;
+    return `${engineName} 检测到白底有效票 ${state.whiteCount} 条、非白底有效票 ${state.nonWhiteCount} 条；同表混色时非白底行会自动设为不发布。`;
   }
   if (state.hasNonWhite && !state.hasWhite) {
-    return `${engineName} 仅检测到非白底有效票 ${state.nonWhiteCount} 条；红底行会自动设为不发布，其它颜色保留人工确认。`;
+    return `${engineName} 仅检测到非白底有效票 ${state.nonWhiteCount} 条；未找到白底参照，先保留人工确认。`;
   }
   if (state.hasWhite) {
     return `${engineName} 仅检测到白底有效票 ${state.whiteCount} 条。`;
@@ -4933,6 +4930,10 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorSelectionMode = analysis.selectionMode || "";
   table.rowColorContiguous = analysis.contiguous === true;
   table.rowColorMaxGap = Number(analysis.maxRowGap || 0);
+  table.rowColorExactBackendAligned = analysis.exactRowAligned === true;
+  table.rowColorLowConfidenceRows = Array.isArray(analysis.lowConfidenceRows) ? analysis.lowConfidenceRows : [];
+  table.rowColorUnreliableReasons = Array.isArray(analysis.unreliableReasons) ? analysis.unreliableReasons : [];
+  table.rowColorWarningReasons = Array.isArray(analysis.warningReasons) ? analysis.warningReasons : [];
   const availableRows = Array.isArray(analysis.rows) ? analysis.rows : [];
   const aligned =
     analysis.source === "ai_row_color"
@@ -4995,8 +4996,12 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   } else if (table.rowColorReliable) {
     table.rowColorMessage = `${engineName} 已匹配 ${table.rows.length} 行底色`;
   } else if (hasColorConflict) {
+    const lowRows = Array.isArray(table.rowColorLowConfidenceRows) && table.rowColorLowConfidenceRows.length
+      ? `，低置信行：${table.rowColorLowConfidenceRows.map((index) => index + 1).join("、")}`
+      : "";
+    const gapText = table.rowColorWarningReasons?.includes("row_gap") ? "，检测到行间空隙但不会单独阻止判断" : "";
     table.rowColorMessage =
-      analysis.error || `${engineName} 行底色未能可靠对齐：识别 ${assignedRows.length}/${table.rows.length} 行${table.rowColorSelectionMode ? `，模式 ${table.rowColorSelectionMode}` : ""}`;
+      analysis.error || `${engineName} 行底色需逐行强信号确认：识别 ${assignedRows.length}/${table.rows.length} 行${table.rowColorSelectionMode ? `，模式 ${table.rowColorSelectionMode}` : ""}${lowRows}${gapText}`;
   } else {
     table.rowColorMessage = labels.length
       ? `${engineName} 已识别 ${assignedRows.length}/${table.rows.length} 行底色，未发现白底+非白底有效票冲突`
@@ -9137,7 +9142,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
             : `${rowColorEngineName} 未识别到有效颜色参考`
       : "";
   const colorEngineHint = openCvConflict
-    ? "红底行会自动设为不发布；你仍可手动改回发布。"
+    ? "同表混色时非白底行会自动设为不发布；你仍可手动改回发布。"
     : "颜色检测会先等待白底参照和可靠对齐，再参与发布判断。";
   const openCvPreviewRows =
     hasColorPreview && table.showOpenCvColorPreview
@@ -9376,7 +9381,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
               openCvPreviewRows
                 ? `<div class="opencv-color-preview">
                     <strong>${escapeHtml(rowColorEngineName)} 逐行颜色</strong>
-                    <span>${openCvConflict ? "这张表同时有白底和其他底色；红底行会自动设为不发布。" : "红底行会自动设为不发布，其它颜色会等待可靠对齐和白底参照。"}</span>
+                    <span>${openCvConflict ? "这张表同时有白底和其他底色；非白底行会自动设为不发布。" : "颜色会等待同表白底参照后再参与发布判断。"}</span>
                     <div class="opencv-color-grid">${openCvPreviewRows}</div>
                   </div>`
                 : ""

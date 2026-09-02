@@ -901,9 +901,18 @@ def analyze(image_path, expected_rows=0):
         max_row_gap = int(max(gaps)) if gaps else 0
         contiguous = max_row_gap <= max(10, median_height * 1.65)
     exact_rows = expected_rows <= 0 or len(rows) == expected_rows
-    # Automatic decisions are allowed only when row count matches and the
-    # selected rows are contiguous. Segment/merged-small-table are still safe
-    # after divider filtering because they no longer include tiny color bands.
+    exact_row_aligned = bool(
+        exact_rows
+        and (
+            expected_rows <= 0
+            or selection_mode.endswith("_exact")
+            or selection_mode == "text_projection_exact"
+        )
+    )
+    # Automatic decisions are allowed only when row count matches and the row
+    # selection mode is one we understand. Visual gaps are reported separately:
+    # a gap can mean a blank spacer inside one table, while row-count mismatch
+    # or weak row color is what can actually shift a color onto the wrong ticket.
     safe_selection_modes = {
         "all",
         "drop_header_exact",
@@ -932,24 +941,24 @@ def analyze(image_path, expected_rows=0):
         "first_group_drop_1_filtered",
         "first_group_drop_2_filtered",
     }
-    # Prefix selection intentionally follows the OCR row order on long pages;
-    # divider gaps inside those rows should not make the result unusable.
-    gap_allowed_modes = {
-        "prefix_after_two_headers",
-        "prefix_after_two_headers_filtered",
-        "prefix_filtered",
-        "prefix",
-        "global_header_0",
-        "global_header_1",
-        "global_header_2",
-        "global_header_0_filtered",
-        "global_header_1_filtered",
-        "global_header_2_filtered",
-        "merged_small_table",
-    }
-    reliable = bool(rows) and exact_rows and selection_mode in safe_selection_modes and (contiguous or selection_mode in gap_allowed_modes)
-    if rows and any(row.get("confidence", 0) < 0.42 for row in rows):
-        reliable = False
+    low_confidence_rows = [
+        index
+        for index, row in enumerate(rows)
+        if float(row.get("confidence", 0) or 0) < 0.42
+    ]
+    unreliable_reasons = []
+    if not rows:
+        unreliable_reasons.append("no_rows")
+    if not exact_rows:
+        unreliable_reasons.append("row_count_mismatch")
+    if selection_mode not in safe_selection_modes:
+        unreliable_reasons.append("unsafe_selection_mode")
+    if low_confidence_rows:
+        unreliable_reasons.append("low_confidence_rows")
+    warning_reasons = []
+    if not contiguous:
+        warning_reasons.append("row_gap")
+    reliable = bool(rows) and exact_rows and selection_mode in safe_selection_modes and not low_confidence_rows
     for index, row in enumerate(rows):
         row["index"] = index
     return {
@@ -958,8 +967,12 @@ def analyze(image_path, expected_rows=0):
         "detectedRows": len(rows),
         "selectionMode": selection_mode,
         "reliable": reliable,
+        "exactRowAligned": exact_row_aligned,
         "contiguous": bool(contiguous),
         "maxRowGap": int(max_row_gap),
+        "lowConfidenceRows": low_confidence_rows,
+        "unreliableReasons": unreliable_reasons,
+        "warningReasons": warning_reasons,
         "labels": unique_labels,
         "rows": rows,
     }
