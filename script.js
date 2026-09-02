@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 43;
+const ROW_COLOR_LOGIC_VERSION = 44;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4997,6 +4997,11 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const colorState = getOpenCvEffectiveColorState(table);
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
   applyOpenCvWhiteVsColoredAutoDecision(table);
+  if (!table.rowColorReliable) {
+    Object.keys(table.publishRows || {}).forEach((rowIndex) => {
+      if (table.userEditedRows?.[rowIndex] !== true && table.publishRows[rowIndex] === false) delete table.publishRows[rowIndex];
+    });
+  }
   const engineName = getRowColorEngineName(table);
   if (table.rowColorReliable && colorState.hasNonWhite && !colorState.hasWhite) {
     table.rowColorMessage = `${engineName} 已匹配 ${table.rows.length} 行底色：只有非白底有效票，没有白底有效票作参照，按整表带色处理。`;
