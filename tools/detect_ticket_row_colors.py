@@ -347,7 +347,15 @@ def choose_data_intervals(intervals, expected_rows):
             and dark_density < 0.055
             and vertical_lines <= 4
         )
-        likely_empty_gap = vertical_lines <= 1 and dark_density < 0.012
+        # A real white ticket row inside an otherwise colored table can have
+        # very little dark ink, especially after scaling. Only drop very short
+        # low-ink bands as empty gaps; taller bands must stay so they can be
+        # classified as white rows instead of shifting every following color.
+        likely_empty_gap = (
+            height <= max(8, int(median_height * 0.5))
+            and vertical_lines <= 1
+            and dark_density < 0.012
+        )
         return likely_short_divider or likely_empty_gap
 
     def take_in_visual_order(candidates, mode):
