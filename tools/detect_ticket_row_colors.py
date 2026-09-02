@@ -326,9 +326,41 @@ def group_intervals(intervals):
     return groups
 
 
+def merge_fragmented_low_ink_intervals(intervals):
+    if len(intervals) < 2:
+        return intervals
+    heights = [item["height"] for item in intervals]
+    median_height = float(np.median(heights)) if heights else 18
+    merged = []
+    index = 0
+    while index < len(intervals):
+        current = dict(intervals[index])
+        if index + 1 < len(intervals):
+            next_item = intervals[index + 1]
+            gap = int(next_item["y1"]) - int(current["y2"])
+            both_short = current["height"] <= median_height * 0.82 and next_item["height"] <= median_height * 0.82
+            low_ink_pair = current["darkDensity"] < 0.12 and next_item["darkDensity"] < 0.12
+            has_cell_structure = max(int(current.get("verticalLines", 0) or 0), int(next_item.get("verticalLines", 0) or 0)) >= 5
+            close_fragments = 1 <= gap <= max(12, int(median_height * 0.62))
+            if both_short and low_ink_pair and has_cell_structure and close_fragments:
+                current["y1"] = min(int(current["y1"]), int(next_item["y1"]))
+                current["y2"] = max(int(current["y2"]), int(next_item["y2"]))
+                current["height"] = current["y2"] - current["y1"]
+                current["darkDensity"] = max(float(current.get("darkDensity", 0) or 0), float(next_item.get("darkDensity", 0) or 0))
+                current["verticalLines"] = max(int(current.get("verticalLines", 0) or 0), int(next_item.get("verticalLines", 0) or 0))
+                current["fragmentMerged"] = True
+                index += 2
+                merged.append(current)
+                continue
+        merged.append(current)
+        index += 1
+    return merged
+
+
 def choose_data_intervals(intervals, expected_rows):
     if not intervals or expected_rows <= 0:
         return intervals, "all"
+    intervals = merge_fragmented_low_ink_intervals(intervals)
     groups = group_intervals(intervals)
     if not groups:
         return intervals[:expected_rows], "fallback"
@@ -374,15 +406,19 @@ def choose_data_intervals(intervals, expected_rows):
             # rows. Later groups often start right after a separator; dropping
             # their first rows caused real tickets near a divider to inherit the
             # divider color or disappear from color alignment.
-            if group_index == 0 and len(group) > global_header_count:
+            if group_index == 0 and global_header_count > 0 and len(group) >= global_header_count:
                 body = group[global_header_count:]
             selected.extend(item for item in body if not looks_like_non_data_row(item))
         return selected
 
+    header_candidates = []
     for header_count in (2, 1, 0):
         candidates = build_body(header_count)
         if len(candidates) == expected_rows:
             return candidates, f"global_header_{header_count}_exact"
+        header_candidates.append((header_count, candidates))
+
+    for header_count, candidates in header_candidates:
         if len(candidates) > expected_rows:
             return take_in_visual_order(candidates, f"global_header_{header_count}")
 
