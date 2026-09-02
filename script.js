@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 48;
+const ROW_COLOR_LOGIC_VERSION = 49;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4920,7 +4920,6 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
   table.publishRows = table.publishRows || {};
   let skipCount = 0;
   table.rows.forEach((row, rowIndex) => {
-    if (table.userEditedRows?.[rowIndex] === true) return;
     const ticket = { table, row, index: rowIndex };
     if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
     if (shouldAutoSkipForRowColor(table, rowIndex)) {
