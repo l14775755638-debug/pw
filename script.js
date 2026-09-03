@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 52;
+const ROW_COLOR_LOGIC_VERSION = 54;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4435,7 +4435,7 @@ function getOpenCvCurrentRedWhiteFallbackState(table) {
 
 function hasOpenCvCurrentRedWhiteFallback(table) {
   const state = getOpenCvCurrentRedWhiteFallbackState(table);
-  return state.redCount >= 2 && state.whiteCount >= 1 && state.labels.every((label) => label === "红底" || isAvailableRowColorLabel(label));
+  return state.redCount >= 1 && state.whiteCount >= 1 && state.labels.every((label) => label === "红底" || isAvailableRowColorLabel(label));
 }
 
 function hasOpenCvSparseMappedRedPageSignal(table, rowIndex) {
@@ -5008,6 +5008,22 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   const start = Math.max(0, Math.floor(Number(startIndex) || 0));
   if (!length || !rows.length) return { rows: [], startIndex: start, exact: false };
 
+  const inferredIndexes = getInferredRowColorSourceIndexesFromSequence(table, rows.length);
+  if (inferredIndexes.length === length) {
+    const rowsByIndex = new Map(
+      rows.map((row, index) => [Number.isFinite(Number(row?.index)) ? Number(row.index) : index, row]),
+    );
+    const mappedRows = inferredIndexes.map((sourceIndex) => rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null);
+    if (mappedRows.every(Boolean)) {
+      return {
+        rows: mappedRows,
+        startIndex: inferredIndexes[0] || 0,
+        exact: true,
+        sourceIndexes: inferredIndexes,
+      };
+    }
+  }
+
   const sourceIndexes = Array.isArray(table?.rowColorSourceIndexes)
     ? table.rowColorSourceIndexes
         .slice(0, length)
@@ -5025,22 +5041,6 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
         startIndex: sourceIndexes[0] || 0,
         exact: true,
         sourceIndexes,
-      };
-    }
-  }
-
-  const inferredIndexes = getInferredRowColorSourceIndexesFromSequence(table, rows.length);
-  if (inferredIndexes.length === length) {
-    const rowsByIndex = new Map(
-      rows.map((row, index) => [Number.isFinite(Number(row?.index)) ? Number(row.index) : index, row]),
-    );
-    const mappedRows = inferredIndexes.map((sourceIndex) => rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null);
-    if (mappedRows.every(Boolean)) {
-      return {
-        rows: mappedRows,
-        startIndex: inferredIndexes[0] || 0,
-        exact: true,
-        sourceIndexes: inferredIndexes,
       };
     }
   }
@@ -9446,9 +9446,19 @@ function hasPageWideSequenceColumn(table) {
   return Math.max(...numbers) > rows.length || numbers.length === rows.length;
 }
 
+function getMaxPageWideSequenceNumber(table) {
+  if (!hasPageWideSequenceColumn(table)) return 0;
+  const numbers = (table.rows || [])
+    .map((row) => String(row?.[0] || "").trim())
+    .filter((value) => /^\d{1,4}$/.test(value))
+    .map(Number);
+  return numbers.length ? Math.max(...numbers) : 0;
+}
+
 function getRowColorExpectedRowsForPendingTable(table) {
   const rowCount = Array.isArray(table?.rows) ? table.rows.length : 0;
-  if (isPdfTableSource(table) && rowCount > 0 && rowCount < 8 && hasPageWideSequenceColumn(table)) return 24;
+  const maxSequence = getMaxPageWideSequenceNumber(table);
+  if (isPdfTableSource(table) && rowCount > 0 && maxSequence > rowCount) return maxSequence;
   return rowCount;
 }
 
