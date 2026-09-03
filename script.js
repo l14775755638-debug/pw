@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 54;
+const ROW_COLOR_LOGIC_VERSION = 55;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4456,15 +4456,16 @@ function shouldAutoSkipForRowColor(table, rowIndex) {
   const item = table.rowColorRows?.[rowIndex];
   const label = getStrictRowLocalOpenCvColorLabel(item);
   if (!label || isAvailableRowColorLabel(label)) return false;
-  if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) return true;
-  if (hasOpenCvRawColorDifference(table) && !isAvailableRowColorLabel(label) && isStrongOpenCvNonWhiteColorItem(item)) return true;
   if (hasOpenCvSoldTextColorAnchor(table)) {
     const anchorState = getOpenCvSoldTextColorAnchorState(table);
     return anchorState.labels.includes(label);
   }
+  if (!isDefaultAutoSkipColorLabel(label)) return false;
+  if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) return true;
+  if (hasOpenCvRawColorDifference(table) && isStrongOpenCvNonWhiteColorItem(item)) return true;
   if (label === "红底" && hasOpenCvSparseMappedRedPageSignal(table, rowIndex)) return true;
   if (label === "红底" && hasOpenCvCurrentRedWhiteFallback(table)) return true;
-  return hasExactMixedRowColorAutoSkipSource(table);
+  return hasExactMixedRowColorAutoSkipSource(table) && isDefaultAutoSkipColorLabel(label);
 }
 
 function getRowColorColumnIndex(table) {
@@ -5277,6 +5278,10 @@ function getTicketRowColorLabel(ticket) {
 
 function isAvailableRowColorLabel(label) {
   return /^白底$/.test(String(label || ""));
+}
+
+function isDefaultAutoSkipColorLabel(label) {
+  return /^红底$/.test(String(label || ""));
 }
 
 function hasWhiteOnlyRowColorRule(table) {
