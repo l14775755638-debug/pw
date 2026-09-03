@@ -10119,10 +10119,9 @@ function confirmSelectedPendingTable() {
       return;
     }
     if (explicitDecision === false) return;
-    const reviewed = isPendingRowReviewed(table, rowIndex);
-    if (reviewed && shouldPublishPendingRow(table, rowIndex) && isCustomerPublishableTicket(ticket)) {
+    if (shouldPublishPendingRow(table, rowIndex) && isCustomerPublishableTicket(ticket)) {
       publishRows.push(row);
-    } else if (!reviewed) {
+    } else {
       remainingRows.push(row);
     }
   });
@@ -10194,10 +10193,9 @@ function confirmAllPendingTables() {
         return;
       }
       if (explicitDecision === false) return;
-      const reviewed = isPendingRowReviewed(table, rowIndex);
-      if (reviewed && shouldPublishPendingRow(table, rowIndex) && isCustomerPublishableTicket(ticket)) {
+      if (shouldPublishPendingRow(table, rowIndex) && isCustomerPublishableTicket(ticket)) {
         publishRows.push(row);
-      } else if (!reviewed) {
+      } else {
         remainingRows.push(row);
       }
     });
