@@ -2720,15 +2720,21 @@ tr.hit-row td {
 .admin-table-head,
 .admin-table-row {
   display: grid;
-  grid-template-columns: 1.1fr 1fr 1fr 0.8fr 1fr;
-  min-width: 820px;
+  grid-template-columns: 1.1fr 1fr 1fr 0.7fr 0.8fr 0.9fr;
+  min-width: 960px;
   border-top: 1px solid #ece9e1;
 }
 
 .admin-table-head span,
-.admin-table-row span {
+.admin-table-row span,
+.admin-table-row .admin-table-actions {
   padding: 12px;
   font-size: 13px;
+}
+
+.admin-table-row .admin-table-actions {
+  display: flex;
+  align-items: center;
 }
 
 .admin-table-head span {

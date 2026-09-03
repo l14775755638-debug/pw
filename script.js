@@ -5359,8 +5359,9 @@ function updatePendingTableReviewFlags(table) {
     forceCanonicalOriginalDisplay(table);
   }
   const risk = analyzePendingTableRisk(table);
-  table.needsManualReview = risk.needsManualReview;
-  table.reviewReasons = risk.reasons;
+  const forcedReviewReasons = table.returnedForReview ? ["从已发布退回校对"] : [];
+  table.needsManualReview = Boolean(risk.needsManualReview || forcedReviewReasons.length);
+  table.reviewReasons = [...forcedReviewReasons, ...risk.reasons.filter((reason) => !forcedReviewReasons.includes(reason))];
   table.reviewFlagsVersion = REVIEW_FLAGS_VERSION;
   return table;
 }
@@ -9844,6 +9845,9 @@ function renderPublishedTables() {
           <span>${escapeHtml(getTableSourceSummary(table))}</span>
           <span>已发布</span>
           <span>${table.rows.length} 条票源</span>
+          <div class="admin-table-actions">
+            <button class="small-button danger ghost" type="button" data-published-table-action="${table.id}">删除/退回</button>
+          </div>
         </div>
       `,
     )
@@ -9856,9 +9860,88 @@ function renderPublishedTables() {
       <span>来源</span>
       <span>状态</span>
       <span>票源数</span>
+      <span>操作</span>
     </div>
     ${rows || `<div class="empty-state">当前演出还没有已发布票源。</div>`}
   `;
+}
+
+function clonePublishedTableForPendingReview(table) {
+  const rows = Array.isArray(table.rows) ? cloneRows(table.rows) : [];
+  return updatePendingTableReviewFlags({
+    ...table,
+    id: `returned-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    title: `退回校对：${table.title || "已发布票源"}`,
+    rows,
+    originalColumns: Array.isArray(table.originalColumns) ? [...table.originalColumns] : Array.isArray(table.columns) ? [...table.columns] : [],
+    originalRows: Array.isArray(table.originalRows) && table.originalRows.length ? cloneRows(table.originalRows) : cloneRows(rows),
+    publishRows: {},
+    reviewedRows: {},
+    userEditedRows: {},
+    aiReviewDecisions: [],
+    aiReviewStatus: "已从已发布票源退回待确认，请重新校对后再发布。",
+    returnedForReview: true,
+    needsManualReview: true,
+    reviewReasons: ["从已发布退回校对"],
+    bulkSkipDraft: false,
+  });
+}
+
+function removePublishedTableById(tableId) {
+  const tableIndex = currentEvent.tables.findIndex((table) => table.id === tableId);
+  if (tableIndex < 0) return null;
+  const [removedTable] = currentEvent.tables.splice(tableIndex, 1);
+  for (let index = uploadedTables.length - 1; index >= 0; index -= 1) {
+    if (uploadedTables[index].id === tableId) uploadedTables.splice(index, 1);
+  }
+  return removedTable;
+}
+
+function refreshAfterPublishedTableAction() {
+  selectFirstDateWithTickets();
+  render();
+  renderAdminEvent();
+  renderUploadRecords();
+  renderReviewPanel();
+  renderPublishedTables();
+}
+
+function handlePublishedTableAction(tableId) {
+  const table = currentEvent.tables.find((item) => item.id === tableId);
+  if (!table) {
+    showToast("没有找到这一页已发布票源。", "error");
+    return;
+  }
+  const choice = window.prompt(
+    `处理「${table.title || "这一页票源"}」？\n\n输入 1：退回待确认重新校正\n输入 2：直接删除这一页\n\n取消或留空：不处理`,
+    "1",
+  );
+  if (!choice) return;
+  const normalizedChoice = normalize(choice);
+  if (normalizedChoice === "1" || normalizedChoice.includes("退回") || normalizedChoice.includes("校正") || normalizedChoice.includes("校对")) {
+    const removedTable = removePublishedTableById(tableId);
+    if (!removedTable) return;
+    const pendingTable = clonePublishedTableForPendingReview(removedTable);
+    pendingTables.unshift(pendingTable);
+    selectedPendingTableId = pendingTable.id;
+    manualReviewOnly = false;
+    pendingReviewFocusRowIndex = getVisibleReviewRowIndexes(pendingTable)[0] ?? null;
+    saveAndArchiveAppStep(`退回已发布页到待确认：${removedTable.title || currentEvent.name}`, "已发布票源");
+    refreshAfterPublishedTableAction();
+    showToast("已退回待确认，可以重新校正后再发布。", "success");
+    return;
+  }
+  if (normalizedChoice === "2" || normalizedChoice.includes("删除")) {
+    const confirmed = window.confirm(`确定直接删除「${table.title || "这一页票源"}」吗？\n\n这页会从客户前台移除，不会回到待确认。`);
+    if (!confirmed) return;
+    const removedTable = removePublishedTableById(tableId);
+    if (!removedTable) return;
+    saveAndArchiveAppStep(`直接删除已发布页：${removedTable.title || currentEvent.name}`, "已发布票源");
+    refreshAfterPublishedTableAction();
+    showToast("已直接删除这一页已发布票源。", "success");
+    return;
+  }
+  showToast("没有识别到选择，请输入 1 或 2。", "error");
 }
 
 async function getUploadImageRowColorAnalyses(parsedTables) {
@@ -11793,6 +11876,11 @@ seatmapTemplateList.addEventListener("click", (event) => {
 confirmAllButton.addEventListener("click", confirmAllPendingTables);
 publishReadyButton.addEventListener("click", confirmReadyPendingTables);
 clearPublishedButton.addEventListener("click", clearCurrentPublishedTables);
+publishedTables.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-published-table-action]");
+  if (!button) return;
+  handlePublishedTableAction(button.dataset.publishedTableAction);
+});
 createOperationArchiveButton.addEventListener("click", () => {
   saveAndArchiveAppStep(`手动存档：${currentEvent.name}`, "手动存档", { silent: false });
 });
