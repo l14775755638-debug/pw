@@ -524,6 +524,7 @@ const STORAGE_KEY = "ticket-admin-state-v1";
 const OPERATION_ARCHIVE_KEY = "ticket-admin-operation-archives-v1";
 const MAX_OPERATION_ARCHIVES = 12;
 const MAX_OPERATION_ARCHIVE_PENDING_TABLES = 80;
+const MAX_OPERATION_ARCHIVE_STORAGE_CHARS = 6 * 1024 * 1024;
 let eventDraftHistory = { artists: [], cities: [], venues: [] };
 let operationArchives = [];
 let manualReviewOnly = false;
@@ -5848,6 +5849,12 @@ function saveAppState() {
 function loadOperationArchives() {
   try {
     const saved = localStorage.getItem(OPERATION_ARCHIVE_KEY);
+    if (saved && saved.length > MAX_OPERATION_ARCHIVE_STORAGE_CHARS) {
+      operationArchives = [];
+      localStorage.removeItem(OPERATION_ARCHIVE_KEY);
+      window.setTimeout(() => showToast("旧操作存档过大，已自动清理以避免刷新白屏；当前主数据未删除。", "warning"), 0);
+      return;
+    }
     const parsed = saved ? JSON.parse(saved) : [];
     operationArchives = Array.isArray(parsed) ? parsed.filter((item) => item?.id && item?.state).slice(0, MAX_OPERATION_ARCHIVES) : [];
     if (Array.isArray(parsed) && parsed.length > operationArchives.length) {
@@ -6122,8 +6129,8 @@ function normalizePendingTablesInMemory({ save = false } = {}) {
   return true;
 }
 
-function loadAppState() {
-  loadOperationArchives();
+function loadAppState({ includeArchives = true } = {}) {
+  if (includeArchives) loadOperationArchives();
   const saved = localStorage.getItem(STORAGE_KEY);
   if (!saved) {
     renderOperationArchives();
@@ -12306,7 +12313,7 @@ window.addEventListener("storage", (event) => {
     return;
   }
   if (event.key !== STORAGE_KEY) return;
-  loadAppState();
+  loadAppState({ includeArchives: true });
   selectedDateId = null;
   selectedZone = null;
   searchTerm = "";
@@ -12318,7 +12325,6 @@ window.addEventListener("storage", (event) => {
   renderPublishedTables();
 });
 
-loadAppState();
 renderRuntimeBanner();
 render();
 renderAdminEvent();
@@ -12331,3 +12337,15 @@ setMode(IS_ADMIN_PAGE ? "admin" : "customer");
 renderAiProviderTemplate("aliyun");
 refreshAiStatus();
 loadExternalSeatmapTemplates();
+
+window.setTimeout(() => {
+  loadAppState({ includeArchives: true });
+  render();
+  renderAdminEvent();
+  renderUploadRecords();
+  renderReviewPanel();
+  renderFieldMappingPreview();
+  renderPublishedTables();
+  renderOperationArchives();
+  setMode(IS_ADMIN_PAGE ? "admin" : "customer");
+}, 0);
