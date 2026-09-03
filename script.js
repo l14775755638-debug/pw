@@ -438,6 +438,10 @@ const adminSeatmapName = document.querySelector("#adminSeatmapName");
 const adminTableCount = document.querySelector("#adminTableCount");
 const adminZoneCount = document.querySelector("#adminZoneCount");
 const adminChecklist = document.querySelector("#adminChecklist");
+const operationArchiveCount = document.querySelector("#operationArchiveCount");
+const operationArchiveList = document.querySelector("#operationArchiveList");
+const createOperationArchiveButton = document.querySelector("#createOperationArchiveButton");
+const clearOperationArchivesButton = document.querySelector("#clearOperationArchivesButton");
 const copyEnvTemplateButton = document.querySelector("#copyEnvTemplateButton");
 const aiProviderInput = document.querySelector("#aiProviderInput");
 const aiKeyNameInput = document.querySelector("#aiKeyNameInput");
@@ -517,7 +521,10 @@ const uploadedTables = [];
 const pendingTables = [];
 let selectedPendingTableId = null;
 const STORAGE_KEY = "ticket-admin-state-v1";
+const OPERATION_ARCHIVE_KEY = "ticket-admin-operation-archives-v1";
+const MAX_OPERATION_ARCHIVES = 30;
 let eventDraftHistory = { artists: [], cities: [], venues: [] };
+let operationArchives = [];
 let manualReviewOnly = false;
 let pendingReviewFocusRowIndex = null;
 let reviewAiBusy = false;
@@ -1769,7 +1776,7 @@ function startFieldMappingPreview({ headers, rows, tables = null, sourceName, so
     matchedTemplateName: template?.name || "",
   };
   renderFieldMappingPreview();
-  saveAppState();
+  saveAndArchiveAppStep(`字段映射预览：${sourceName || currentEvent.name}`, "字段映射");
 }
 
 function renderFieldMappingPreview() {
@@ -1871,6 +1878,7 @@ function confirmFieldMappingImport() {
     showToast("映射后没有可导入的数据。", "error");
     return;
   }
+  const mappingSourceName = fieldMappingDraft.sourceName || currentEvent.name;
   saveFieldMappingTemplate(fieldMappingDraft);
   const rawTables = createUploadedTables(mappedTables);
   const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
@@ -1881,7 +1889,7 @@ function confirmFieldMappingImport() {
   renderFieldMappingPreview();
   setUploadStatus(`已按字段映射生成 ${tables.length} 张待确认表${removedSoldRows ? `，已跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。`, "success");
   showToast("字段映射已保存，表格已进入待确认。", "success");
-  saveAppState();
+  saveAndArchiveAppStep(`字段映射导入：${mappingSourceName}`, "生成待确认");
   renderUploadRecords();
   renderReviewPanel();
   renderPublishedTables();
@@ -1984,6 +1992,7 @@ async function pollTicketOcrJob(jobId) {
       failed ? "idle" : "success",
     );
     showToast("批量识别完成。", "success");
+    saveAndArchiveAppStep(`PDF OCR 完成：${result.fileName || uploadedSource?.name || "票源 PDF"}`, "PDF OCR");
     return;
   }
 
@@ -1995,6 +2004,7 @@ async function pollTicketOcrJob(jobId) {
       pdfDetectionStatus.textContent = `${result.message || "批量识别中断"} 已保留已识别页面内容，可先生成待确认表。`;
       setUploadStatus(`批量识别中断，但已保留 ${success} 页内容。失败 ${failed} 页可稍后补扫。`, "error");
       showToast("已保留部分识别结果。", "error");
+      saveAndArchiveAppStep(`PDF OCR 部分完成：${result.fileName || uploadedSource?.name || "票源 PDF"}`, "PDF OCR");
       return;
     }
     throw new Error(result.message || "批量识别没有读到可用表格内容。");
@@ -2291,7 +2301,7 @@ function applySeatmapTemplate(template, reason = "模板") {
   const imageText = templateImage ? "座位图和热区" : "热区";
   zoneMarkingStatus.textContent = `${reason}已套用：${template.name}，已带入${imageText}，共 ${currentEvent.zones.length} 个精准热区。`;
   seatmapStatus.textContent = `已套用模板：${template.name}。发布票源前必须前台逐区测试通过。`;
-  saveAppState();
+  saveAndArchiveAppStep(`套用座位图模板：${template.name}`, "座位图");
   renderAdminEvent();
   render();
   showToast(`已套用完整模板：${template.name}`, "success");
@@ -2333,7 +2343,7 @@ async function saveCurrentSeatmapAsTemplate(auto = false) {
     seatmapTemplates.unshift(template);
   }
   currentEvent.seatmapTemplateId = template.id;
-  if (!saveAppState()) return null;
+  if (!saveAndArchiveAppStep(`保存座位图模板：${template.name}`, "座位图模板")) return null;
   renderSeatmapTemplates();
   renderAdminChecklist();
   if (!auto) showToast("已保存整套座位图模板。", "success");
@@ -5784,6 +5794,131 @@ function saveAppState() {
   }
 }
 
+function loadOperationArchives() {
+  try {
+    const saved = localStorage.getItem(OPERATION_ARCHIVE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    operationArchives = Array.isArray(parsed) ? parsed.filter((item) => item?.id && item?.state).slice(0, MAX_OPERATION_ARCHIVES) : [];
+  } catch {
+    operationArchives = [];
+    localStorage.removeItem(OPERATION_ARCHIVE_KEY);
+  }
+}
+
+function saveOperationArchives() {
+  try {
+    localStorage.setItem(OPERATION_ARCHIVE_KEY, JSON.stringify(operationArchives.slice(0, MAX_OPERATION_ARCHIVES)));
+    return true;
+  } catch {
+    operationArchives = operationArchives.slice(0, Math.max(5, Math.floor(MAX_OPERATION_ARCHIVES / 2)));
+    try {
+      localStorage.setItem(OPERATION_ARCHIVE_KEY, JSON.stringify(operationArchives));
+      return true;
+    } catch {
+      console.warn("Operation archive save skipped because local storage is full.");
+      return false;
+    }
+  }
+}
+
+function getOperationArchiveSummary() {
+  const pendingCount = pendingTables.filter((table) => table.eventId === currentEvent.id).length;
+  return `${currentEvent.name} · 已发布 ${currentEvent.tables.length} 张 · 待确认 ${pendingCount} 张`;
+}
+
+function archiveCurrentSavedState(label, type = "操作", { silent = true } = {}) {
+  const savedState = localStorage.getItem(STORAGE_KEY);
+  if (!savedState) return false;
+  let parsedState = null;
+  try {
+    parsedState = JSON.parse(savedState);
+  } catch {
+    return false;
+  }
+  const archive = {
+    id: `operation-archive-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    label,
+    type,
+    createdAt: Date.now(),
+    createdAtText: new Date().toLocaleString("zh-CN", { hour12: false }),
+    eventId: currentEvent.id,
+    eventName: currentEvent.name,
+    summary: getOperationArchiveSummary(),
+    state: parsedState,
+  };
+  operationArchives = [archive, ...operationArchives].slice(0, MAX_OPERATION_ARCHIVES);
+  const saved = saveOperationArchives();
+  renderOperationArchives();
+  if (saved && !silent) showToast("已创建操作存档。", "success");
+  return saved;
+}
+
+function saveAndArchiveAppStep(label, type = "操作", options = {}) {
+  const saved = saveAppState();
+  if (!saved) return false;
+  return archiveCurrentSavedState(label, type, options);
+}
+
+function renderOperationArchives() {
+  if (!operationArchiveList || !operationArchiveCount) return;
+  operationArchiveCount.textContent = `自动保留最近 ${operationArchives.length}/${MAX_OPERATION_ARCHIVES} 个恢复点`;
+  if (!operationArchives.length) {
+    operationArchiveList.innerHTML = `<div class="empty-upload-record">还没有操作存档。</div>`;
+    if (clearOperationArchivesButton) clearOperationArchivesButton.disabled = true;
+    return;
+  }
+  if (clearOperationArchivesButton) clearOperationArchivesButton.disabled = false;
+  operationArchiveList.innerHTML = operationArchives
+    .slice(0, 8)
+    .map(
+      (archive) => `
+        <div class="operation-archive-item">
+          <div>
+            <strong>${escapeHtml(archive.label || archive.type || "操作存档")}</strong>
+            <span>${escapeHtml(archive.createdAtText || "")} · ${escapeHtml(archive.summary || archive.eventName || "")}</span>
+          </div>
+          <div class="operation-archive-actions">
+            <button class="small-button ghost" type="button" data-restore-operation-archive="${archive.id}">恢复</button>
+            <button class="small-button danger ghost" type="button" data-delete-operation-archive="${archive.id}">删除</button>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function restoreOperationArchive(archiveId) {
+  const archive = operationArchives.find((item) => item.id === archiveId);
+  if (!archive?.state) {
+    showToast("没有找到这个操作存档。", "error");
+    return;
+  }
+  const confirmed = window.confirm(`恢复到「${archive.label}」吗？\n\n当前页面状态会被这个存档覆盖。`);
+  if (!confirmed) return;
+  saveAndArchiveAppStep(`恢复前备份：${currentEvent.name}`, "恢复前备份");
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(archive.state));
+  window.location.reload();
+}
+
+function deleteOperationArchive(archiveId) {
+  const before = operationArchives.length;
+  operationArchives = operationArchives.filter((item) => item.id !== archiveId);
+  if (operationArchives.length === before) return;
+  saveOperationArchives();
+  renderOperationArchives();
+  showToast("已删除这个操作存档。", "success");
+}
+
+function clearOperationArchives() {
+  if (!operationArchives.length) return;
+  const confirmed = window.confirm(`确定删除全部 ${operationArchives.length} 个操作存档吗？\n\n当前主数据不会删除。`);
+  if (!confirmed) return;
+  operationArchives = [];
+  saveOperationArchives();
+  renderOperationArchives();
+  showToast("已删除全部旧存档。", "success");
+}
+
 let pendingAppStateSaveTimer = null;
 let appStateSaveBackoffUntil = 0;
 
@@ -5909,8 +6044,12 @@ function normalizePendingTablesInMemory({ save = false } = {}) {
 }
 
 function loadAppState() {
+  loadOperationArchives();
   const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return;
+  if (!saved) {
+    renderOperationArchives();
+    return;
+  }
   try {
     const parsed = JSON.parse(saved);
     if (!Array.isArray(parsed.events) || !parsed.events.length) return;
@@ -6304,7 +6443,11 @@ function markSeatmapZoneTested(zone) {
     currentEvent.seatmapTestRequired = true;
     seatmapStatus.textContent = `座位图测试中：已测 ${progress.testedCount}/${progress.total}，剩余 ${progress.missingZones.slice(0, 6).map((item) => item.label).join("、")}${progress.missingZones.length > 6 ? "…" : ""}`;
   }
-  scheduleAppStateSave(200);
+  if (!wasAlreadyTested) {
+    saveAndArchiveAppStep(`点击座位图热区：${currentEvent.name} · ${zone.label || key}`, "座位图测试");
+  } else {
+    scheduleAppStateSave(200);
+  }
   renderAdminChecklist();
 }
 
@@ -6328,7 +6471,7 @@ function markSeatmapTestComplete() {
   const progress = getSeatmapTestProgress();
   seatmapStatus.textContent = `座位图测试已确认完成：${progress.testedCount}/${progress.total}。后续上传/发布票源不会再弹出测试要求。`;
   zoneMarkingStatus.textContent = "座位图热区已确认可用。客户视角不会显示线框，只保留点击效果。";
-  saveAppState();
+  saveAndArchiveAppStep(`确认座位图测试完成：${currentEvent.name}`, "座位图测试");
   renderSeatmap();
   renderAdminChecklist();
   showToast("座位图测试已确认完成。", "success");
@@ -7885,7 +8028,7 @@ async function saveSeatmapHotspotEdit() {
   zoneMarkingStatus.textContent = template
     ? `已保存 ${zone.label} 热区，并更新模板“${template.name}”。现在是客户视角，请重新点击验证。`
     : `已保存 ${zone.label} 热区。现在是客户视角，请重新点击验证。`;
-  saveAppState();
+  saveAndArchiveAppStep(`修改座位图热区：${currentEvent.name} · ${zone.label}`, "座位图");
   renderSeatmapMarkers();
   renderAdminEvent();
   render();
@@ -8401,6 +8544,7 @@ function renderAdminEvent() {
   renderAdminChecklist();
   renderSeatmapTemplates();
   renderEventDraftHistory();
+  renderOperationArchives();
   deleteCurrentEventButton.disabled = events.length <= 1;
 }
 
@@ -8644,7 +8788,7 @@ function focusReviewRow(rowIndex) {
   });
 }
 
-function refreshReviewAfterRowAction(rowIndex) {
+function refreshReviewAfterRowAction(rowIndex, archiveLabel = "", archiveType = "校对") {
   const table = getSelectedPendingTable();
   pendingReviewFocusRowIndex = getNextReviewableRowIndex(table, rowIndex);
   if (pendingReviewFocusRowIndex === null) {
@@ -8658,7 +8802,11 @@ function refreshReviewAfterRowAction(rowIndex) {
   }
   renderReviewPanel(pendingReviewFocusRowIndex);
   window.requestAnimationFrame(() => renderUploadRecords());
-  scheduleAppStateSave();
+  if (archiveLabel) {
+    saveAndArchiveAppStep(archiveLabel, archiveType);
+  } else {
+    scheduleAppStateSave();
+  }
 }
 
 function cloneReviewState(table) {
@@ -8760,7 +8908,7 @@ function restoreReviewSnapshot(table, snapshotId) {
   updatePendingTableReviewFlags(table);
   renderUploadRecords();
   renderReviewPanel();
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`恢复校对历史：${table.title || currentEvent.name}`, "校对");
   showToast("已恢复到历史记录。", "success");
 }
 
@@ -8776,7 +8924,7 @@ function setColorReviewSample(table, rowIndex, sampleType) {
   if (sampleType === "sold") table.colorReviewSamples.soldRow = rowIndex;
   if (sampleType === "available") table.colorReviewSamples.availableRow = rowIndex;
   renderReviewPanel(rowIndex);
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`设置颜色样本：第 ${rowIndex + 1} 条${sampleType === "sold" ? "已售" : "未售"}样本`, "校对");
   showToast(sampleType === "sold" ? "已设置已售颜色样本。" : "已设置未售颜色样本。", "success");
 }
 
@@ -8816,7 +8964,7 @@ function saveReviewRowPrice(table, rowIndex, value) {
   table.userEditedRows[rowIndex] = true;
   updatePendingTableReviewFlags(table);
   markPendingRowReviewed(table, rowIndex);
-  refreshReviewAfterRowAction(rowIndex);
+  refreshReviewAfterRowAction(rowIndex, `修改售价：第 ${rowIndex + 1} 条设为 ${price}`, "校对");
   showToast("售价已保存，并设为可发布。", "success");
 }
 
@@ -8846,7 +8994,7 @@ function applyReviewDateToTable(table, value) {
   updatePendingTableReviewFlags(table);
   renderUploadRecords();
   renderReviewPanel();
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`批量补日期：${changedRows} 条设为 ${date}`, "校对");
   showToast(`已给 ${changedRows} 条票补上日期。`, "success");
 }
 
@@ -8874,7 +9022,7 @@ function saveReviewRowEdits(table, rowIndex, card) {
   editingReviewRows.delete(getReviewEditKey(table, rowIndex));
   updatePendingTableReviewFlags(table);
   markPendingRowReviewed(table, rowIndex);
-  refreshReviewAfterRowAction(rowIndex);
+  refreshReviewAfterRowAction(rowIndex, `修改票源：第 ${rowIndex + 1} 条`, "校对");
   showToast("票源信息已修改。", "success");
 }
 
@@ -8902,7 +9050,7 @@ function togglePendingRowSold(table, rowIndex) {
   table.publishRows[rowIndex] = isCustomerPublishableTicket(nextTicket);
   markPendingRowReviewed(table, rowIndex);
   updatePendingTableReviewFlags(table);
-  refreshReviewAfterRowAction(rowIndex);
+  refreshReviewAfterRowAction(rowIndex, `标记售卖状态：第 ${rowIndex + 1} 条`, "校对");
 }
 
 function clearSoldMarkersFromRow(table, rowIndex) {
@@ -8963,7 +9111,7 @@ function togglePendingRowPublish(table, rowIndex) {
   updatePendingTableReviewFlags(table);
   renderUploadRecords();
   renderReviewPanel(rowIndex);
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`${nextPublish ? "设为发布" : "设为不发布"}：第 ${rowIndex + 1} 条`, "校对");
 }
 
 function setPendingRowPublish(table, rowIndex, shouldPublish) {
@@ -8977,7 +9125,7 @@ function setPendingRowPublish(table, rowIndex, shouldPublish) {
   updatePendingTableReviewFlags(table);
   renderUploadRecords();
   renderReviewPanel(rowIndex);
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`${shouldPublish ? "设为发布" : "设为不发布"}：第 ${rowIndex + 1} 条`, "校对");
 }
 
 function setPendingRowPublishDraft(table, rowIndex, shouldPublish) {
@@ -8985,7 +9133,7 @@ function setPendingRowPublishDraft(table, rowIndex, shouldPublish) {
   table.publishRows = table.publishRows || {};
   table.publishRows[rowIndex] = Boolean(shouldPublish);
   renderReviewPanel(rowIndex);
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`${shouldPublish ? "草稿设为发布" : "草稿设为不发布"}：第 ${rowIndex + 1} 条`, "校对");
 }
 
 function getVisibleReviewRowIndexes(table) {
@@ -9010,7 +9158,7 @@ function markAllReviewRowsSkipDraft(table) {
   table.bulkSkipDraft = true;
   table.aiReviewStatus = `已把 ${rowIndexes.length} 条候选票全部改为“不发布”。你可以把少数可上架的票反选成“发布到前台”，最后点右上角“确认并发布”。`;
   renderReviewPanel(rowIndexes[0]);
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`批量设为不发布：${rowIndexes.length} 条`, "校对");
   showToast("已全部改为不发布，可反选少量上架。", "success");
 }
 
@@ -9310,7 +9458,7 @@ async function requestReviewAiAssist(table, instruction) {
   } finally {
     reviewAiBusy = false;
     renderReviewPanel();
-    scheduleAppStateSave();
+    saveAndArchiveAppStep(`生成 AI 校对建议：${table.title || currentEvent.name}`, "AI 校对");
   }
 }
 
@@ -9340,7 +9488,7 @@ function applyReviewAiSuggestions(table) {
   pendingReviewFocusRowIndex = getVisibleReviewRowIndexes(table)[0] ?? null;
   renderUploadRecords();
   renderReviewPanel(pendingReviewFocusRowIndex);
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`应用 AI 建议：${skipCount} 条不发布、${publishCount} 条候选发布`, "校对");
   showToast("已应用 AI 建议。", "success");
 }
 
@@ -9929,7 +10077,7 @@ async function publishUpload() {
   renderReviewPanel();
   renderPublishedTables();
   renderAdminEvent();
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`生成待确认表：${uploadedSource?.name || uploadTableTitle.value || currentEvent.name}`, "生成待确认");
   uploadRecords.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -9977,7 +10125,7 @@ function confirmSelectedPendingTable() {
     table.showSoldInReview = true;
     renderUploadRecords();
     renderReviewPanel();
-    scheduleAppStateSave();
+    saveAndArchiveAppStep(`确认发布未选中票：${table.title || currentEvent.name}`, "发布");
     showToast("这张表没有勾选要上传的票，已保留在待确认里。你可以恢复历史或反选可发布票。", "error");
     return;
   }
@@ -10006,7 +10154,7 @@ function confirmSelectedPendingTable() {
   renderPublishedTables();
   renderAdminEvent();
   window.setTimeout(render, 0);
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`确认发布：${table.title} · ${publishRows.length} 条`, "发布");
 }
 
 function confirmAllPendingTables() {
@@ -10082,7 +10230,7 @@ function confirmAllPendingTables() {
   renderPublishedTables();
   renderAdminEvent();
   window.setTimeout(render, 0);
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`一键发布：${publishedRowCount} 条票`, "发布");
 }
 
 function confirmReadyPendingTables() {
@@ -10155,17 +10303,20 @@ function confirmReadyPendingTables() {
   renderPublishedTables();
   renderAdminEvent();
   window.setTimeout(render, 0);
-  scheduleAppStateSave();
+  saveAndArchiveAppStep(`发布无需人工确认：${publishedTableCount} 张表、${publishedRowCount} 条票`, "发布");
 }
 
 function clearCurrentPendingTables() {
   const before = pendingTables.length;
+  const currentPendingCount = pendingTables.filter((table) => table.eventId === currentEvent.id).length;
+  if (currentPendingCount) saveAndArchiveAppStep(`清空待确认前备份：${currentEvent.name}`, "删除前备份");
   for (let index = pendingTables.length - 1; index >= 0; index -= 1) {
     if (pendingTables[index].eventId === currentEvent.id) pendingTables.splice(index, 1);
   }
   selectedPendingTableId = null;
   const removed = before - pendingTables.length;
   showToast(removed ? `已清空 ${removed} 张待确认表。` : "当前没有待确认表。", removed ? "success" : "error");
+  if (removed) saveAndArchiveAppStep(`清空待确认：${currentEvent.name}`, "清空待确认");
   renderUploadRecords();
   renderReviewPanel();
 }
@@ -10942,7 +11093,7 @@ function generateQuickZones() {
   resetSeatmapTestStatus("快速生成热区后需要逐区测试");
   seatmapStatus.textContent = `已生成 ${labels.length} 个可点击区域。发布票源前必须前台逐区测试。`;
   showToast(`已生成 ${labels.length} 个可点击区域。`, "success");
-  saveAppState();
+  saveAndArchiveAppStep(`快速生成热区：${currentEvent.name} · ${labels.length} 个`, "座位图");
   renderAdminEvent();
   render();
 }
@@ -10997,7 +11148,7 @@ function markNextZone(event) {
     resetSeatmapTestStatus("手动标注热区后需要逐区测试");
     zoneMarkingStatus.textContent = `已标注 ${markingZones.length} 个 SVG 可点击热区。请在座位图工具栏测试后点“确认测试完成”。`;
     showToast("区域标注完成。", "success");
-    saveAppState();
+    saveAndArchiveAppStep(`手动标注热区完成：${currentEvent.name} · ${markingZones.length} 个`, "座位图");
     renderAdminEvent();
     render();
     return;
@@ -11048,7 +11199,7 @@ async function saveScannedSeatmapZones() {
     ? `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区，并已把座位图底图一起存入模板库“${template.name}”。测试无误后请点“确认测试完成”。`
     : `已保存 ${currentEvent.zones.length} 个完全透明的独立 SVG 可点击热区。测试无误后请点“确认测试完成”。`;
   showToast(template ? "整套座位图模板已保存。" : "座位图热区已保存。", "success");
-  saveAppState();
+  saveAndArchiveAppStep(`保存座位图热区：${currentEvent.name} · ${currentEvent.zones.length} 个`, "座位图");
   renderSeatmapMarkers();
   renderAdminEvent();
   render();
@@ -11073,6 +11224,7 @@ function openSeatmapTest() {
     ? `已进入热区检查：${currentEvent.zones.length} 个热区已显示。保存后可切到客户视角测试。`
     : "已进入前台测试：当前只有座位图，保存热区后才能点击区域。";
   showToast(message, currentEvent.zones.length ? "success" : "idle");
+  saveAndArchiveAppStep(`进入座位图测试：${currentEvent.name}`, "座位图测试");
 }
 
 function syncNewEventDisplayName() {
@@ -11129,7 +11281,7 @@ function createNewEvent() {
   newEventStatus.dataset.status = "success";
   newEventStatus.textContent = "演出已创建，可以上传座位图和票源 PDF。";
   showToast(`${name} 已创建。`, "success");
-  saveAppState();
+  saveAndArchiveAppStep(`创建演出：${name}`, "演出");
   render();
   renderAdminEvent();
   renderUploadRecords();
@@ -11148,6 +11300,7 @@ function deleteCurrentEvent() {
   if (!confirmed) return;
   const deletedName = currentEvent.name;
   const deletedId = currentEvent.id;
+  saveAndArchiveAppStep(`删除前备份：${deletedName}`, "删除前备份");
   const currentIndex = events.findIndex((event) => event.id === deletedId);
   if (currentIndex >= 0) events.splice(currentIndex, 1);
   for (let index = pendingTables.length - 1; index >= 0; index -= 1) {
@@ -11163,7 +11316,7 @@ function deleteCurrentEvent() {
   newEventForm.classList.add("hidden");
   pendingSeatmap = null;
   manualReviewOnly = false;
-  saveAppState();
+  saveAndArchiveAppStep(`删除演出：${deletedName}`, "删除演出");
   render();
   renderAdminEvent();
   renderUploadRecords();
@@ -11182,6 +11335,7 @@ function clearCurrentPublishedTables() {
     `确定清空「${currentEvent.name}」的已发布票源吗？\n\n会删除 ${tableCount} 张已发布票源表，客户前台会立刻清空旧票。座位图、热区和待确认表不会删除。`,
   );
   if (!confirmed) return;
+  saveAndArchiveAppStep(`清空已发布前备份：${currentEvent.name}`, "删除前备份");
   const removedIds = new Set(currentEvent.tables.map((table) => table.id));
   currentEvent.tables = [];
   for (let index = uploadedTables.length - 1; index >= 0; index -= 1) {
@@ -11193,7 +11347,7 @@ function clearCurrentPublishedTables() {
   hoveredZone = null;
   searchTerm = "";
   searchInput.value = "";
-  saveAppState();
+  saveAndArchiveAppStep(`清空已发布票源：${currentEvent.name}`, "清空票源");
   render();
   renderAdminEvent();
   renderUploadRecords();
@@ -11483,14 +11637,14 @@ async function applyPendingSeatmapToCurrentEvent({ autoScan = false } = {}) {
     currentEvent.seatmapTemplateId = "builtin-laizi";
     resetSeatmapTestStatus("自动套用标准热区后需要逐区测试");
     seatmapStatus.textContent = `座位图已保存，并已自动套用 ${currentEvent.zones.length} 个拉椅子标准热区。发布票源前必须前台逐区测试。`;
-    if (!saveAppState()) return false;
+    if (!saveAndArchiveAppStep(`保存座位图：${currentEvent.name} · ${savedSeatmapName}`, "座位图")) return false;
     showToast(`${currentEvent.name} 座位图已更新。`, "success");
     renderAdminEvent();
     render();
     return true;
   }
   seatmapStatus.textContent = autoScan ? "座位图已上传并保存，正在自动扫描热区..." : "座位图已保存。点击“扫描热区”后会自动组合 AI 和本地兜底识别。";
-  if (!saveAppState()) return false;
+  if (!saveAndArchiveAppStep(`保存座位图：${currentEvent.name} · ${savedSeatmapName}`, "座位图")) return false;
   renderAdminEvent();
   render();
   if (autoScan) {
@@ -11619,7 +11773,7 @@ seatmapTemplateList.addEventListener("click", (event) => {
     const nextName = window.prompt("请输入新的模板名称", template.name)?.trim();
     if (!nextName) return;
     seatmapTemplates[templateIndex] = { ...seatmapTemplates[templateIndex], name: nextName, updatedAt: Date.now() };
-    saveAppState();
+    saveAndArchiveAppStep(`重命名座位图模板：${template.name} -> ${nextName}`, "座位图模板");
     renderSeatmapTemplates();
     showToast("模板名称已更新。", "success");
     return;
@@ -11627,7 +11781,7 @@ seatmapTemplateList.addEventListener("click", (event) => {
   if (button.dataset.deleteTemplate) {
     seatmapTemplates.splice(templateIndex, 1);
     if (currentEvent.seatmapTemplateId === template.id) currentEvent.seatmapTemplateId = "";
-    saveAppState();
+    saveAndArchiveAppStep(`删除座位图模板：${template.name}`, "座位图模板");
     renderSeatmapTemplates();
     renderAdminChecklist();
     showToast("模板已删除。当前演出的座位图不会被清掉。", "success");
@@ -11636,6 +11790,21 @@ seatmapTemplateList.addEventListener("click", (event) => {
 confirmAllButton.addEventListener("click", confirmAllPendingTables);
 publishReadyButton.addEventListener("click", confirmReadyPendingTables);
 clearPublishedButton.addEventListener("click", clearCurrentPublishedTables);
+createOperationArchiveButton.addEventListener("click", () => {
+  saveAndArchiveAppStep(`手动存档：${currentEvent.name}`, "手动存档", { silent: false });
+});
+clearOperationArchivesButton.addEventListener("click", clearOperationArchives);
+operationArchiveList.addEventListener("click", (event) => {
+  const restoreButton = event.target.closest("[data-restore-operation-archive]");
+  if (restoreButton) {
+    restoreOperationArchive(restoreButton.dataset.restoreOperationArchive);
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-operation-archive]");
+  if (deleteButton) {
+    deleteOperationArchive(deleteButton.dataset.deleteOperationArchive);
+  }
+});
 showManualReviewButton.addEventListener("click", () => {
   manualReviewOnly = !manualReviewOnly;
   const riskyTable = pendingTables.find((table) => table.eventId === currentEvent.id && ensurePendingTableReviewFlags(table).needsManualReview);
@@ -11697,7 +11866,7 @@ sourceFileInput.addEventListener("change", async () => {
       return;
     }
   }
-  saveAppState();
+  saveAndArchiveAppStep(`选择票源文件：${file.name}`, "上传文件");
   selectedSourceName.textContent = `已选择：${getSelectedFileDisplayName(file.name)}`;
   selectedSourceName.title = decodePossiblyEncodedFileName(file.name);
   setUploadStatus("正在自动检测文件结构...", "loading");
@@ -11793,15 +11962,16 @@ fieldMappingTable.addEventListener("change", (event) => {
   const index = Number(select.dataset.fieldMappingIndex);
   if (!Number.isInteger(index)) return;
   fieldMappingDraft.mapping[index] = select.value;
-  saveAppState();
+  saveAndArchiveAppStep(`调整字段映射：${fieldMappingDraft.sourceName || currentEvent.name}`, "字段映射");
 });
 
 confirmFieldMappingButton.addEventListener("click", confirmFieldMappingImport);
 
 cancelFieldMappingButton.addEventListener("click", () => {
+  const sourceName = fieldMappingDraft?.sourceName || currentEvent.name;
   fieldMappingDraft = null;
   renderFieldMappingPreview();
-  saveAppState();
+  saveAndArchiveAppStep(`取消字段映射：${sourceName}`, "字段映射");
   setUploadStatus("已取消字段映射，本次表格未导入。", "idle");
   showToast("已取消字段映射。", "success");
 });
@@ -11938,6 +12108,11 @@ reviewLayout.addEventListener("click", (event) => {
 confirmReviewButton.addEventListener("click", confirmSelectedPendingTable);
 
 window.addEventListener("storage", (event) => {
+  if (event.key === OPERATION_ARCHIVE_KEY) {
+    loadOperationArchives();
+    renderOperationArchives();
+    return;
+  }
   if (event.key !== STORAGE_KEY) return;
   loadAppState();
   selectedDateId = null;
@@ -11959,6 +12134,7 @@ renderUploadRecords();
 renderReviewPanel();
 renderFieldMappingPreview();
 renderPublishedTables();
+renderOperationArchives();
 setMode(IS_ADMIN_PAGE ? "admin" : "customer");
 renderAiProviderTemplate("aliyun");
 refreshAiStatus();

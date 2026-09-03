@@ -1887,6 +1887,56 @@ tr.hit-row td {
   flex: 0 0 auto;
 }
 
+.operation-archive-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #ece9e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.operation-archive-header,
+.operation-archive-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.operation-archive-header strong,
+.operation-archive-item strong {
+  display: block;
+  color: var(--ink);
+}
+
+.operation-archive-header span,
+.operation-archive-item span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.operation-archive-list {
+  display: grid;
+  gap: 8px;
+}
+
+.operation-archive-item {
+  padding-top: 8px;
+  border-top: 1px solid #ece9e1;
+}
+
+.operation-archive-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .review-risk-badge,
 .review-ok-badge {
   display: inline-flex;
