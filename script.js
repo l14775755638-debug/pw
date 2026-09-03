@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 51;
+const ROW_COLOR_LOGIC_VERSION = 52;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -5173,7 +5173,14 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const colorState = getOpenCvEffectiveColorState(table);
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
   applyOpenCvWhiteVsColoredAutoDecision(table);
-  if (!table.rowColorReliable && !hasOpenCvSoldTextColorAnchor(table) && !hasOpenCvCurrentRedWhiteFallback(table) && !hasOpenCvSparseMappedRedPageSignalForTable(table)) {
+  if (
+    !table.rowColorReliable &&
+    !hasOpenCvSoldTextColorAnchor(table) &&
+    !hasOpenCvCurrentRedWhiteFallback(table) &&
+    !hasOpenCvSparseMappedRedPageSignalForTable(table) &&
+    !hasOpenCvRawColorDifference(table) &&
+    !hasAnyOpenCvWhiteAndColoredConflict(table)
+  ) {
     Object.keys(table.publishRows || {}).forEach((rowIndex) => {
       if (table.userEditedRows?.[rowIndex] !== true && table.publishRows[rowIndex] === false) delete table.publishRows[rowIndex];
     });
@@ -9416,15 +9423,32 @@ function shouldAutoRepairRowColors(table) {
   if (!table || !Array.isArray(table.rows) || !table.rows.length) return false;
   const hasFreshRowColorLogic = Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION;
   if (hasFreshRowColorLogic && (table._rowColorRepairing || table._rowColorRepairDone || table._rowColorRepairTried)) return false;
-  if (isVisualRowColorSource(table) && hasFreshRowColorLogic) return false;
+  if (isVisualRowColorSource(table) && hasFreshRowColorLogic) {
+    const hasAnyAutoSkip = table.rows.some((row, rowIndex) => isColorMarkedSoldTicket({ table, row, index: rowIndex }));
+    const hasMixedRawSignal = hasOpenCvRawColorDifference(table) || hasAnyOpenCvWhiteAndColoredConflict(table);
+    if (hasAnyAutoSkip || !hasMixedRawSignal) return false;
+  }
   if (!isPdfTableSource(table) && !String(table.originalType || "").startsWith("image/")) return false;
   if (!table.originalImage) return false;
   return true;
 }
 
+function hasPageWideSequenceColumn(table) {
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  if (!rows.length) return false;
+  const firstColumnName = normalizeText(table?.columns?.[0] || "");
+  if (!/(^|[^a-z0-9])(序号|编号|no|number|index)([^a-z0-9]|$)/i.test(firstColumnName)) return false;
+  const numbers = rows
+    .map((row) => String(row?.[0] || "").trim())
+    .filter((value) => /^\d{1,4}$/.test(value))
+    .map(Number);
+  if (!numbers.length) return false;
+  return Math.max(...numbers) > rows.length || numbers.length === rows.length;
+}
+
 function getRowColorExpectedRowsForPendingTable(table) {
   const rowCount = Array.isArray(table?.rows) ? table.rows.length : 0;
-  if (isPdfTableSource(table) && rowCount > 0 && rowCount < 8) return 24;
+  if (isPdfTableSource(table) && rowCount > 0 && rowCount < 8 && hasPageWideSequenceColumn(table)) return 24;
   return rowCount;
 }
 
