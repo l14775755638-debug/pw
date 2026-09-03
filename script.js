@@ -698,7 +698,11 @@ function mapRecognizedRowToColumns(row, sourceColumns, targetColumns) {
     const text = String(value || "").trim();
     if (!text) return;
     const emptyIndex = mapped.findIndex((item, index) => !usedIndexes.has(index) && !String(item || "").trim());
-    if (emptyIndex >= 0) mapped[emptyIndex] = text;
+    if (emptyIndex >= 0) {
+      mapped[emptyIndex] = text;
+    } else {
+      mapped.push(text);
+    }
   });
   return mapped;
 }
@@ -6620,7 +6624,8 @@ function getSalePriceFromRowSource(source) {
   const index = priceIndexes[0];
   if (index < 0) return "";
   const value = row[index];
-  return isLikelyRowColorValue(value) || isSoldText(value, { strict: true }) || isBusinessStatusRemarkValue(value) ? "" : value;
+  if (isLikelyRowColorValue(value) || isSoldText(value, { strict: true }) || isBusinessStatusRemarkValue(value)) return "";
+  return isLikelySalePriceValue(value, { minPrice: 100 }) ? extractSalePriceText(value, { minPrice: 100 }) || value : "";
 }
 
 function getTicketSalePriceValue(ticket) {
