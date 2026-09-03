@@ -17,6 +17,7 @@ const pdfRowColorScriptPath = path.join(root, "tools", "detect_pdf_row_colors.py
 const depsPythonPath = path.join(depsRoot, "python", "bin", "python3");
 const seatmapTemplateDir = path.join(root, "seatmap-templates");
 const uploadSourceDir = path.join(root, "uploads");
+const uploadBackupDir = path.join(os.homedir(), ".ticket-admin-source-cache");
 const ticketOcrJobs = new Map();
 
 function loadLocalEnv() {
@@ -158,20 +159,44 @@ function safeFileStem(fileName) {
     .slice(0, 80) || "source";
 }
 
+function ensureUploadStorageDirs() {
+  fs.mkdirSync(uploadSourceDir, { recursive: true });
+  fs.mkdirSync(uploadBackupDir, { recursive: true });
+}
+
+function getUploadBackupPath(fileName) {
+  return path.join(uploadBackupDir, path.basename(String(fileName || "")));
+}
+
+function getReadableUploadPath(sourceUrl) {
+  if (!String(sourceUrl || "").startsWith("uploads/")) return null;
+  const fileName = path.basename(sourceUrl);
+  const sourcePath = path.resolve(uploadSourceDir, fileName);
+  const uploadRoot = path.resolve(uploadSourceDir);
+  if (!sourcePath.startsWith(`${uploadRoot}${path.sep}`)) return null;
+  if (fs.existsSync(sourcePath)) return sourcePath;
+  const backupPath = getUploadBackupPath(fileName);
+  if (fs.existsSync(backupPath)) return backupPath;
+  return null;
+}
+
 async function saveSourceFile(request, response) {
   const raw = await readBody(request);
   const payload = JSON.parse(raw || "{}");
   const { mimeType, buffer } = dataUrlToBuffer(payload.file || payload.dataUrl || "");
   const fileName = String(payload.fileName || "source");
-  fs.mkdirSync(uploadSourceDir, { recursive: true });
+  ensureUploadStorageDirs();
   const savedName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeFileStem(fileName)}${getExtensionForMime(mimeType, fileName)}`;
   const filePath = path.join(uploadSourceDir, savedName);
+  const backupPath = getUploadBackupPath(savedName);
   fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(backupPath, buffer);
   sendJson(response, 200, {
     url: `uploads/${savedName}`,
     fileName: savedName,
     mimeType,
     size: buffer.length,
+    backup: true,
   });
 }
 
@@ -1365,9 +1390,8 @@ async function analyzeTicketRowColors(request, response) {
   const sourcePage = Math.max(1, Math.floor(Number(payload.sourcePage || 1)));
   const expectedRows = Math.max(0, Math.floor(Number(payload.expectedRows || 0)));
   if (!image && sourceUrl.startsWith("uploads/")) {
-    const sourcePath = path.resolve(root, sourceUrl);
-    const uploadRoot = path.resolve(uploadSourceDir);
-    if (!sourcePath.startsWith(`${uploadRoot}${path.sep}`) || !fs.existsSync(sourcePath)) {
+    const sourcePath = getReadableUploadPath(sourceUrl);
+    if (!sourcePath) {
       sendJson(response, 404, { error: "Source image not found", message: "没有找到已保存的原始图片，请重新选择图片。" });
       return;
     }
@@ -1409,9 +1433,8 @@ async function resolveRowColorSourceImage(payload) {
   const sourceUrl = String(payload.sourceUrl || "");
   const sourcePage = Math.max(1, Math.floor(Number(payload.sourcePage || 1)));
   if (!image && sourceUrl.startsWith("uploads/")) {
-    const sourcePath = path.resolve(root, sourceUrl);
-    const uploadRoot = path.resolve(uploadSourceDir);
-    if (!sourcePath.startsWith(`${uploadRoot}${path.sep}`) || !fs.existsSync(sourcePath)) {
+    const sourcePath = getReadableUploadPath(sourceUrl);
+    if (!sourcePath) {
       const error = new Error("没有找到已保存的原始图片，请重新选择图片。");
       error.status = 404;
       throw error;
@@ -1790,10 +1813,17 @@ function sendSeatmapTemplates(response) {
 function serveStatic(request, response) {
   const url = new URL(request.url, `http://127.0.0.1:${port}`);
   let filePath = path.join(root, decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname));
+  const uploadPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+  if (uploadPath.startsWith("uploads/")) {
+    const readableUploadPath = getReadableUploadPath(uploadPath);
+    if (readableUploadPath) filePath = readableUploadPath;
+  }
   if (!filePath.startsWith(root)) {
-    response.writeHead(403);
-    response.end("Forbidden");
-    return;
+    if (!filePath.startsWith(uploadBackupDir)) {
+      response.writeHead(403);
+      response.end("Forbidden");
+      return;
+    }
   }
   fs.stat(filePath, (error, stats) => {
     if (error || !stats.isFile()) {
