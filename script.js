@@ -522,7 +522,8 @@ const pendingTables = [];
 let selectedPendingTableId = null;
 const STORAGE_KEY = "ticket-admin-state-v1";
 const OPERATION_ARCHIVE_KEY = "ticket-admin-operation-archives-v1";
-const MAX_OPERATION_ARCHIVES = 30;
+const MAX_OPERATION_ARCHIVES = 12;
+const MAX_OPERATION_ARCHIVE_PENDING_TABLES = 80;
 let eventDraftHistory = { artists: [], cities: [], venues: [] };
 let operationArchives = [];
 let manualReviewOnly = false;
@@ -543,6 +544,7 @@ let seatmapTemplates = [];
 let externalSeatmapTemplates = [];
 let templateLibraryOpen = false;
 let seatmapUploadRunId = 0;
+let pendingTablesNormalizeCacheKey = "";
 const aiProviderTemplates = {
   aliyun: {
     provider: "阿里云百炼 / qwen3-vl-plus",
@@ -5687,6 +5689,8 @@ function makeCompactPendingTable(table) {
     title: table.title,
     originalImage: table.originalImage,
     originalType: table.originalType,
+    originalColumns: Array.isArray(table.originalColumns) ? [...table.originalColumns] : [],
+    originalRows: Array.isArray(table.originalRows) ? table.originalRows.map((row) => [...row]) : [],
     sourceFileName: table.sourceFileName,
     sourceName: table.sourceName,
     sourcePage: table.sourcePage,
@@ -5701,6 +5705,22 @@ function makeCompactPendingTable(table) {
     rowColorPartialSequenceAligned: Boolean(table.rowColorPartialSequenceAligned),
     rowColorSparseSourceRepair: Boolean(table.rowColorSparseSourceRepair),
     rowColorPageLabels: Array.isArray(table.rowColorPageLabels) ? [...table.rowColorPageLabels] : [],
+    rowColorRows: Array.isArray(table.rowColorRows)
+      ? table.rowColorRows.map((item) => ({
+          label: item?.label || "",
+          rawLabel: item?.rawLabel || "",
+          confidence: Number(item?.confidence || 0),
+          whiteRatio: Number(item?.whiteRatio || 0),
+          coloredRatio: Number(item?.coloredRatio || 0),
+          coverageRatio: Number(item?.coverageRatio || 0),
+        }))
+      : [],
+    rowColorSource: table.rowColorSource || "",
+    rowColorReliable: Boolean(table.rowColorReliable),
+    rowColorConfirmed: Boolean(table.rowColorConfirmed),
+    rowColorExactRowAligned: Boolean(table.rowColorExactRowAligned),
+    rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
+    colorReviewSamples: { ...(table.colorReviewSamples || {}) },
     rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
       ? {
           soldNonWhiteCount: Number(table.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
@@ -5713,9 +5733,8 @@ function makeCompactPendingTable(table) {
   };
 }
 
-function saveAppState() {
-  compactLargeStateBeforeSave();
-  const serializableEvents = events.map((event) => ({
+function buildSerializableEvents() {
+  return events.map((event) => ({
     id: event.id,
     name: event.name,
     artist: event.artist || getEventArtist(event),
@@ -5738,7 +5757,11 @@ function saveAppState() {
     zones: event.zones,
     tables: event.tables,
   }));
-  const serializablePendingTables = pendingTables.map((table) => ({
+}
+
+function buildSerializablePendingTables({ compact = false } = {}) {
+  if (compact) return pendingTables.slice(0, MAX_OPERATION_ARCHIVE_PENDING_TABLES).map(makeCompactPendingTable);
+  return pendingTables.map((table) => ({
     ...table,
     columns: Array.isArray(table.columns) ? [...table.columns] : [],
     rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
@@ -5764,7 +5787,10 @@ function saveAppState() {
         }))
       : [],
   }));
-  const serializableUploadedSource = uploadedSource
+}
+
+function buildSerializableUploadedSource() {
+  return uploadedSource
     ? {
         name: uploadedSource.name,
         type: uploadedSource.type,
@@ -5773,6 +5799,13 @@ function saveAppState() {
         detectedTables: uploadedSource.detectedTables || 1,
       }
     : null;
+}
+
+function saveAppState() {
+  compactLargeStateBeforeSave();
+  const serializableEvents = buildSerializableEvents();
+  const serializablePendingTables = buildSerializablePendingTables();
+  const serializableUploadedSource = buildSerializableUploadedSource();
   try {
     mergeEventDraftHistory();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource)));
@@ -5805,6 +5838,9 @@ function loadOperationArchives() {
     const saved = localStorage.getItem(OPERATION_ARCHIVE_KEY);
     const parsed = saved ? JSON.parse(saved) : [];
     operationArchives = Array.isArray(parsed) ? parsed.filter((item) => item?.id && item?.state).slice(0, MAX_OPERATION_ARCHIVES) : [];
+    if (Array.isArray(parsed) && parsed.length > operationArchives.length) {
+      window.setTimeout(saveOperationArchives, 0);
+    }
   } catch {
     operationArchives = [];
     localStorage.removeItem(OPERATION_ARCHIVE_KEY);
@@ -5833,14 +5869,7 @@ function getOperationArchiveSummary() {
 }
 
 function archiveCurrentSavedState(label, type = "操作", { silent = true } = {}) {
-  const savedState = localStorage.getItem(STORAGE_KEY);
-  if (!savedState) return false;
-  let parsedState = null;
-  try {
-    parsedState = JSON.parse(savedState);
-  } catch {
-    return false;
-  }
+  compactLargeStateBeforeSave();
   const archive = {
     id: `operation-archive-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     label,
@@ -5850,7 +5879,7 @@ function archiveCurrentSavedState(label, type = "操作", { silent = true } = {}
     eventId: currentEvent.id,
     eventName: currentEvent.name,
     summary: getOperationArchiveSummary(),
-    state: parsedState,
+    state: buildSerializableAppState(buildSerializableEvents(), buildSerializablePendingTables({ compact: true }), buildSerializableUploadedSource(), { omitLargeDrafts: true }),
   };
   operationArchives = [archive, ...operationArchives].slice(0, MAX_OPERATION_ARCHIVES);
   const saved = saveOperationArchives();
@@ -5933,8 +5962,15 @@ function scheduleAppStateSave(delay = 500) {
   const wait = Math.max(delay, appStateSaveBackoffUntil - Date.now());
   pendingAppStateSaveTimer = window.setTimeout(() => {
     pendingAppStateSaveTimer = null;
-    const saved = saveAppState();
-    appStateSaveBackoffUntil = saved ? 0 : Date.now() + 10000;
+    const runSave = () => {
+      const saved = saveAppState();
+      appStateSaveBackoffUntil = saved ? 0 : Date.now() + 10000;
+    };
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(runSave, { timeout: 2000 });
+    } else {
+      window.setTimeout(runSave, 0);
+    }
   }, wait);
 }
 
@@ -6024,8 +6060,29 @@ function getPendingTableRuntimeSignature(table) {
   ].join("::");
 }
 
+function getPendingTablesNormalizeCacheKey() {
+  return pendingTables
+    .map((table) =>
+      [
+        table?.id || "",
+        table?.eventId || "",
+        table?.sourceFileName || table?.sourceName || "",
+        Number(table?.sourcePage || 0) || 0,
+        Number(table?.sourcePart || 0) || 0,
+        Array.isArray(table?.columns) ? table.columns.length : 0,
+        Array.isArray(table?.rows) ? table.rows.length : 0,
+        Number(table?.rowColorLogicVersion || 0) || 0,
+        table?.rowColorSource || "",
+        table?._forceCanonicalDisplay === true ? "canonical" : "raw",
+      ].join(":"),
+    )
+    .join("|");
+}
+
 function normalizePendingTablesInMemory({ save = false } = {}) {
   if (!pendingTables.length) return false;
+  const cacheKey = getPendingTablesNormalizeCacheKey();
+  if (cacheKey && cacheKey === pendingTablesNormalizeCacheKey) return false;
   const selectedBefore = pendingTables.find((table) => table.id === selectedPendingTableId) || null;
   const selectedSourceKey = selectedBefore
     ? `${selectedBefore.eventId || ""}::${selectedBefore.sourceFileName || selectedBefore.sourceName || ""}::${Number(selectedBefore.sourcePage || 0) || 0}`
@@ -6034,7 +6091,10 @@ function normalizePendingTablesInMemory({ save = false } = {}) {
   const normalizedTables = mergeFragmentedPendingTables(pendingTables.map(normalizeLoadedPendingTable));
   const afterSignature = normalizedTables.map(getPendingTableRuntimeSignature).join("\n");
   const needsPdfCanonicalDisplay = pendingTables.some((table) => Number(table.sourcePage || 0) > 0 && table._forceCanonicalDisplay !== true);
-  if (beforeSignature === afterSignature && !needsPdfCanonicalDisplay) return false;
+  if (beforeSignature === afterSignature && !needsPdfCanonicalDisplay) {
+    pendingTablesNormalizeCacheKey = cacheKey;
+    return false;
+  }
 
   pendingTables.splice(0, pendingTables.length, ...normalizedTables);
   if (selectedBefore && !pendingTables.some((table) => table.id === selectedBefore.id)) {
@@ -6045,6 +6105,7 @@ function normalizePendingTablesInMemory({ save = false } = {}) {
       }) || pendingTables.find((table) => table.eventId === currentEvent.id);
     selectedPendingTableId = replacement?.id || null;
   }
+  pendingTablesNormalizeCacheKey = getPendingTablesNormalizeCacheKey();
   if (save) scheduleAppStateSave();
   return true;
 }
