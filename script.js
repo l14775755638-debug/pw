@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 31;
-const ROW_COLOR_LOGIC_VERSION = 50;
+const ROW_COLOR_LOGIC_VERSION = 51;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -4455,6 +4455,7 @@ function shouldAutoSkipForRowColor(table, rowIndex) {
   const label = getStrictRowLocalOpenCvColorLabel(item);
   if (!label || isAvailableRowColorLabel(label)) return false;
   if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) return true;
+  if (hasOpenCvRawColorDifference(table) && !isAvailableRowColorLabel(label) && isStrongOpenCvNonWhiteColorItem(item)) return true;
   if (hasOpenCvSoldTextColorAnchor(table)) {
     const anchorState = getOpenCvSoldTextColorAnchorState(table);
     return anchorState.labels.includes(label);
