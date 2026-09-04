@@ -10057,25 +10057,104 @@ async function getUploadImageRowColorAnalyses(parsedTables) {
   if (isPdf) return null;
   const isImage = String(uploadedSource?.type || "").startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(uploadedSource?.name || "");
   const hasImageSource = uploadedSource?.dataUrl?.startsWith("data:image/") || String(uploadedSource?.url || "").startsWith("uploads/");
-  if (isImage && !hasImageSource) throw new Error("无法读取原始图片做行底色检测，请重新选择图片后再生成待确认表。");
+  if (isImage && !hasImageSource) {
+    console.warn("Row color analysis skipped because the original image is unavailable.");
+    return {};
+  }
   if (!hasImageSource) return {};
   const expectedRows = parsedTables.reduce((count, table) => {
     const rowCount = Array.isArray(table.rows) ? table.rows.length : 0;
     return count + rowCount + (hasMisreadDataHeaderColumns(table.columns, table.rows) ? 1 : 0);
   }, 0);
   if (!expectedRows) return {};
-  const response = await fetch("/api/tables/analyze-row-colors", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      image: uploadedSource.dataUrl || "",
-      sourceUrl: uploadedSource.url || "",
-      expectedRows,
-    }),
-  });
-  const result = await response.json();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 6000);
+  let response;
+  try {
+    response = await fetch("/api/tables/analyze-row-colors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        image: uploadedSource.dataUrl || "",
+        sourceUrl: uploadedSource.url || "",
+        expectedRows,
+      }),
+    });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+  const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.message || result.error || "图片行底色检测失败。");
   return result.rowColorAnalysis ? { "1": result.rowColorAnalysis } : {};
+}
+
+async function getUploadImageRowColorAnalysesSafely(parsedTables) {
+  try {
+    return await getUploadImageRowColorAnalyses(parsedTables);
+  } catch (error) {
+    console.warn("Row color analysis skipped during pending table generation.", error);
+    showToast("颜色检测暂时不可用，已先生成待确认表。", "warning");
+    return {};
+  }
+}
+
+function setPublishUploadBusy(isBusy) {
+  publishUploadButton.disabled = isBusy;
+  publishUploadButton.textContent = isBusy ? "正在生成..." : "生成待确认表";
+}
+
+async function publishUpload() {
+  setPublishUploadBusy(true);
+  setUploadStatus("正在检查上传内容...", "loading");
+  showToast("正在处理上传...", "loading");
+  try {
+    await publishUploadInner();
+  } finally {
+    setPublishUploadBusy(false);
+  }
+}
+
+async function publishUploadInner() {
+  if (fieldMappingDraft) {
+    const draftSource = String(fieldMappingDraft.sourceName || fieldMappingDraft.sourceType || "").toLowerCase();
+    if (/\.(csv|tsv|txt|xlsx)$/.test(draftSource) || /csv|spreadsheet|excel/.test(draftSource)) {
+      setUploadStatus("当前 CSV / Excel 正在字段映射预览，请先点“按这个映射导入”或取消映射。", "error");
+      showToast("请先处理字段映射。", "error");
+      return;
+    }
+    fieldMappingDraft = null;
+    renderFieldMappingPreview();
+  }
+  const parsedTables = splitRecognizedTables(uploadTableText.value);
+  if (!uploadedSource) {
+    setUploadStatus("请先选择一张图片或 PDF。", "error");
+    showToast("上传失败：请先选择文件。", "error");
+    return;
+  }
+  if (!parsedTables.length) {
+    setUploadStatus("表格内容至少需要表头和一行票源。", "error");
+    showToast("上传失败：表格内容不完整。", "error");
+    return;
+  }
+  const rowColorAnalyses = await getUploadImageRowColorAnalysesSafely(parsedTables);
+  const rawTables = createUploadedTables(parsedTables, rowColorAnalyses);
+  const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
+  const tables = rawTables.filter((table) => table.rows.length);
+  pendingTables.unshift(...tables);
+  selectedPendingTableId = tables[0]?.id || selectedPendingTableId;
+  selectedDateId = null;
+  selectedZone = null;
+  searchTerm = "";
+  searchInput.value = "";
+  setUploadStatus(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，已自动跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。校对确认后才会发布给客户。`, "success");
+  showToast(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。`, "success");
+  renderUploadRecords();
+  renderReviewPanel();
+  renderPublishedTables();
+  renderAdminEvent();
+  saveAndArchiveAppStep(`生成待确认表：${uploadedSource?.name || uploadTableTitle.value || currentEvent.name}`, "生成待确认");
+  uploadRecords.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function hasAnyRowColorAnalysis(rowColorAnalyses) {
@@ -10231,50 +10310,6 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
     }
     return updatePendingTableReviewFlags(table);
   });
-}
-
-async function publishUpload() {
-  setUploadStatus("正在检查上传内容...", "loading");
-  showToast("正在处理上传...", "loading");
-  if (fieldMappingDraft) {
-    const draftSource = String(fieldMappingDraft.sourceName || fieldMappingDraft.sourceType || "").toLowerCase();
-    if (/\.(csv|tsv|txt|xlsx)$/.test(draftSource) || /csv|spreadsheet|excel/.test(draftSource)) {
-      setUploadStatus("当前 CSV / Excel 正在字段映射预览，请先点“按这个映射导入”或取消映射。", "error");
-      showToast("请先处理字段映射。", "error");
-      return;
-    }
-    fieldMappingDraft = null;
-    renderFieldMappingPreview();
-  }
-  const parsedTables = splitRecognizedTables(uploadTableText.value);
-  if (!uploadedSource) {
-    setUploadStatus("请先选择一张图片或 PDF。", "error");
-    showToast("上传失败：请先选择文件。", "error");
-    return;
-  }
-  if (!parsedTables.length) {
-    setUploadStatus("表格内容至少需要表头和一行票源。", "error");
-    showToast("上传失败：表格内容不完整。", "error");
-    return;
-  }
-  const rowColorAnalyses = await getUploadImageRowColorAnalyses(parsedTables);
-  const rawTables = createUploadedTables(parsedTables, rowColorAnalyses);
-  const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
-  const tables = rawTables.filter((table) => table.rows.length);
-  pendingTables.unshift(...tables);
-  selectedPendingTableId = tables[0]?.id || selectedPendingTableId;
-  selectedDateId = null;
-  selectedZone = null;
-  searchTerm = "";
-  searchInput.value = "";
-  setUploadStatus(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，已自动跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。校对确认后才会发布给客户。`, "success");
-  showToast(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。`, "success");
-  renderUploadRecords();
-  renderReviewPanel();
-  renderPublishedTables();
-  renderAdminEvent();
-  saveAndArchiveAppStep(`生成待确认表：${uploadedSource?.name || uploadTableTitle.value || currentEvent.name}`, "生成待确认");
-  uploadRecords.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function previewUploadedTable(tableId) {
