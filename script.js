@@ -11571,6 +11571,27 @@ function renderRuntimeBanner() {
   runtimeBanner.classList.toggle("hidden", window.location.protocol !== "file:");
 }
 
+function runWhenDocumentVisible(callback) {
+  if (document.visibilityState !== "hidden") {
+    callback();
+    return;
+  }
+  const onVisible = () => {
+    if (document.visibilityState === "hidden") return;
+    document.removeEventListener("visibilitychange", onVisible);
+    callback();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+}
+
+function runWhenPageIdle(callback, timeout = 1200) {
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(callback, { timeout });
+    return;
+  }
+  window.setTimeout(callback, 0);
+}
+
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => setMode(button.dataset.mode));
 });
@@ -12326,26 +12347,32 @@ window.addEventListener("storage", (event) => {
 });
 
 renderRuntimeBanner();
-render();
-renderAdminEvent();
-renderUploadRecords();
-renderReviewPanel();
-renderFieldMappingPreview();
-renderPublishedTables();
-renderOperationArchives();
 setMode(IS_ADMIN_PAGE ? "admin" : "customer");
 renderAiProviderTemplate("aliyun");
 refreshAiStatus();
 loadExternalSeatmapTemplates();
 
-window.setTimeout(() => {
+runWhenDocumentVisible(() => {
+  render();
+  renderAdminEvent();
+  renderUploadRecords();
+  renderFieldMappingPreview();
+  renderPublishedTables();
+  renderOperationArchives();
+
+  if (!IS_ADMIN_PAGE) {
+    renderReviewPanel();
+  }
+});
+
+window.setTimeout(() => runWhenDocumentVisible(() => {
   loadAppState({ includeArchives: true });
   render();
   renderAdminEvent();
   renderUploadRecords();
-  renderReviewPanel();
   renderFieldMappingPreview();
   renderPublishedTables();
   renderOperationArchives();
   setMode(IS_ADMIN_PAGE ? "admin" : "customer");
-}, 0);
+  runWhenPageIdle(() => renderReviewPanel());
+}), 0);
