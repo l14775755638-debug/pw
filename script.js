@@ -5382,6 +5382,14 @@ function updatePendingTableReviewFlags(table) {
   return table;
 }
 
+function markPendingTableReviewFlagsLightly(table, reason = "大表已生成，请逐页校对") {
+  if (!table) return table;
+  table.needsManualReview = true;
+  table.reviewReasons = uniqueCleanValues([reason, ...(Array.isArray(table.reviewReasons) ? table.reviewReasons : [])]);
+  table.reviewFlagsVersion = REVIEW_FLAGS_VERSION;
+  return table;
+}
+
 function ensurePendingTableReviewFlags(table) {
   if (!table) return table;
   repairMisreadDataHeaderTable(table);
@@ -8719,8 +8727,8 @@ async function refreshAiStatus() {
   zoneMarkingStatus.textContent = describeRecognitionStatus();
 }
 
-function renderUploadRecords() {
-  normalizePendingTablesInMemory({ save: true });
+function renderUploadRecords({ save = true } = {}) {
+  normalizePendingTablesInMemory({ save });
   const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
   const repairedTables = allCurrentPending.filter((table) => table._columnRepairChanged);
   if (repairedTables.length) {
@@ -10149,12 +10157,17 @@ async function publishUploadInner() {
   searchInput.value = "";
   setUploadStatus(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，已自动跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。校对确认后才会发布给客户。`, "success");
   showToast(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。`, "success");
-  renderUploadRecords();
-  renderReviewPanel();
+  renderUploadRecords({ save: false });
+  reviewTitle.textContent = "待确认表已生成";
+  confirmReviewButton.disabled = true;
+  reviewLayout.innerHTML = `<div class="empty-state">已生成 ${tables.length} 张待确认表。为避免大 PDF 卡住页面，请从上方待确认列表点“打开这一页”逐页校对。</div>`;
   renderPublishedTables();
   renderAdminEvent();
-  saveAndArchiveAppStep(`生成待确认表：${uploadedSource?.name || uploadTableTitle.value || currentEvent.name}`, "生成待确认");
   uploadRecords.scrollIntoView({ behavior: "smooth", block: "start" });
+  runWhenPageIdle(() => {
+    renderUploadRecords({ save: false });
+    saveAndArchiveAppStep(`生成待确认表：${uploadedSource?.name || uploadTableTitle.value || currentEvent.name}`, "生成待确认");
+  }, 5000);
 }
 
 function hasAnyRowColorAnalysis(rowColorAnalyses) {
@@ -10307,6 +10320,9 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
     const colorAnalysis = colorAnalyses[String(sourcePage)] || colorAnalyses[sourcePage] || null;
     if (colorAnalysis) {
       applyOpenCvRowColorsToTable(table, colorAnalysis, 0);
+    }
+    if ((table.rows || []).length > 250) {
+      return markPendingTableReviewFlagsLightly(table);
     }
     return updatePendingTableReviewFlags(table);
   });
