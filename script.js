@@ -1,4 +1,4 @@
-const REVIEW_FLAGS_VERSION = 31;
+const REVIEW_FLAGS_VERSION = 32;
 const ROW_COLOR_LOGIC_VERSION = 55;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
@@ -5353,6 +5353,26 @@ function analyzePendingTableRisk(table) {
   };
 }
 
+function analyzePendingTableRiskLightly(table) {
+  const reasons = [];
+  const columns = table.columns || [];
+  const rows = table.rows || [];
+  const dateIndex = findColumnIndex(columns, ["日期", "演出日期", "date", "day", "일자"]);
+  const zoneIndex = findColumnIndex(columns, ["区域", "区", "block", "section", "구역"]);
+  const priceIndex = findColumnIndex(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]);
+
+  if (columns.length < 4) reasons.push("识别到的列数偏少");
+  if (rows.length < 1) reasons.push("没有识别到票源行");
+  if (dateIndex < 0) reasons.push("缺少日期列");
+  if (zoneIndex < 0) reasons.push("缺少区域列");
+  if (priceIndex < 0) reasons.push("缺少售价列");
+
+  return {
+    needsManualReview: reasons.length > 0,
+    reasons,
+  };
+}
+
 function updatePendingTableReviewFlags(table) {
   if (!table) return table;
   repairMisreadDataHeaderTable(table);
@@ -5382,11 +5402,14 @@ function updatePendingTableReviewFlags(table) {
   return table;
 }
 
-function markPendingTableReviewFlagsLightly(table, reason = "大表已生成，请逐页校对") {
+function markPendingTableReviewFlagsLightly(table) {
   if (!table) return table;
+  const risk = analyzePendingTableRiskLightly(table);
+  const forcedReviewReasons = table.returnedForReview ? ["从已发布退回校对"] : [];
   table.lightReviewFlags = true;
-  table.needsManualReview = true;
-  table.reviewReasons = uniqueCleanValues([reason, ...(Array.isArray(table.reviewReasons) ? table.reviewReasons : [])]);
+  delete table._columnRepairChanged;
+  table.needsManualReview = Boolean(risk.needsManualReview || forcedReviewReasons.length);
+  table.reviewReasons = [...forcedReviewReasons, ...risk.reasons.filter((reason) => !forcedReviewReasons.includes(reason))];
   table.reviewFlagsVersion = REVIEW_FLAGS_VERSION;
   return table;
 }
@@ -5400,6 +5423,9 @@ function ensurePendingTableReviewFlags(table) {
     table._columnRepairChanged !== true
   ) {
     return table;
+  }
+  if (table.lightReviewFlags) {
+    return markPendingTableReviewFlagsLightly(table);
   }
   repairMisreadDataHeaderTable(table);
   return updatePendingTableReviewFlags(table);
@@ -5752,6 +5778,7 @@ function makeCompactPendingTable(table) {
     needsManualReview: Boolean(table.needsManualReview),
     reviewReasons: Array.isArray(table.reviewReasons) ? [...table.reviewReasons] : [],
     reviewFlagsVersion: table.reviewFlagsVersion || 0,
+    lightReviewFlags: Boolean(table.lightReviewFlags),
   };
 }
 
@@ -6394,7 +6421,12 @@ function rememberOpenCvSoldTextColorAnchors(table) {
 
 function removeSoldRowsFromTable(table) {
   rememberOpenCvSoldTextColorAnchors(table);
-  const removed = removeRowsFromTable(table, (row, rowIndex) => isUnavailableTicket({ table, row, index: rowIndex }) || isNonTicketFooterRow(table, row));
+  const useLightSoldCleanup = table.lightReviewFlags && !hasOpenCvRowColorPreview(table);
+  const removed = removeRowsFromTable(table, (row, rowIndex) =>
+    useLightSoldCleanup
+      ? row.some((cell) => isSoldText(cell, { strict: true })) || isNonTicketFooterRow(table, row)
+      : isUnavailableTicket({ table, row, index: rowIndex }) || isNonTicketFooterRow(table, row),
+  );
   if (removed) {
     if (table.lightReviewFlags) {
       markPendingTableReviewFlagsLightly(table);
@@ -8732,8 +8764,8 @@ async function refreshAiStatus() {
   zoneMarkingStatus.textContent = describeRecognitionStatus();
 }
 
-function renderUploadRecords({ save = true } = {}) {
-  normalizePendingTablesInMemory({ save });
+function renderUploadRecords({ save = true, normalize = true } = {}) {
+  if (normalize) normalizePendingTablesInMemory({ save });
   const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
   const repairedTables = allCurrentPending.filter((table) => table._columnRepairChanged);
   if (repairedTables.length) {
@@ -10162,7 +10194,7 @@ async function publishUploadInner() {
   searchInput.value = "";
   setUploadStatus(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，已自动跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。校对确认后才会发布给客户。`, "success");
   showToast(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。`, "success");
-  renderUploadRecords({ save: false });
+  renderUploadRecords({ save: false, normalize: false });
   reviewTitle.textContent = "待确认表已生成";
   confirmReviewButton.disabled = true;
   reviewLayout.innerHTML = `<div class="empty-state">已生成 ${tables.length} 张待确认表。为避免大 PDF 卡住页面，请从上方待确认列表点“打开这一页”逐页校对。</div>`;
@@ -10170,7 +10202,7 @@ async function publishUploadInner() {
   renderAdminEvent();
   uploadRecords.scrollIntoView({ behavior: "smooth", block: "start" });
   runWhenPageIdle(() => {
-    renderUploadRecords({ save: false });
+    renderUploadRecords({ save: false, normalize: false });
     saveAndArchiveAppStep(`生成待确认表：${uploadedSource?.name || uploadTableTitle.value || currentEvent.name}`, "生成待确认");
   }, 5000);
 }
