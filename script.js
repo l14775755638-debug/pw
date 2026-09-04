@@ -5384,6 +5384,7 @@ function updatePendingTableReviewFlags(table) {
 
 function markPendingTableReviewFlagsLightly(table, reason = "大表已生成，请逐页校对") {
   if (!table) return table;
+  table.lightReviewFlags = true;
   table.needsManualReview = true;
   table.reviewReasons = uniqueCleanValues([reason, ...(Array.isArray(table.reviewReasons) ? table.reviewReasons : [])]);
   table.reviewFlagsVersion = REVIEW_FLAGS_VERSION;
@@ -5392,7 +5393,6 @@ function markPendingTableReviewFlagsLightly(table, reason = "大表已生成，�
 
 function ensurePendingTableReviewFlags(table) {
   if (!table) return table;
-  repairMisreadDataHeaderTable(table);
   if (
     table.reviewFlagsVersion === REVIEW_FLAGS_VERSION &&
     typeof table.needsManualReview === "boolean" &&
@@ -5401,6 +5401,7 @@ function ensurePendingTableReviewFlags(table) {
   ) {
     return table;
   }
+  repairMisreadDataHeaderTable(table);
   return updatePendingTableReviewFlags(table);
 }
 
@@ -6395,7 +6396,11 @@ function removeSoldRowsFromTable(table) {
   rememberOpenCvSoldTextColorAnchors(table);
   const removed = removeRowsFromTable(table, (row, rowIndex) => isUnavailableTicket({ table, row, index: rowIndex }) || isNonTicketFooterRow(table, row));
   if (removed) {
-    updatePendingTableReviewFlags(table);
+    if (table.lightReviewFlags) {
+      markPendingTableReviewFlagsLightly(table);
+    } else {
+      updatePendingTableReviewFlags(table);
+    }
   }
   return removed;
 }
@@ -10287,6 +10292,8 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
   const isPdf = uploadedSource.type === "application/pdf" || uploadedSource.name.toLowerCase().endsWith(".pdf");
   const uploadTables = isPdf ? mergeParsedTablesByPdfPage(parsedTables) : parsedTables;
   const count = uploadTables.length;
+  const totalUploadRows = uploadTables.reduce((sum, table) => sum + (Array.isArray(table?.rows) ? table.rows.length : 0), 0);
+  const useLightReviewFlags = totalUploadRows > 250 || count > 12;
   const colorAnalyses = hasAnyRowColorAnalysis(rowColorAnalyses)
     ? rowColorAnalyses
     : isPdf
@@ -10321,7 +10328,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
     if (colorAnalysis) {
       applyOpenCvRowColorsToTable(table, colorAnalysis, 0);
     }
-    if ((table.rows || []).length > 250) {
+    if (useLightReviewFlags || (table.rows || []).length > 250) {
       return markPendingTableReviewFlagsLightly(table);
     }
     return updatePendingTableReviewFlags(table);
