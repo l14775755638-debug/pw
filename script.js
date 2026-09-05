@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 32;
-const ROW_COLOR_LOGIC_VERSION = 61;
+const ROW_COLOR_LOGIC_VERSION = 62;
 const MAX_REVIEW_ROWS_RENDERED = 120;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
@@ -5087,6 +5087,36 @@ function getPartialRowColorSourceIndexesFromSequence(table, availableRowCount) {
   return mappedCount > 0 && mappedCount < rows.length ? indexes : [];
 }
 
+function getFirstSourceSequenceIndex(table, aligned) {
+  if (!table || table.rowColorSourceIndexMode !== "sequence") return -1;
+  const sourceIndexes = Array.isArray(aligned?.sourceIndexes) ? aligned.sourceIndexes.map((value) => Number(value)) : [];
+  const validIndexes = sourceIndexes.filter((value) => Number.isInteger(value) && value >= 0);
+  return validIndexes.length ? Math.min(...validIndexes) : -1;
+}
+
+function hasSafeSkippedOpenCvPrefixForSourceSequence(availableRows, firstSourceIndex) {
+  const firstIndex = Math.floor(Number(firstSourceIndex));
+  if (!Number.isInteger(firstIndex) || firstIndex <= 0) return true;
+  const rows = Array.isArray(availableRows) ? availableRows : [];
+  if (rows.length <= firstIndex) return false;
+  const skippedRows = rows.slice(0, firstIndex);
+  if (skippedRows.length !== firstIndex) return false;
+  return skippedRows.every((row) => {
+    const label = getOpenCvItemConflictActionLabel(row) || getOpenCvItemRawColorLabel(row);
+    return label && !isAvailableRowColorLabel(label) && !isOpenCvCellMajorityWhite(row);
+  });
+}
+
+function hasUnsafeSourceSequenceColorPrefix(table, analysis, aligned, availableRows) {
+  if (!table || !analysis || table.rowColorSourceIndexMode !== "sequence") return false;
+  if (!["opencv", "pdf_vector"].includes(analysis.source)) return false;
+  const sequenceNumbers = getVisibleSourceSequenceNumbers(table);
+  if (!sequenceNumbers.length || Math.min(...sequenceNumbers) <= 1) return false;
+  const firstSourceIndex = getFirstSourceSequenceIndex(table, aligned);
+  if (firstSourceIndex <= 0) return false;
+  return !hasSafeSkippedOpenCvPrefixForSourceSequence(availableRows, firstSourceIndex);
+}
+
 function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   const length = table?.rows?.length || 0;
   const rows = Array.isArray(availableRows) ? availableRows.filter(Boolean) : [];
@@ -5183,6 +5213,7 @@ function hasSourceIndexedOpenCvAlignment(table, analysis, aligned, availableRows
   if (!["opencv", "pdf_vector"].includes(analysis.source)) return false;
   if (analysis.contiguous !== true) return false;
   if (Array.isArray(analysis.lowConfidenceRows) && analysis.lowConfidenceRows.length) return false;
+  if (hasUnsafeSourceSequenceColorPrefix(table, analysis, aligned, availableRows)) return false;
   const sourceIndexes = Array.isArray(aligned.sourceIndexes) ? aligned.sourceIndexes.map((value) => Number(value)) : [];
   if (!Array.isArray(table.rows) || sourceIndexes.length !== table.rows.length || aligned.rows?.length !== table.rows.length) return false;
   const availableCount = Array.isArray(availableRows) ? availableRows.length : 0;
@@ -5240,7 +5271,11 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
       : getAlignedOpenCvRowsForTable(table, availableRows, startIndex);
   const assignedRows = aligned.rows;
   const sourceIndexedAlignment = hasSourceIndexedOpenCvAlignment(table, analysis, aligned, availableRows);
-  table.rowColorExactBackendAligned = analysis.exactRowAligned === true || sourceIndexedAlignment;
+  const unsafeSourceSequencePrefix = hasUnsafeSourceSequenceColorPrefix(table, analysis, aligned, availableRows);
+  if (unsafeSourceSequencePrefix && !table.rowColorWarningReasons.includes("source_sequence_prefix_not_verified")) {
+    table.rowColorWarningReasons = [...table.rowColorWarningReasons, "source_sequence_prefix_not_verified"];
+  }
+  table.rowColorExactBackendAligned = (analysis.exactRowAligned === true && !unsafeSourceSequencePrefix) || sourceIndexedAlignment;
   table.rowColorAlignedStart = aligned.startIndex;
   table.rowColorPartialSequenceAligned = aligned.partialSequenceAligned === true;
   table.rowColorPageLabels = uniqueCleanValues(availableRows.map((row) => getOpenCvItemRawColorLabel(row)));
