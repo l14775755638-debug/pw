@@ -1,5 +1,6 @@
-const REVIEW_FLAGS_VERSION = 33;
+const REVIEW_FLAGS_VERSION = 34;
 const ROW_COLOR_LOGIC_VERSION = 62;
+const PUBLISH_DECISION_LOGIC_VERSION = 2;
 const MAX_REVIEW_ROWS_RENDERED = 120;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
@@ -4982,7 +4983,7 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
     if (shouldAutoSkipForRowColor(table, rowIndex)) {
       table.publishRows[rowIndex] = false;
       skipCount += 1;
-    } else if (table.publishRows[rowIndex] === false && table.userEditedRows?.[rowIndex] !== true && isCustomerPublishableTicket(ticket)) {
+    } else if (table.publishRows[rowIndex] === false && table.manualSkipRows?.[rowIndex] !== true && isCustomerPublishableTicket(ticket)) {
       delete table.publishRows[rowIndex];
       releasedCount += 1;
     }
@@ -4998,7 +4999,7 @@ function clearUntrustedRowColorPublishHolds(table) {
   let cleared = 0;
   Object.keys(table.publishRows).forEach((rowIndexText) => {
     const rowIndex = Number(rowIndexText);
-    if (!Number.isInteger(rowIndex) || table.publishRows[rowIndex] !== false || table.userEditedRows?.[rowIndex] === true) return;
+    if (!Number.isInteger(rowIndex) || table.publishRows[rowIndex] !== false || table.manualSkipRows?.[rowIndex] === true) return;
     const ticket = { table, row: table.rows[rowIndex], index: rowIndex };
     if (isSoldTicket(ticket) || !hasTicketSalePrice(ticket) || isNonTicketPlaceholderRow(ticket)) return;
     delete table.publishRows[rowIndex];
@@ -5008,6 +5009,21 @@ function clearUntrustedRowColorPublishHolds(table) {
     table.rowColorAutoApplied = false;
     table.rowColorAutoSkipCount = 0;
   }
+  return cleared;
+}
+
+function clearStalePublishDecisionBlocks(table) {
+  if (!table || !Array.isArray(table.rows) || !table.publishRows) return 0;
+  let cleared = 0;
+  Object.keys(table.publishRows).forEach((rowIndexText) => {
+    const rowIndex = Number(rowIndexText);
+    if (!Number.isInteger(rowIndex) || table.publishRows[rowIndex] !== false) return;
+    if (table.manualSkipRows?.[rowIndex] === true || table.bulkSkipDraft === true) return;
+    const ticket = { table, row: table.rows[rowIndex], index: rowIndex };
+    if (!isCustomerPublishableTicket(ticket)) return;
+    delete table.publishRows[rowIndex];
+    cleared += 1;
+  });
   return cleared;
 }
 
@@ -5342,7 +5358,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
     !hasAnyOpenCvWhiteAndColoredConflict(table)
   ) {
     Object.keys(table.publishRows || {}).forEach((rowIndex) => {
-      if (table.userEditedRows?.[rowIndex] !== true && table.publishRows[rowIndex] === false) delete table.publishRows[rowIndex];
+      if (table.manualSkipRows?.[rowIndex] !== true && table.publishRows[rowIndex] === false) delete table.publishRows[rowIndex];
     });
   }
   const engineName = getRowColorEngineName(table);
@@ -5943,6 +5959,7 @@ function makeCompactPendingTable(table) {
     rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
     publishRows: { ...(table.publishRows || {}) },
     manualPublishRows: { ...(table.manualPublishRows || {}) },
+    manualSkipRows: { ...(table.manualSkipRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
     rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
@@ -5965,6 +5982,7 @@ function makeCompactPendingTable(table) {
     rowColorConfirmed: Boolean(table.rowColorConfirmed),
     rowColorExactRowAligned: Boolean(table.rowColorExactRowAligned),
     rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
+    publishDecisionLogicVersion: Number(table.publishDecisionLogicVersion || 0),
     colorReviewSamples: { ...(table.colorReviewSamples || {}) },
     rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
       ? {
@@ -6013,6 +6031,7 @@ function buildSerializablePendingTables({ compact = false } = {}) {
     rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
     publishRows: { ...(table.publishRows || {}) },
     manualPublishRows: { ...(table.manualPublishRows || {}) },
+    manualSkipRows: { ...(table.manualSkipRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
     aiReviewDecisions: Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions.map((item) => ({ ...item })) : [],
@@ -6027,6 +6046,7 @@ function buildSerializablePendingTables({ compact = false } = {}) {
                 rows: Array.isArray(snapshot.state.rows) ? snapshot.state.rows.map((row) => [...row]) : [],
                 publishRows: { ...(snapshot.state.publishRows || {}) },
                 manualPublishRows: { ...(snapshot.state.manualPublishRows || {}) },
+                manualSkipRows: { ...(snapshot.state.manualSkipRows || {}) },
                 reviewedRows: { ...(snapshot.state.reviewedRows || {}) },
                 userEditedRows: { ...(snapshot.state.userEditedRows || {}) },
                 aiReviewDecisions: Array.isArray(snapshot.state.aiReviewDecisions) ? snapshot.state.aiReviewDecisions.map((item) => ({ ...item })) : [],
@@ -6231,12 +6251,15 @@ function scheduleAppStateSave(delay = 500) {
 function normalizeLoadedPendingTable(table) {
   const loadedRowColorVersion = Number(table?.rowColorLogicVersion || 0);
   const hasStaleRowColorLogic = loadedRowColorVersion !== ROW_COLOR_LOGIC_VERSION;
+  const loadedPublishDecisionVersion = Number(table?.publishDecisionLogicVersion || 0);
+  const hasStalePublishDecisionLogic = loadedPublishDecisionVersion !== PUBLISH_DECISION_LOGIC_VERSION;
   const normalizedTable = {
     ...table,
     columns: Array.isArray(table.columns) ? [...table.columns] : [],
     rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
     publishRows: { ...(table.publishRows || {}) },
     manualPublishRows: { ...(table.manualPublishRows || {}) },
+    manualSkipRows: { ...(table.manualSkipRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
   };
@@ -6247,7 +6270,7 @@ function normalizeLoadedPendingTable(table) {
   }
   if (isVisualRowColorSource(normalizedTable) && hasStaleRowColorLogic) {
     Object.keys(normalizedTable.publishRows || {}).forEach((rowIndex) => {
-      if (normalizedTable.userEditedRows?.[rowIndex] !== true) delete normalizedTable.publishRows[rowIndex];
+      if (normalizedTable.manualSkipRows?.[rowIndex] !== true) delete normalizedTable.publishRows[rowIndex];
     });
     normalizedTable.rowColorSource = "";
     normalizedTable.rowColorReliable = false;
@@ -6268,6 +6291,8 @@ function normalizeLoadedPendingTable(table) {
   normalizedTable.rowColorLogicVersion = Number(normalizedTable.rowColorLogicVersion || 0);
   repairMisreadDataHeaderTable(normalizedTable);
   ensurePendingTableSourceRowIndexes(normalizedTable);
+  if (hasStalePublishDecisionLogic) clearStalePublishDecisionBlocks(normalizedTable);
+  normalizedTable.publishDecisionLogicVersion = PUBLISH_DECISION_LOGIC_VERSION;
   return normalizedTable;
 }
 
@@ -6312,6 +6337,9 @@ function getPendingTableRuntimeSignature(table) {
     Array.isArray(table?.originalColumns) ? table.originalColumns.join("|") : "",
     Array.isArray(table?.rows) ? table.rows.length : 0,
     rowPreview,
+    Number(table?.publishDecisionLogicVersion || 0) || 0,
+    JSON.stringify(table?.publishRows || {}),
+    JSON.stringify(table?.manualSkipRows || {}),
     table?._forceCanonicalDisplay === true ? "canonical" : "original",
   ].join("::");
 }
@@ -6328,7 +6356,10 @@ function getPendingTablesNormalizeCacheKey() {
         Array.isArray(table?.columns) ? table.columns.length : 0,
         Array.isArray(table?.rows) ? table.rows.length : 0,
         Number(table?.rowColorLogicVersion || 0) || 0,
+        Number(table?.publishDecisionLogicVersion || 0) || 0,
         table?.rowColorSource || "",
+        Object.keys(table?.publishRows || {}).length,
+        Object.keys(table?.manualSkipRows || {}).length,
         table?._forceCanonicalDisplay === true ? "canonical" : "raw",
       ].join(":"),
     )
@@ -6620,6 +6651,7 @@ function removeRowsFromTable(table, shouldRemove) {
   const keptOriginalRows = [];
   const nextPublishRows = {};
   const nextManualPublishRows = {};
+  const nextManualSkipRows = {};
   const nextReviewedRows = {};
   const nextUserEditedRows = {};
   const nextRowColorRows = [];
@@ -6637,6 +6669,7 @@ function removeRowsFromTable(table, shouldRemove) {
     }
     if (table.publishRows?.[rowIndex] !== undefined) nextPublishRows[nextIndex] = table.publishRows[rowIndex];
     if (table.manualPublishRows?.[rowIndex] !== undefined) nextManualPublishRows[nextIndex] = table.manualPublishRows[rowIndex];
+    if (table.manualSkipRows?.[rowIndex] !== undefined) nextManualSkipRows[nextIndex] = table.manualSkipRows[rowIndex];
     if (table.reviewedRows?.[rowIndex] !== undefined) nextReviewedRows[nextIndex] = table.reviewedRows[rowIndex];
     if (table.userEditedRows?.[rowIndex] !== undefined) nextUserEditedRows[nextIndex] = table.userEditedRows[rowIndex];
     if (Array.isArray(table.rowColorRows) && table.rowColorRows[rowIndex]) nextRowColorRows[nextIndex] = table.rowColorRows[rowIndex];
@@ -6649,6 +6682,7 @@ function removeRowsFromTable(table, shouldRemove) {
     if (Array.isArray(table.originalRows)) table.originalRows = keptOriginalRows;
     table.publishRows = nextPublishRows;
     table.manualPublishRows = nextManualPublishRows;
+    table.manualSkipRows = nextManualSkipRows;
     table.reviewedRows = nextReviewedRows;
     table.userEditedRows = nextUserEditedRows;
     if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
@@ -9233,6 +9267,7 @@ function cloneReviewState(table) {
     originalRows: Array.isArray(table.originalRows) ? cloneRows(table.originalRows) : [],
     publishRows: { ...(table.publishRows || {}) },
     manualPublishRows: { ...(table.manualPublishRows || {}) },
+    manualSkipRows: { ...(table.manualSkipRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
     aiReviewDecisions: Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions.map((item) => ({ ...item })) : [],
@@ -9240,6 +9275,7 @@ function cloneReviewState(table) {
     colorReviewSamples: { ...(table.colorReviewSamples || {}) },
     rowColorSource: table.rowColorSource || "",
     rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
+    publishDecisionLogicVersion: Number(table.publishDecisionLogicVersion || 0),
     rowColorReliable: Boolean(table.rowColorReliable),
     rowColorConfirmed: Boolean(table.rowColorConfirmed),
     rowColorExactRowAligned: Boolean(table.rowColorExactRowAligned),
@@ -9293,6 +9329,7 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.originalRows = Array.isArray(state.originalRows) && state.originalRows.length ? cloneRows(state.originalRows) : cloneRows(table.rows);
   table.publishRows = { ...(state.publishRows || {}) };
   table.manualPublishRows = { ...(state.manualPublishRows || {}) };
+  table.manualSkipRows = { ...(state.manualSkipRows || {}) };
   table.reviewedRows = { ...(state.reviewedRows || {}) };
   table.userEditedRows = { ...(state.userEditedRows || {}) };
   table.aiReviewDecisions = Array.isArray(state.aiReviewDecisions) ? state.aiReviewDecisions.map((item) => ({ ...item })) : [];
@@ -9300,6 +9337,7 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.colorReviewSamples = { ...(state.colorReviewSamples || {}) };
   table.rowColorSource = state.rowColorSource || "";
   table.rowColorLogicVersion = Number(state.rowColorLogicVersion || 0);
+  table.publishDecisionLogicVersion = Number(state.publishDecisionLogicVersion || 0);
   table.rowColorReliable = Boolean(state.rowColorReliable);
   table.rowColorConfirmed = Boolean(state.rowColorConfirmed);
   table.rowColorExactRowAligned = Boolean(state.rowColorExactRowAligned);
@@ -9377,7 +9415,11 @@ function saveReviewRowPrice(table, rowIndex, value) {
   table.rows[rowIndex][priceIndex] = price;
   syncOriginalRowValue(table, rowIndex, priceIndex, price, { appendMissing: true });
   table.publishRows = table.publishRows || {};
+  table.manualPublishRows = table.manualPublishRows || {};
+  table.manualSkipRows = table.manualSkipRows || {};
   table.publishRows[rowIndex] = true;
+  table.manualPublishRows[rowIndex] = true;
+  delete table.manualSkipRows[rowIndex];
   table.userEditedRows = table.userEditedRows || {};
   table.userEditedRows[rowIndex] = true;
   updatePendingTableReviewFlags(table);
@@ -9466,6 +9508,14 @@ function togglePendingRowSold(table, rowIndex) {
   table.publishRows = table.publishRows || {};
   const nextTicket = { table, row: table.rows[rowIndex], index: rowIndex };
   table.publishRows[rowIndex] = isCustomerPublishableTicket(nextTicket);
+  table.manualPublishRows = table.manualPublishRows || {};
+  table.manualSkipRows = table.manualSkipRows || {};
+  if (table.publishRows[rowIndex] === true) {
+    table.manualPublishRows[rowIndex] = true;
+    delete table.manualSkipRows[rowIndex];
+  } else {
+    delete table.manualPublishRows[rowIndex];
+  }
   markPendingRowReviewed(table, rowIndex);
   updatePendingTableReviewFlags(table);
   refreshReviewAfterRowAction(rowIndex, `标记售卖状态：第 ${rowIndex + 1} 条`, "校对");
@@ -9548,7 +9598,10 @@ function getPendingRowDecisionReason(ticket, { selectedForPublish = false, publi
   }
   if (!hasTicketSalePrice(ticket)) return "缺少有效售价";
   if (selectedForPublish && !publishEligible) return getPendingRowPublishBlockReason(ticket) || "未满足发布条件";
-  if (!selectedForPublish) return "人工选择不发布";
+  if (!selectedForPublish) {
+    if (ticket.table.manualSkipRows?.[ticket.index] === true || ticket.table.bulkSkipDraft === true) return "人工选择不发布";
+    return "历史不发布状态";
+  }
   return "满足发布条件";
 }
 
@@ -9556,11 +9609,17 @@ function togglePendingRowPublish(table, rowIndex) {
   if (!table || !table.rows[rowIndex]) return;
   table.publishRows = table.publishRows || {};
   table.manualPublishRows = table.manualPublishRows || {};
+  table.manualSkipRows = table.manualSkipRows || {};
   const nextPublish = !isPendingRowSelectedForPublish(table, rowIndex);
   if (nextPublish) clearUnavailableMarkersFromRow(table, rowIndex);
   table.publishRows[rowIndex] = nextPublish;
-  if (nextPublish) table.manualPublishRows[rowIndex] = true;
-  else delete table.manualPublishRows[rowIndex];
+  if (nextPublish) {
+    table.manualPublishRows[rowIndex] = true;
+    delete table.manualSkipRows[rowIndex];
+  } else {
+    delete table.manualPublishRows[rowIndex];
+    table.manualSkipRows[rowIndex] = true;
+  }
   table.userEditedRows = table.userEditedRows || {};
   table.userEditedRows[rowIndex] = true;
   markPendingRowReviewed(table, rowIndex);
@@ -9575,9 +9634,15 @@ function setPendingRowPublish(table, rowIndex, shouldPublish) {
   if (shouldPublish) clearUnavailableMarkersFromRow(table, rowIndex);
   table.publishRows = table.publishRows || {};
   table.manualPublishRows = table.manualPublishRows || {};
+  table.manualSkipRows = table.manualSkipRows || {};
   table.publishRows[rowIndex] = Boolean(shouldPublish);
-  if (shouldPublish) table.manualPublishRows[rowIndex] = true;
-  else delete table.manualPublishRows[rowIndex];
+  if (shouldPublish) {
+    table.manualPublishRows[rowIndex] = true;
+    delete table.manualSkipRows[rowIndex];
+  } else {
+    delete table.manualPublishRows[rowIndex];
+    table.manualSkipRows[rowIndex] = true;
+  }
   table.userEditedRows = table.userEditedRows || {};
   table.userEditedRows[rowIndex] = true;
   markPendingRowReviewed(table, rowIndex);
@@ -9591,9 +9656,15 @@ function setPendingRowPublishDraft(table, rowIndex, shouldPublish) {
   if (!table || !table.rows[rowIndex]) return;
   table.publishRows = table.publishRows || {};
   table.manualPublishRows = table.manualPublishRows || {};
+  table.manualSkipRows = table.manualSkipRows || {};
   table.publishRows[rowIndex] = Boolean(shouldPublish);
-  if (shouldPublish) table.manualPublishRows[rowIndex] = true;
-  else delete table.manualPublishRows[rowIndex];
+  if (shouldPublish) {
+    table.manualPublishRows[rowIndex] = true;
+    delete table.manualSkipRows[rowIndex];
+  } else {
+    delete table.manualPublishRows[rowIndex];
+    table.manualSkipRows[rowIndex] = true;
+  }
   renderReviewPanel(rowIndex);
   saveAndArchiveAppStep(`${shouldPublish ? "草稿设为发布" : "草稿设为不发布"}：第 ${rowIndex + 1} 条`, "校对");
 }
@@ -9614,8 +9685,12 @@ function markAllReviewRowsSkipDraft(table) {
   }
   pushReviewSnapshot(table, "全部改为不发布前");
   table.publishRows = table.publishRows || {};
+  table.manualPublishRows = table.manualPublishRows || {};
+  table.manualSkipRows = table.manualSkipRows || {};
   rowIndexes.forEach((rowIndex) => {
     table.publishRows[rowIndex] = false;
+    delete table.manualPublishRows[rowIndex];
+    table.manualSkipRows[rowIndex] = true;
   });
   table.bulkSkipDraft = true;
   table.aiReviewStatus = `已把 ${rowIndexes.length} 条候选票全部改为“不发布”。你可以把少数可上架的票反选成“发布到前台”，最后点右上角“确认并发布”。`;
@@ -9675,12 +9750,16 @@ function keepPendingRows(table, rows) {
   const previousRows = table.rows || [];
   const previousOriginalRows = table.originalRows || [];
   const previousPublishRows = { ...(table.publishRows || {}) };
+  const previousManualPublishRows = { ...(table.manualPublishRows || {}) };
+  const previousManualSkipRows = { ...(table.manualSkipRows || {}) };
   const previousReviewedRows = { ...(table.reviewedRows || {}) };
   const previousUserEditedRows = { ...(table.userEditedRows || {}) };
   const previousRowColorRows = Array.isArray(table.rowColorRows) ? table.rowColorRows : [];
   const previousRowColorSourceIndexes = Array.isArray(table.rowColorSourceIndexes) ? table.rowColorSourceIndexes : [];
   const previousRowColorSourceIndexMode = table.rowColorSourceIndexMode || "";
   const nextPublishRows = {};
+  const nextManualPublishRows = {};
+  const nextManualSkipRows = {};
   const nextReviewedRows = {};
   const nextUserEditedRows = {};
   const nextRowColorRows = [];
@@ -9689,6 +9768,8 @@ function keepPendingRows(table, rows) {
     const sourceIndex = previousRows.findIndex((candidate) => candidate === row);
     if (sourceIndex >= 0) {
       if (previousPublishRows[sourceIndex] !== undefined) nextPublishRows[nextIndex] = previousPublishRows[sourceIndex];
+      if (previousManualPublishRows[sourceIndex] !== undefined) nextManualPublishRows[nextIndex] = previousManualPublishRows[sourceIndex];
+      if (previousManualSkipRows[sourceIndex] !== undefined) nextManualSkipRows[nextIndex] = previousManualSkipRows[sourceIndex];
       if (previousReviewedRows[sourceIndex] !== undefined) nextReviewedRows[nextIndex] = previousReviewedRows[sourceIndex];
       if (previousUserEditedRows[sourceIndex] !== undefined) nextUserEditedRows[nextIndex] = previousUserEditedRows[sourceIndex];
       if (previousRowColorRows[sourceIndex]) nextRowColorRows[nextIndex] = { ...previousRowColorRows[sourceIndex] };
@@ -9699,6 +9780,8 @@ function keepPendingRows(table, rows) {
   table.rows = rows.map((row) => [...row]);
   table.originalRows = originalRows;
   table.publishRows = nextPublishRows;
+  table.manualPublishRows = nextManualPublishRows;
+  table.manualSkipRows = nextManualSkipRows;
   table.reviewedRows = nextReviewedRows;
   table.userEditedRows = nextUserEditedRows;
   if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
@@ -9996,6 +10079,8 @@ function applyReviewAiSuggestions(table) {
   }
   pushReviewSnapshot(table, `应用 AI 建议前：${table.aiReviewInstruction || "未填写规则"}`);
   table.publishRows = table.publishRows || {};
+  table.manualPublishRows = table.manualPublishRows || {};
+  table.manualSkipRows = table.manualSkipRows || {};
   let publishCount = 0;
   let skipCount = 0;
   table.aiReviewDecisions.forEach((decision) => {
@@ -10004,10 +10089,13 @@ function applyReviewAiSuggestions(table) {
     const shouldSkip = decision.action !== "publish" || /已售|疑似|下架|复核/.test(String(decision.status || ""));
     if (shouldSkip) {
       table.publishRows[rowIndex] = false;
+      delete table.manualPublishRows[rowIndex];
+      table.manualSkipRows[rowIndex] = true;
       skipCount += 1;
       return;
     }
     if (table.publishRows[rowIndex] !== false) delete table.publishRows[rowIndex];
+    delete table.manualSkipRows[rowIndex];
     publishCount += 1;
   });
   table.aiReviewStatus = `AI 建议已应用：${skipCount} 条设为不发布，${publishCount} 条建议发布但仍需人工逐条点“发布到前台”。已自动保存历史，可随时恢复。`;
@@ -10044,6 +10132,11 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
     table.reviewFlagsVersion = 0;
   }
   ensurePendingTableReviewFlags(table);
+  if (Number(table.publishDecisionLogicVersion || 0) !== PUBLISH_DECISION_LOGIC_VERSION) {
+    const clearedStaleBlocks = clearStalePublishDecisionBlocks(table);
+    table.publishDecisionLogicVersion = PUBLISH_DECISION_LOGIC_VERSION;
+    if (clearedStaleBlocks > 0) scheduleAppStateSave(0);
+  }
   if (table._columnRepairChanged) {
     delete table._columnRepairChanged;
     scheduleAppStateSave(0);
@@ -10406,12 +10499,14 @@ function clonePublishedTableForPendingReview(table) {
     originalRows: Array.isArray(table.originalRows) && table.originalRows.length ? cloneRows(table.originalRows) : cloneRows(rows),
     publishRows: {},
     manualPublishRows: {},
+    manualSkipRows: {},
     reviewedRows: {},
     userEditedRows: {},
     aiReviewDecisions: [],
     aiReviewStatus: "已从已发布票源退回待确认，请重新校对后再发布。",
     returnedForReview: true,
     needsManualReview: true,
+    publishDecisionLogicVersion: PUBLISH_DECISION_LOGIC_VERSION,
     reviewReasons: ["从已发布退回校对"],
     bulkSkipDraft: false,
   });
