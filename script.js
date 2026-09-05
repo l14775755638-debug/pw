@@ -1,4 +1,4 @@
-const REVIEW_FLAGS_VERSION = 32;
+const REVIEW_FLAGS_VERSION = 33;
 const ROW_COLOR_LOGIC_VERSION = 62;
 const MAX_REVIEW_ROWS_RENDERED = 120;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
@@ -5567,12 +5567,35 @@ function markPendingTableReviewFlagsLightly(table) {
   return table;
 }
 
+function getCachedMissingPriceReviewCount(table) {
+  const reasons = Array.isArray(table?.reviewReasons) ? table.reviewReasons : [];
+  const reason = reasons.find((item) => /缺少售价/.test(String(item || "")));
+  if (!reason) return -1;
+  const count = extractNumber(reason);
+  return Number.isFinite(count) && count !== null ? count : 1;
+}
+
+function getCurrentMissingPriceReviewCount(table) {
+  if (!table || !Array.isArray(table.rows)) return 0;
+  return table.rows
+    .map((row, index) => ({ table, row, index }))
+    .filter((ticket) => !isUnavailableTicket(ticket))
+    .filter((ticket) => !hasTicketSalePrice(ticket)).length;
+}
+
+function hasStaleMissingPriceReviewReason(table) {
+  const cachedCount = getCachedMissingPriceReviewCount(table);
+  if (cachedCount < 0) return false;
+  return cachedCount !== getCurrentMissingPriceReviewCount(table);
+}
+
 function ensurePendingTableReviewFlags(table) {
   if (!table) return table;
   if (
     table.reviewFlagsVersion === REVIEW_FLAGS_VERSION &&
     typeof table.needsManualReview === "boolean" &&
     Array.isArray(table.reviewReasons) &&
+    !hasStaleMissingPriceReviewReason(table) &&
     table._columnRepairChanged !== true
   ) {
     return table;
