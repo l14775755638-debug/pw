@@ -4465,9 +4465,13 @@ function hasOpenCvSparseMappedRedPageSignalForTable(table) {
   return table.rows.some((_, rowIndex) => hasOpenCvSparseMappedRedPageSignal(table, rowIndex));
 }
 
+function isPendingRowManuallyPublished(table, rowIndex) {
+  return table?.manualPublishRows?.[rowIndex] === true && table?.publishRows?.[rowIndex] === true;
+}
+
 function shouldAutoSkipForRowColor(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
-  if (table?.userEditedRows?.[rowIndex] === true && table?.publishRows?.[rowIndex] === true) return false;
+  if (isPendingRowManuallyPublished(table, rowIndex)) return false;
   if ((table.rowColorSource === "opencv" || table.rowColorSource === "pdf_vector") && table.rowColorReliable !== true) return false;
   const item = table.rowColorRows?.[rowIndex];
   const label = getStrictRowLocalOpenCvColorLabel(item);
@@ -5938,6 +5942,7 @@ function makeCompactPendingTable(table) {
     columns: Array.isArray(table.columns) ? [...table.columns] : [],
     rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
     publishRows: { ...(table.publishRows || {}) },
+    manualPublishRows: { ...(table.manualPublishRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
     rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
@@ -6007,6 +6012,7 @@ function buildSerializablePendingTables({ compact = false } = {}) {
     columns: Array.isArray(table.columns) ? [...table.columns] : [],
     rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
     publishRows: { ...(table.publishRows || {}) },
+    manualPublishRows: { ...(table.manualPublishRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
     aiReviewDecisions: Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions.map((item) => ({ ...item })) : [],
@@ -6020,6 +6026,7 @@ function buildSerializablePendingTables({ compact = false } = {}) {
                 columns: Array.isArray(snapshot.state.columns) ? [...snapshot.state.columns] : [],
                 rows: Array.isArray(snapshot.state.rows) ? snapshot.state.rows.map((row) => [...row]) : [],
                 publishRows: { ...(snapshot.state.publishRows || {}) },
+                manualPublishRows: { ...(snapshot.state.manualPublishRows || {}) },
                 reviewedRows: { ...(snapshot.state.reviewedRows || {}) },
                 userEditedRows: { ...(snapshot.state.userEditedRows || {}) },
                 aiReviewDecisions: Array.isArray(snapshot.state.aiReviewDecisions) ? snapshot.state.aiReviewDecisions.map((item) => ({ ...item })) : [],
@@ -6229,6 +6236,7 @@ function normalizeLoadedPendingTable(table) {
     columns: Array.isArray(table.columns) ? [...table.columns] : [],
     rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
     publishRows: { ...(table.publishRows || {}) },
+    manualPublishRows: { ...(table.manualPublishRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
   };
@@ -6512,17 +6520,41 @@ function isSoldText(value, { strict = false } = {}) {
   return new RegExp(`^${explicitPattern.source}$`, "i").test(text);
 }
 
+function getTicketRowsForSoldScan(ticket) {
+  const table = ticket?.table || {};
+  const sources = [];
+  const seenRows = new Set();
+  const add = (row, columns) => {
+    if (!Array.isArray(row) || seenRows.has(row)) return;
+    seenRows.add(row);
+    sources.push({ columns: columns || table.columns || [], row });
+  };
+  add(ticket?.row, table.columns || []);
+  const index = Number.isInteger(ticket?.index) ? ticket.index : -1;
+  if (index >= 0) {
+    add(Array.isArray(table.rows) ? table.rows[index] : null, table.columns || []);
+    add(Array.isArray(table.originalRows) ? table.originalRows[index] : null, table.originalColumns || table.columns || []);
+  }
+  return sources;
+}
+
+function rowSourceHasSoldText(source) {
+  const columns = source?.columns || [];
+  const row = source?.row || [];
+  const statusIndex = findColumnIndex(columns, ["状态", "售卖状态", "销售状态", "status", "是否售出", "售出"]);
+  if (statusIndex >= 0 && isSoldText(row[statusIndex], { strict: true })) return true;
+
+  const noteIndex = findColumnIndex(columns, ["备注", "remark", "note", "标记", "说明"]);
+  if (noteIndex >= 0 && isSoldText(row[noteIndex], { strict: true })) return true;
+
+  const salePriceIndexes = findSalePriceColumnIndexes(columns);
+  if (salePriceIndexes.some((index) => isSoldText(row[index], { strict: true }))) return true;
+
+  return row.some((cell) => isSoldText(cell, { strict: true }));
+}
+
 function isSoldTicket(ticket) {
-  const statusIndex = findColumnIndex(ticket.table.columns, ["状态", "售卖状态", "销售状态", "status", "是否售出", "售出"]);
-  if (statusIndex >= 0 && isSoldText(ticket.row[statusIndex], { strict: true })) return true;
-
-  const noteIndex = findColumnIndex(ticket.table.columns, ["备注", "remark", "note", "标记", "说明"]);
-  if (noteIndex >= 0 && isSoldText(ticket.row[noteIndex], { strict: true })) return true;
-
-  const salePriceIndexes = findSalePriceColumnIndexes(ticket.table.columns || []);
-  if (salePriceIndexes.some((index) => isSoldText(ticket.row[index], { strict: true }))) return true;
-
-  return ticket.row.some((cell) => isSoldText(cell, { strict: true }));
+  return getTicketRowsForSoldScan(ticket).some(rowSourceHasSoldText);
 }
 
 function isColorHeldForReviewTicket(ticket) {
@@ -6549,6 +6581,7 @@ function removeRowsFromTable(table, shouldRemove) {
   const keptRows = [];
   const keptOriginalRows = [];
   const nextPublishRows = {};
+  const nextManualPublishRows = {};
   const nextReviewedRows = {};
   const nextUserEditedRows = {};
   const nextRowColorRows = [];
@@ -6565,6 +6598,7 @@ function removeRowsFromTable(table, shouldRemove) {
       keptOriginalRows[nextIndex] = table.originalRows[rowIndex];
     }
     if (table.publishRows?.[rowIndex] !== undefined) nextPublishRows[nextIndex] = table.publishRows[rowIndex];
+    if (table.manualPublishRows?.[rowIndex] !== undefined) nextManualPublishRows[nextIndex] = table.manualPublishRows[rowIndex];
     if (table.reviewedRows?.[rowIndex] !== undefined) nextReviewedRows[nextIndex] = table.reviewedRows[rowIndex];
     if (table.userEditedRows?.[rowIndex] !== undefined) nextUserEditedRows[nextIndex] = table.userEditedRows[rowIndex];
     if (Array.isArray(table.rowColorRows) && table.rowColorRows[rowIndex]) nextRowColorRows[nextIndex] = table.rowColorRows[rowIndex];
@@ -6576,6 +6610,7 @@ function removeRowsFromTable(table, shouldRemove) {
     table.rows = keptRows;
     if (Array.isArray(table.originalRows)) table.originalRows = keptOriginalRows;
     table.publishRows = nextPublishRows;
+    table.manualPublishRows = nextManualPublishRows;
     table.reviewedRows = nextReviewedRows;
     table.userEditedRows = nextUserEditedRows;
     if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
@@ -9159,6 +9194,7 @@ function cloneReviewState(table) {
     originalColumns: Array.isArray(table.originalColumns) ? [...table.originalColumns] : [],
     originalRows: Array.isArray(table.originalRows) ? cloneRows(table.originalRows) : [],
     publishRows: { ...(table.publishRows || {}) },
+    manualPublishRows: { ...(table.manualPublishRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
     aiReviewDecisions: Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions.map((item) => ({ ...item })) : [],
@@ -9218,6 +9254,7 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.originalColumns = Array.isArray(state.originalColumns) ? [...state.originalColumns] : [...table.columns];
   table.originalRows = Array.isArray(state.originalRows) && state.originalRows.length ? cloneRows(state.originalRows) : cloneRows(table.rows);
   table.publishRows = { ...(state.publishRows || {}) };
+  table.manualPublishRows = { ...(state.manualPublishRows || {}) };
   table.reviewedRows = { ...(state.reviewedRows || {}) };
   table.userEditedRows = { ...(state.userEditedRows || {}) };
   table.aiReviewDecisions = Array.isArray(state.aiReviewDecisions) ? state.aiReviewDecisions.map((item) => ({ ...item })) : [];
@@ -9403,6 +9440,12 @@ function clearSoldMarkersFromRow(table, rowIndex) {
     table.rows[rowIndex][columnIndex] = "";
     syncOriginalRowValue(table, rowIndex, columnIndex, "");
   });
+  if (Array.isArray(table.originalRows) && Array.isArray(table.originalRows[rowIndex])) {
+    table.originalRows[rowIndex].forEach((value, columnIndex) => {
+      if (!isSoldText(value, { strict: true })) return;
+      table.originalRows[rowIndex][columnIndex] = "";
+    });
+  }
   const statusIndex = findColumnIndex(table.columns, ["状态", "售卖状态", "销售状态", "status"]);
   if (statusIndex >= 0 && isSoldText(table.rows[rowIndex][statusIndex], { strict: true })) {
     table.rows[rowIndex][statusIndex] = "";
@@ -9461,9 +9504,12 @@ function getPendingRowPublishBlockReason(ticket) {
 function togglePendingRowPublish(table, rowIndex) {
   if (!table || !table.rows[rowIndex]) return;
   table.publishRows = table.publishRows || {};
+  table.manualPublishRows = table.manualPublishRows || {};
   const nextPublish = !isPendingRowSelectedForPublish(table, rowIndex);
   if (nextPublish) clearUnavailableMarkersFromRow(table, rowIndex);
   table.publishRows[rowIndex] = nextPublish;
+  if (nextPublish) table.manualPublishRows[rowIndex] = true;
+  else delete table.manualPublishRows[rowIndex];
   table.userEditedRows = table.userEditedRows || {};
   table.userEditedRows[rowIndex] = true;
   markPendingRowReviewed(table, rowIndex);
@@ -9477,7 +9523,10 @@ function setPendingRowPublish(table, rowIndex, shouldPublish) {
   if (!table || !table.rows[rowIndex]) return;
   if (shouldPublish) clearUnavailableMarkersFromRow(table, rowIndex);
   table.publishRows = table.publishRows || {};
+  table.manualPublishRows = table.manualPublishRows || {};
   table.publishRows[rowIndex] = Boolean(shouldPublish);
+  if (shouldPublish) table.manualPublishRows[rowIndex] = true;
+  else delete table.manualPublishRows[rowIndex];
   table.userEditedRows = table.userEditedRows || {};
   table.userEditedRows[rowIndex] = true;
   markPendingRowReviewed(table, rowIndex);
@@ -9490,7 +9539,10 @@ function setPendingRowPublish(table, rowIndex, shouldPublish) {
 function setPendingRowPublishDraft(table, rowIndex, shouldPublish) {
   if (!table || !table.rows[rowIndex]) return;
   table.publishRows = table.publishRows || {};
+  table.manualPublishRows = table.manualPublishRows || {};
   table.publishRows[rowIndex] = Boolean(shouldPublish);
+  if (shouldPublish) table.manualPublishRows[rowIndex] = true;
+  else delete table.manualPublishRows[rowIndex];
   renderReviewPanel(rowIndex);
   saveAndArchiveAppStep(`${shouldPublish ? "草稿设为发布" : "草稿设为不发布"}：第 ${rowIndex + 1} 条`, "校对");
 }
@@ -10300,6 +10352,7 @@ function clonePublishedTableForPendingReview(table) {
     originalColumns: Array.isArray(table.originalColumns) ? [...table.originalColumns] : Array.isArray(table.columns) ? [...table.columns] : [],
     originalRows: Array.isArray(table.originalRows) && table.originalRows.length ? cloneRows(table.originalRows) : cloneRows(rows),
     publishRows: {},
+    manualPublishRows: {},
     reviewedRows: {},
     userEditedRows: {},
     aiReviewDecisions: [],
