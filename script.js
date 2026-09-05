@@ -525,6 +525,7 @@ const OPERATION_ARCHIVE_KEY = "ticket-admin-operation-archives-v1";
 const MAX_OPERATION_ARCHIVES = 12;
 const MAX_OPERATION_ARCHIVE_PENDING_TABLES = 80;
 const MAX_OPERATION_ARCHIVE_STORAGE_CHARS = 6 * 1024 * 1024;
+const MAX_UPLOAD_DRAFT_STORAGE_CHARS = 240 * 1024;
 let eventDraftHistory = { artists: [], cities: [], venues: [] };
 let operationArchives = [];
 let manualReviewOnly = false;
@@ -2042,14 +2043,15 @@ async function recognizeTicketSource(file, detectedTables) {
   stopTicketOcrPolling();
   lastTicketOcrJobSnapshot = null;
   renderFailedOcrPanel(null);
-  const dataUrl = await readFileAsDataUrl(file);
+  const sourceUrl = uploadedSource?.sourceFile === file ? uploadedSource.url || "" : uploadedSource?.url || "";
+  const dataUrl = String(sourceUrl || "").startsWith("uploads/") ? "" : await readFileAsDataUrl(file);
   const estimatedPages = Math.max(detectedTables || 1, 1);
   setUploadStatus(`正在创建批量识别任务，预计处理整份 PDF（约 ${estimatedPages} 页）...`, "loading");
   pdfDetectionStatus.textContent = `PDF 约 ${estimatedPages} 页，正在创建完整批量 OCR 任务。`;
   const response = await fetch("/api/tables/recognize/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file: dataUrl, fileName: file.name, detectedPages: detectedTables }),
+    body: JSON.stringify({ file: dataUrl, sourceUrl, fileName: file.name, detectedPages: detectedTables }),
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.message || result.error || "PDF 批量识别任务创建失败。");
@@ -5565,12 +5567,23 @@ function readFileAsDataUrl(file) {
   });
 }
 
-async function saveUploadedSourceFile(file, dataUrl) {
-  const response = await fetch("/api/source/save", {
+async function saveUploadedSourceFile(file, dataUrl = "") {
+  let response = await fetch("/api/source/save", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file: dataUrl, fileName: file.name }),
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+      "X-File-Name": encodeURIComponent(file.name || "source"),
+      "X-File-Type": file.type || "",
+    },
+    body: file,
   });
+  if (!response.ok && dataUrl) {
+    response = await fetch("/api/source/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file: dataUrl, fileName: file.name }),
+    });
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.message || payload.error || "原始文件保存失败。");
   return payload.url;
@@ -5712,6 +5725,8 @@ function compactLargeStateBeforeSave() {
 }
 
 function buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource, options = {}) {
+  const uploadDraftText = String(uploadTableText.value || "");
+  const shouldStoreUploadDraft = !options.omitLargeDrafts && uploadDraftText.length <= MAX_UPLOAD_DRAFT_STORAGE_CHARS;
   return {
     events: serializableEvents,
     currentEventId: currentEvent.id,
@@ -5724,9 +5739,10 @@ function buildSerializableAppState(serializableEvents, serializablePendingTables
     uploadedSource: serializableUploadedSource,
     uploadDraft: {
       tableTitle: uploadTableTitle.value,
-      tableText: options.omitLargeDrafts ? "" : uploadTableText.value,
-      status: options.omitLargeDrafts ? "" : uploadStatus.textContent,
-      pdfStatus: options.omitLargeDrafts ? "" : pdfDetectionStatus.textContent,
+      tableText: shouldStoreUploadDraft ? uploadDraftText : "",
+      status: shouldStoreUploadDraft ? uploadStatus.textContent : "",
+      pdfStatus: shouldStoreUploadDraft ? pdfDetectionStatus.textContent : "",
+      omittedLargeDraft: !shouldStoreUploadDraft && Boolean(uploadDraftText),
     },
   };
 }
@@ -6191,6 +6207,10 @@ function loadAppState({ includeArchives = true } = {}) {
       uploadTableText.value = parsed.uploadDraft.tableText || "";
       uploadStatus.textContent = parsed.uploadDraft.status || uploadStatus.textContent;
       pdfDetectionStatus.textContent = parsed.uploadDraft.pdfStatus || pdfDetectionStatus.textContent;
+      if (parsed.uploadDraft.omittedLargeDraft) {
+        uploadStatus.textContent = "上次 OCR 草稿过大，未写入浏览器缓存以避免刷新白屏；请从待确认表继续，或重新识别原文件。";
+        uploadStatus.dataset.status = "idle";
+      }
       if (uploadedSource?.name) {
         selectedSourceName.textContent = `已恢复：${getSelectedFileDisplayName(uploadedSource.name)}`;
         selectedSourceName.title = decodePossiblyEncodedFileName(uploadedSource.name);
@@ -12136,21 +12156,25 @@ sourceFileInput.addEventListener("change", async () => {
     return;
   }
   stopTicketOcrPolling();
-  const dataUrl = await readFileAsDataUrl(file);
-  let stableUrl = dataUrl;
+  const isSpreadsheet = isSpreadsheetFile(file);
+  let dataUrl = isSpreadsheet ? await readFileAsDataUrl(file) : "";
+  let stableUrl = "";
   try {
     stableUrl = await saveUploadedSourceFile(file, dataUrl);
   } catch (error) {
     showToast(error.message || "原始文件保存失败，将临时保存在浏览器。", "error");
+    dataUrl = dataUrl || (await readFileAsDataUrl(file));
+    stableUrl = dataUrl;
   }
   uploadedSource = {
     name: file.name,
     type: file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : isSpreadsheetFile(file) ? "text/csv" : "image/*"),
     url: stableUrl,
     dataUrl: String(stableUrl || "").startsWith("uploads/") ? "" : dataUrl,
+    sourceFile: file,
     detectedTables: 1,
   };
-  if (isSpreadsheetFile(file)) {
+  if (isSpreadsheet) {
     try {
       setUploadStatus("正在读取表格，准备字段映射预览...", "loading");
       showToast("正在读取表格...", "loading");

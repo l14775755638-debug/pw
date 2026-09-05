@@ -114,6 +114,24 @@ function readBody(request) {
   });
 }
 
+function readRawBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    request.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > 220 * 1024 * 1024) {
+        reject(new Error("Payload too large"));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => resolve(Buffer.concat(chunks)));
+    request.on("error", reject);
+  });
+}
+
 function runFile(command, args) {
   return new Promise((resolve, reject) => {
     execFile(command, args, { timeout: 120000 }, (error, stdout, stderr) => {
@@ -159,6 +177,14 @@ function safeFileStem(fileName) {
     .slice(0, 80) || "source";
 }
 
+function decodeHeaderValue(value, fallback = "") {
+  try {
+    return decodeURIComponent(String(value || fallback));
+  } catch {
+    return String(value || fallback);
+  }
+}
+
 function ensureUploadStorageDirs() {
   fs.mkdirSync(uploadSourceDir, { recursive: true });
   fs.mkdirSync(uploadBackupDir, { recursive: true });
@@ -181,10 +207,25 @@ function getReadableUploadPath(sourceUrl) {
 }
 
 async function saveSourceFile(request, response) {
-  const raw = await readBody(request);
-  const payload = JSON.parse(raw || "{}");
-  const { mimeType, buffer } = dataUrlToBuffer(payload.file || payload.dataUrl || "");
-  const fileName = String(payload.fileName || "source");
+  const contentType = String(request.headers["content-type"] || "");
+  let mimeType = contentType.split(";")[0] || "application/octet-stream";
+  let buffer;
+  let fileName = decodeHeaderValue(request.headers["x-file-name"], "source");
+  if (contentType.includes("application/json")) {
+    const raw = await readBody(request);
+    const payload = JSON.parse(raw || "{}");
+    const parsed = dataUrlToBuffer(payload.file || payload.dataUrl || "");
+    mimeType = parsed.mimeType;
+    buffer = parsed.buffer;
+    fileName = String(payload.fileName || "source");
+  } else {
+    buffer = await readRawBody(request);
+    mimeType = String(request.headers["x-file-type"] || mimeType || getMimeForExtension(fileName));
+  }
+  if (!buffer?.length) {
+    sendJson(response, 400, { error: "Missing file", message: "没有读到上传文件，请重新选择。" });
+    return;
+  }
   ensureUploadStorageDirs();
   const savedName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeFileStem(fileName)}${getExtensionForMime(mimeType, fileName)}`;
   const filePath = path.join(uploadSourceDir, savedName);
@@ -860,12 +901,14 @@ function getPdfPageCountFromBuffer(buffer) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-pdf-info-"));
   const pdfPath = path.join(tempDir, "source.pdf");
   fs.writeFileSync(pdfPath, buffer);
-  return runFile(pdfinfoPath, [pdfPath])
-    .then(({ stdout }) => {
-      const match = stdout.match(/^Pages:\s*(\d+)/m);
-      return Math.max(1, Number(match?.[1] || 1));
-    })
+  return getPdfPageCountFromPath(pdfPath)
     .finally(() => fs.rm(tempDir, { recursive: true, force: true }, () => {}));
+}
+
+async function getPdfPageCountFromPath(pdfPath) {
+  const { stdout } = await runFile(pdfinfoPath, [pdfPath]);
+  const match = stdout.match(/^Pages:\s*(\d+)/m);
+  return Math.max(1, Number(match?.[1] || 1));
 }
 
 function getRequestedTicketOcrPages(value, fallback) {
@@ -914,6 +957,25 @@ async function renderPdfPageToImage(pdfDataUrl, pageNumber = 1) {
   const outputPrefix = path.join(tempDir, "page");
   const page = Math.max(1, Math.floor(Number(pageNumber) || 1));
   fs.writeFileSync(pdfPath, buffer);
+  try {
+    await runFile(pdftoppmPath, ["-jpeg", "-r", "150", "-f", String(page), "-l", String(page), pdfPath, outputPrefix]);
+    const sharp = require(path.join(nodeModuleRoot, "sharp"));
+    const file = fs
+      .readdirSync(tempDir)
+      .filter((name) => /^page-\d+\.jpg$/.test(name))
+      .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]))[0];
+    if (!file) return "";
+    const compressed = await sharp(path.join(tempDir, file)).resize({ width: 1600, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+    return `data:image/jpeg;base64,${compressed.toString("base64")}`;
+  } finally {
+    fs.rm(tempDir, { recursive: true, force: true }, () => {});
+  }
+}
+
+async function renderPdfPagePathToImage(pdfPath, pageNumber = 1) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-pdf-page-"));
+  const outputPrefix = path.join(tempDir, "page");
+  const page = Math.max(1, Math.floor(Number(pageNumber) || 1));
   try {
     await runFile(pdftoppmPath, ["-jpeg", "-r", "150", "-f", String(page), "-l", String(page), pdfPath, outputPrefix]);
     const sharp = require(path.join(nodeModuleRoot, "sharp"));
@@ -1223,44 +1285,45 @@ async function recognizeTicketPageTextWithCompletenessCheck(item) {
   return { text, recognizedRows, visualAnalysis };
 }
 
-async function runTicketOcrBatch(job, file, maxPages) {
+async function runTicketOcrBatch(job, source, maxPages) {
   let pdfVectorTempDir = "";
   try {
-    const { buffer } = dataUrlToBuffer(file);
-    pdfVectorTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-ocr-pdf-vector-"));
-    const pdfVectorPath = path.join(pdfVectorTempDir, "source.pdf");
-    fs.writeFileSync(pdfVectorPath, buffer);
-    job.totalPages = await getPdfPageCountFromBuffer(buffer).catch(() => Number(maxPages) || 1);
+    let pdfVectorPath = source.sourcePath || "";
+    if (!pdfVectorPath) {
+      const { buffer } = dataUrlToBuffer(source.dataUrl);
+      pdfVectorTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-ocr-pdf-vector-"));
+      pdfVectorPath = path.join(pdfVectorTempDir, "source.pdf");
+      fs.writeFileSync(pdfVectorPath, buffer);
+    }
+    job.totalPages = await getPdfPageCountFromPath(pdfVectorPath).catch(() => Number(maxPages) || 1);
     const requestedPages = Number.isFinite(Number(maxPages)) && Number(maxPages) > 0 ? Number(maxPages) : job.totalPages;
     const pagesToRender = getRequestedTicketOcrPages(Math.min(requestedPages, job.totalPages), job.totalPages);
     job.pagesQueued = pagesToRender;
     const limitText = pagesToRender < job.totalPages ? formatTicketOcrPageLimit() : "";
-    job.message = `正在把 PDF 转成 ${pagesToRender}/${job.totalPages} 张图片${limitText}...`;
-    const images = await renderPdfPagesToImages(file, pagesToRender);
-    if (!images.length) {
-      job.status = "error";
-      job.message = "PDF 页面渲染失败，请换一个 PDF 再试。";
-      return;
-    }
-
+    job.message = `正在逐页读取 PDF，共 ${pagesToRender}/${job.totalPages} 页${limitText}...`;
+    const pages = Array.from({ length: pagesToRender }, (_, index) => index + 1);
     let cursor = 0;
     job.status = "running";
-    job.message = `正在批量识别 0/${images.length} 页...`;
-    const workers = Array.from({ length: Math.min(batchOcrConcurrency, images.length) }, async () => {
-      while (cursor < images.length) {
-        const item = { ...images[cursor], pdfPath: pdfVectorPath };
+    job.message = `正在批量识别 0/${pages.length} 页...`;
+    const workers = Array.from({ length: Math.min(batchOcrConcurrency, pages.length) }, async () => {
+      while (cursor < pages.length) {
+        const page = pages[cursor];
         cursor += 1;
+        let image = "";
         try {
+          image = await renderPdfPagePathToImage(pdfVectorPath, page);
+          if (!image) throw new Error("PDF 页面渲染失败，请换一个 PDF 再试。");
+          const item = { page, image, pdfPath: pdfVectorPath };
           const result = await recognizeTicketPageWithRetry(item, job);
           if (result.text) job.results.push(result);
         } catch (error) {
-          job.failedImages[item.page] = item.image;
-          job.errors.push({ page: item.page, message: formatErrorMessage(error) });
+          if (image) job.failedImages[page] = image;
+          job.errors.push({ page, message: formatErrorMessage(error) });
         } finally {
           job.pagesProcessed += 1;
           const success = job.results.filter((result) => result.text).length;
           const failed = job.errors.length;
-          job.message = `正在批量识别 ${job.pagesProcessed}/${images.length} 页，已读到 ${success} 页${failed ? `，失败 ${failed} 页` : ""}...`;
+          job.message = `正在批量识别 ${job.pagesProcessed}/${pages.length} 页，已读到 ${success} 页${failed ? `，失败 ${failed} 页` : ""}...`;
         }
       }
     });
@@ -1728,9 +1791,12 @@ async function startTicketOcrJob(request, response) {
   const raw = await readBody(request);
   const payload = JSON.parse(raw || "{}");
   const file = String(payload.file || "");
+  const sourceUrl = String(payload.sourceUrl || "");
   const fileName = String(payload.fileName || "票源文件");
   const maxPages = Number(payload.maxPages || 0) > 0 ? getRequestedTicketOcrPages(payload.maxPages, Number(payload.maxPages)) : null;
-  if (!file.startsWith("data:application/pdf")) {
+  const sourcePath = sourceUrl.startsWith("uploads/") ? getReadableUploadPath(sourceUrl) : "";
+  const sourceIsPdf = sourcePath ? getMimeForExtension(sourcePath) === "application/pdf" : file.startsWith("data:application/pdf");
+  if (!sourceIsPdf) {
     sendJson(response, 400, { error: "Only PDF OCR is supported here", message: "批量 OCR 当前只处理 PDF。" });
     return;
   }
@@ -1750,7 +1816,7 @@ async function startTicketOcrJob(request, response) {
     finishedAt: null,
   };
   ticketOcrJobs.set(id, job);
-  runTicketOcrBatch(job, file, maxPages);
+  runTicketOcrBatch(job, { sourcePath, dataUrl: file }, maxPages);
   sendJson(response, 202, publicTicketOcrJob(job));
 }
 
