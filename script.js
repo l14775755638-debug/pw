@@ -6524,18 +6524,56 @@ function getTicketRowsForSoldScan(ticket) {
   const table = ticket?.table || {};
   const sources = [];
   const seenRows = new Set();
-  const add = (row, columns) => {
+  const currentSource = { columns: table.columns || [], row: ticket?.row || [] };
+  const add = (row, columns, requireMatch = false) => {
     if (!Array.isArray(row) || seenRows.has(row)) return;
+    const source = { columns: columns || table.columns || [], row };
+    if (requireMatch && !soldScanRowMatchesCurrentSource(currentSource, source)) return;
     seenRows.add(row);
-    sources.push({ columns: columns || table.columns || [], row });
+    sources.push(source);
   };
   add(ticket?.row, table.columns || []);
   const index = Number.isInteger(ticket?.index) ? ticket.index : -1;
   if (index >= 0) {
     add(Array.isArray(table.rows) ? table.rows[index] : null, table.columns || []);
-    add(Array.isArray(table.originalRows) ? table.originalRows[index] : null, table.originalColumns || table.columns || []);
+    add(Array.isArray(table.originalRows) ? table.originalRows[index] : null, table.originalColumns || table.columns || [], true);
   }
   return sources;
+}
+
+function getSoldScanSourceValue(source, names) {
+  const index = findColumnIndex(source?.columns || [], names);
+  return index >= 0 ? String(source.row?.[index] || "").trim() : "";
+}
+
+function soldScanRowMatchesCurrentSource(currentSource, candidateSource) {
+  const currentRow = currentSource?.row || [];
+  const candidateRow = candidateSource?.row || [];
+  const currentSerial = getSoldScanSourceValue(currentSource, ["序号", "编号", "no", "id"]);
+  const candidateSerial = getSoldScanSourceValue(candidateSource, ["序号", "编号", "no", "id"]);
+  if (currentSerial && candidateSerial) return normalize(currentSerial) === normalize(candidateSerial);
+
+  const checks = [
+    [["日期", "演出日期", "date", "day", "일자"], (value) => getDateKeysFromText(value)[0] || normalize(value)],
+    [["区域", "区", "block", "section", "구역"], (value) => cleanZoneToken(value)],
+    [["排", "排数", "行", "行数", "row", "열"], (value) => normalize(extractSeatRowFromText(value, { allowBareRange: true }) || value)],
+    [["座位号", "座位", "号段", "号码", "seat", "번호", "좌석번호"], (value) => normalize(extractSeatNumberFromText(value, { allowBareRange: true }) || value)],
+  ];
+  let compared = 0;
+  let matched = 0;
+  checks.forEach(([names, normalizeValue]) => {
+    const currentValue = normalizeValue(getSoldScanSourceValue(currentSource, names));
+    const candidateValue = normalizeValue(getSoldScanSourceValue(candidateSource, names));
+    if (!currentValue || !candidateValue) return;
+    compared += 1;
+    if (currentValue === candidateValue) matched += 1;
+  });
+  if (compared >= 2) return matched >= 2;
+
+  const currentTokens = new Set(currentRow.map((cell) => normalize(cell)).filter((cell) => cell && !isSoldText(cell, { strict: true })));
+  const candidateTokens = candidateRow.map((cell) => normalize(cell)).filter((cell) => cell && !isSoldText(cell, { strict: true }));
+  const overlap = candidateTokens.filter((token) => currentTokens.has(token)).length;
+  return overlap >= 3;
 }
 
 function rowSourceHasSoldText(source) {
@@ -9501,6 +9539,19 @@ function getPendingRowPublishBlockReason(ticket) {
   return "";
 }
 
+function getPendingRowDecisionReason(ticket, { selectedForPublish = false, publishEligible = false } = {}) {
+  if (!ticket?.table || !ticket.table.rows?.[ticket.index]) return "票源行不存在";
+  if (isSoldTicket(ticket)) return "文字 SOLD/已售 下架";
+  if (isColorHeldForReviewTicket(ticket)) {
+    const label = getWhiteVsColoredConflictLabel(ticket.table, ticket.index) || getTicketRowColorLabel(ticket) || "非白底";
+    return `颜色${label}下架`;
+  }
+  if (!hasTicketSalePrice(ticket)) return "缺少有效售价";
+  if (selectedForPublish && !publishEligible) return getPendingRowPublishBlockReason(ticket) || "未满足发布条件";
+  if (!selectedForPublish) return "人工选择不发布";
+  return "满足发布条件";
+}
+
 function togglePendingRowPublish(table, rowIndex) {
   if (!table || !table.rows[rowIndex]) return;
   table.publishRows = table.publishRows || {};
@@ -10093,6 +10144,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
       const soldLike = isSoldTicket(ticket);
       const colorHeld = !soldLike && isColorHeldForReviewTicket(ticket);
       const publishBlockReason = selectedForPublish && !publishEligible ? getPendingRowPublishBlockReason(ticket) : "";
+      const decisionReason = getPendingRowDecisionReason(ticket, { selectedForPublish, publishEligible });
       const zoneUnmatched =
         !soldLike &&
         currentEvent.zones.length > 0 &&
@@ -10137,6 +10189,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
           </div>
           ${missingPrice ? `<div class="review-ticket-warning">缺少售价：请对照左侧原图补上售价，保存后再决定是否发布。</div>${priceEditor}` : ""}
           ${publishBlockReason ? `<div class="review-ticket-warning">已记录“发布到前台”，但暂不能发布：${escapeHtml(publishBlockReason)}</div>` : ""}
+          ${!shouldPublish ? `<div class="review-ticket-warning">当前原因：${escapeHtml(decisionReason)}</div>` : ""}
           ${zoneUnmatched ? `<div class="review-ticket-warning">区域未匹配座位图热区：请检查“区域”是否识别错字，或到座位图热区里补这个区。</div>` : ""}
           ${
             aiDecision
