@@ -6970,6 +6970,19 @@ function getExplicitCurrencySalePriceFromFields(fields = []) {
     .find(Boolean) || "";
 }
 
+function getVisibleTicketSalePriceValue(ticket) {
+  const directValue = getTicketSalePriceValue(ticket);
+  if (directValue) return directValue;
+  const fields = getOriginalTicketFields(ticket, { preserveOriginal: false });
+  return (
+    fields
+      .map((field) => (isSalePriceColumnName(field.label) ? extractSalePriceText(field.value, { minPrice: 100 }) || field.value : ""))
+      .find(Boolean) ||
+    getExplicitCurrencySalePriceFromFields(fields) ||
+    ""
+  );
+}
+
 function findSalePriceColumnIndex(columns = []) {
   return findPreferredSalePriceColumnIndexes(columns)[0] ?? -1;
 }
@@ -7040,7 +7053,7 @@ function ensureDateColumn(table) {
 }
 
 function hasTicketSalePrice(ticket) {
-  const value = String(getTicketSalePriceValue(ticket) || "").trim();
+  const value = String(getVisibleTicketSalePriceValue(ticket) || "").trim();
   const missingLike = !value || value === "/" || value === "-" || /^无$/i.test(value);
   if (!missingLike && !isSoldText(value, { strict: true }) && extractNumber(value) !== null) return true;
   return Boolean(getExplicitCurrencySalePriceFromTicket(ticket));
@@ -10023,13 +10036,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
       const publishEligible = isCustomerPublishableTicket(ticket);
       const shouldPublish = selectedForPublish && publishEligible;
       const fieldObjects = getOriginalTicketFields(ticket, { preserveOriginal: false });
-      const visibleSalePrice =
-        getTicketSalePriceValue(ticket) ||
-        fieldObjects
-          .map((field) => (isSalePriceColumnName(field.label) ? extractSalePriceText(field.value, { minPrice: 100 }) : ""))
-          .find(Boolean) ||
-        getExplicitCurrencySalePriceFromFields(fieldObjects) ||
-        getExplicitCurrencySalePriceFromTicket(ticket);
+      const visibleSalePrice = getVisibleTicketSalePriceValue(ticket);
       const missingPrice = !visibleSalePrice;
       const soldLike = isSoldTicket(ticket);
       const colorHeld = !soldLike && isColorHeldForReviewTicket(ticket);
