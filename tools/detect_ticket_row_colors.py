@@ -951,6 +951,86 @@ def choose_small_table_rows(rows, expected_rows):
     return None, ""
 
 
+def detect_compact_colored_table_intervals(image, expected_rows):
+    """Recover tiny tables where OCR asks for only a few rows.
+
+    In two-row mini tables, text projection can accidentally select the header
+    plus the white row and miss the colored sold row. Anchor on a strong
+    non-neutral row background in the data area, then infer the neighboring
+    same-height ticket rows.
+    """
+    if expected_rows <= 1 or expected_rows > 3:
+        return [], ""
+    height, width = image.shape[:2]
+    if height < 120 or width < 240:
+        return [], ""
+
+    x1 = int(width * 0.16)
+    x2 = int(width * 0.985)
+    if x2 - x1 < 120:
+        return [], ""
+    region = image[:, x1:x2]
+    masks, non_ink, _ = build_color_masks(region)
+    if not masks:
+        return [], ""
+
+    # Ignore cyan/green title/date panels. The sold markers that users rely on
+    # in these ticket sheets are red/orange/yellow/pink/purple/blue bands.
+    target = np.zeros(non_ink.shape, dtype=bool)
+    for key in ("red", "orange", "yellow", "pink", "purple", "blue"):
+        target |= masks.get(key, np.zeros(non_ink.shape, dtype=bool))
+
+    row_counts = np.count_nonzero(target, axis=1)
+    min_pixels = max(60, int((x2 - x1) * 0.22))
+    ys = np.where(row_counts >= min_pixels)[0]
+    if ys.size < 10:
+        return [], ""
+
+    runs = []
+    for run in merge_runs(ys, gap=4):
+        run_height = int(run[1] - run[0] + 1)
+        if run_height < 18 or run_height > max(140, int(height * 0.55)):
+            continue
+        if int(run[0]) < height * 0.18:
+            continue
+        runs.append((int(run[0]), int(run[1]) + 1))
+    if not runs:
+        return [], ""
+
+    # Use the first strong colored data row. Later colored rows can belong to a
+    # following table on a tall page.
+    anchor_y1, anchor_y2 = runs[0]
+    row_height = anchor_y2 - anchor_y1
+    if row_height < 18:
+        return [], ""
+
+    intervals = []
+    start_y = anchor_y1 - row_height * (expected_rows - 1)
+    if start_y < max(0, height * 0.06):
+        return [], ""
+    for index in range(expected_rows):
+        y1 = int(round(start_y + row_height * index))
+        y2 = int(round(start_y + row_height * (index + 1)))
+        y1 = max(0, min(height - 1, y1))
+        y2 = max(y1 + 9, min(height, y2))
+        band_gray = cv2.cvtColor(image[y1:y2, :], cv2.COLOR_BGR2GRAY)
+        dark_density = float(np.count_nonzero(band_gray < 150)) / max(1, band_gray.size)
+        dark_band = band_gray < 130
+        col_counts = np.count_nonzero(dark_band, axis=0)
+        xs = np.where(col_counts >= max(2, int((y2 - y1) * 0.45)))[0]
+        vertical_runs = [run for run in merge_runs(xs, gap=3) if run[1] - run[0] <= 8]
+        intervals.append(
+            {
+                "y1": int(y1),
+                "y2": int(y2),
+                "height": int(y2 - y1),
+                "darkDensity": round(dark_density, 4),
+                "verticalLines": int(len(vertical_runs)),
+            }
+        )
+    return intervals, "compact_color_anchor_exact"
+
+
 def analyze(image_path, expected_rows=0):
     image = cv2.imread(image_path, cv2.IMREAD_COLOR)
     if image is None:
@@ -962,6 +1042,14 @@ def analyze(image_path, expected_rows=0):
     else:
         selected, selection_mode = choose_data_intervals(intervals, expected_rows)
     rows = [classify_interval(image, interval) for interval in selected]
+    compact_selected, compact_mode = detect_compact_colored_table_intervals(image, expected_rows)
+    if compact_selected:
+        compact_rows = [classify_interval(image, interval) for interval in compact_selected]
+        current_has_color = any(color_family(row) not in ("neutral", "unknown") for row in rows)
+        compact_has_color = any(color_family(row) not in ("neutral", "unknown") for row in compact_rows)
+        compact_exact = len(compact_rows) == expected_rows
+        if compact_exact and compact_has_color and (selection_mode.endswith("prefix") or not current_has_color):
+            selected, selection_mode, rows = compact_selected, compact_mode, compact_rows
     labels = [row["label"] for row in rows if row.get("label")]
     unique_labels = sorted(set(labels))
     if len(rows) <= 1:
@@ -1014,6 +1102,7 @@ def analyze(image_path, expected_rows=0):
         "first_group_drop_1_filtered",
         "first_group_drop_2_filtered",
         "text_projection_split_exact",
+        "compact_color_anchor_exact",
     }
     if selection_mode.startswith("group_") and selection_mode.endswith("_exact"):
         safe_selection_modes.add(selection_mode)
