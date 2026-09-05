@@ -4467,6 +4467,7 @@ function hasOpenCvSparseMappedRedPageSignalForTable(table) {
 
 function shouldAutoSkipForRowColor(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
+  if (table?.userEditedRows?.[rowIndex] === true && table?.publishRows?.[rowIndex] === true) return false;
   if ((table.rowColorSource === "opencv" || table.rowColorSource === "pdf_vector") && table.rowColorReliable !== true) return false;
   const item = table.rowColorRows?.[rowIndex];
   const label = getStrictRowLocalOpenCvColorLabel(item);
