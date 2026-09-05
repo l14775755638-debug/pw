@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 32;
-const ROW_COLOR_LOGIC_VERSION = 60;
+const ROW_COLOR_LOGIC_VERSION = 61;
 const MAX_REVIEW_ROWS_RENDERED = 120;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
