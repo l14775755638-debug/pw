@@ -9425,7 +9425,7 @@ function shouldPublishPendingRow(table, rowIndex) {
   if (!table.publishRows || table.publishRows[rowIndex] === undefined) {
     return isCustomerPublishableTicket(ticket);
   }
-  return table.publishRows[rowIndex] !== false;
+  return table.publishRows[rowIndex] !== false && isCustomerPublishableTicket(ticket);
 }
 
 function togglePendingRowPublish(table, rowIndex) {
