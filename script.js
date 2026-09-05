@@ -9429,10 +9429,26 @@ function shouldPublishPendingRow(table, rowIndex) {
   return table.publishRows[rowIndex] !== false && isCustomerPublishableTicket(ticket);
 }
 
+function isPendingRowSelectedForPublish(table, rowIndex) {
+  if (!table || !table.rows[rowIndex]) return false;
+  if (!table.publishRows || table.publishRows[rowIndex] === undefined) {
+    return shouldPublishPendingRow(table, rowIndex);
+  }
+  return table.publishRows[rowIndex] === true;
+}
+
+function getPendingRowPublishBlockReason(ticket) {
+  if (!ticket?.table || !ticket.table.rows?.[ticket.index]) return "票源行不存在，无法发布。";
+  if (isSoldTicket(ticket)) return "仍被识别为已售，请点修改清掉 SOLD/已售字样，或重新点“发布到前台”。";
+  if (isColorHeldForReviewTicket(ticket)) return "仍被颜色标色下架，请确认这行不是已售后再点“发布到前台”。";
+  if (!hasTicketSalePrice(ticket)) return "缺少有效售价，请先补售价。";
+  return "";
+}
+
 function togglePendingRowPublish(table, rowIndex) {
   if (!table || !table.rows[rowIndex]) return;
   table.publishRows = table.publishRows || {};
-  const nextPublish = !shouldPublishPendingRow(table, rowIndex);
+  const nextPublish = !isPendingRowSelectedForPublish(table, rowIndex);
   if (nextPublish) clearUnavailableMarkersFromRow(table, rowIndex);
   table.publishRows[rowIndex] = nextPublish;
   table.userEditedRows = table.userEditedRows || {};
@@ -10001,9 +10017,11 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   const rows = renderedReviewRows
     .map(({ row, rowIndex }) => {
       const currentRow = table.rows[rowIndex] || row;
-      const shouldPublish = shouldPublishPendingRow(table, rowIndex);
       const aiDecision = aiDecisionByRow.get(rowIndex + 1);
       const ticket = { table, row: currentRow, index: rowIndex };
+      const selectedForPublish = isPendingRowSelectedForPublish(table, rowIndex);
+      const publishEligible = isCustomerPublishableTicket(ticket);
+      const shouldPublish = selectedForPublish && publishEligible;
       const fieldObjects = getOriginalTicketFields(ticket, { preserveOriginal: false });
       const visibleSalePrice =
         getTicketSalePriceValue(ticket) ||
@@ -10015,6 +10033,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
       const missingPrice = !visibleSalePrice;
       const soldLike = isSoldTicket(ticket);
       const colorHeld = !soldLike && isColorHeldForReviewTicket(ticket);
+      const publishBlockReason = selectedForPublish && !publishEligible ? getPendingRowPublishBlockReason(ticket) : "";
       const zoneUnmatched =
         !soldLike &&
         currentEvent.zones.length > 0 &&
@@ -10055,9 +10074,10 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
         <article class="review-ticket-card ${soldLike ? "sold-row" : ""} ${colorHeld ? "color-review-row" : ""} ${missingPrice ? "missing-price" : ""}" data-review-row-index="${rowIndex}">
           <div class="review-ticket-top">
             <strong>第 ${rowIndex + 1} 条票</strong>
-            <span class="${shouldPublish ? "review-ticket-status upload" : "review-ticket-status skip"}">${soldLike ? "已售" : colorHeld ? "颜色标色下架" : shouldPublish ? "会发布到客户前台" : "不会发布"}</span>
+            <span class="${shouldPublish ? "review-ticket-status upload" : "review-ticket-status skip"}">${shouldPublish ? "会发布到客户前台" : selectedForPublish ? "已选择发布，待修正" : soldLike ? "已售" : colorHeld ? "颜色标色下架" : "不会发布"}</span>
           </div>
           ${missingPrice ? `<div class="review-ticket-warning">缺少售价：请对照左侧原图补上售价，保存后再决定是否发布。</div>${priceEditor}` : ""}
+          ${publishBlockReason ? `<div class="review-ticket-warning">已记录“发布到前台”，但暂不能发布：${escapeHtml(publishBlockReason)}</div>` : ""}
           ${zoneUnmatched ? `<div class="review-ticket-warning">区域未匹配座位图热区：请检查“区域”是否识别错字，或到座位图热区里补这个区。</div>` : ""}
           ${
             aiDecision
@@ -10083,8 +10103,8 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
           }
           <div class="review-ticket-actions">
             <div class="publish-choice" role="group" aria-label="是否发布到前台">
-              <button class="choice-button ${shouldPublish ? "active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="true">发布到前台</button>
-              <button class="choice-button ${!shouldPublish ? "danger active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="false">不发布</button>
+              <button class="choice-button ${selectedForPublish ? "active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="true">发布到前台</button>
+              <button class="choice-button ${!selectedForPublish ? "danger active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="false">不发布</button>
             </div>
             <button class="row-action-button" type="button" data-edit-review-row="${rowIndex}">${editing ? "正在修改" : "修改"}</button>
             <button class="row-action-button" type="button" data-toggle-row-sold="${rowIndex}">标已售</button>
