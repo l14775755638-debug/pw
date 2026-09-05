@@ -2200,6 +2200,16 @@ tr.hit-row td {
   text-align: center;
 }
 
+.review-ticket-limit-note {
+  padding: 10px 12px;
+  color: #48666b;
+  font-size: 13px;
+  font-weight: 800;
+  border: 1px solid #bfdde2;
+  border-radius: 8px;
+  background: #f0fbfb;
+}
+
 .review-bulk-actions {
   display: flex;
   flex: 0 0 auto;

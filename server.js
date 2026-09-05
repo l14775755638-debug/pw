@@ -1463,7 +1463,7 @@ async function analyzeTicketRowColors(request, response) {
     if (mimeType === "application/pdf") {
       if (expectedRows) {
         const vectorAnalysis = await analyzeTicketRowColorsFromPdfPath(sourcePath, sourcePage, expectedRows);
-        if (vectorAnalysis.reliable || vectorAnalysis.rows?.length) {
+        if (vectorAnalysis.reliable && vectorAnalysis.exactRowAligned === true) {
           sendJson(response, 200, { rowColorAnalysis: vectorAnalysis });
           return;
         }
@@ -1476,7 +1476,7 @@ async function analyzeTicketRowColors(request, response) {
   if (image.startsWith("data:application/pdf")) {
     if (expectedRows) {
       const vectorAnalysis = await analyzeTicketRowColorsFromPdfDataUrl(image, sourcePage, expectedRows);
-      if (vectorAnalysis.reliable || vectorAnalysis.rows?.length) {
+      if (vectorAnalysis.reliable && vectorAnalysis.exactRowAligned === true) {
         sendJson(response, 200, { rowColorAnalysis: vectorAnalysis });
         return;
       }

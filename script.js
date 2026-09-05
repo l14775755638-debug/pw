@@ -1,5 +1,7 @@
 const REVIEW_FLAGS_VERSION = 32;
-const ROW_COLOR_LOGIC_VERSION = 55;
+const ROW_COLOR_LOGIC_VERSION = 60;
+const MAX_REVIEW_ROWS_RENDERED = 120;
+const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -2523,10 +2525,14 @@ function isSeatPositionColumnName(column = "") {
   return /(票面|门票|座位|座席)?(位置|排数|排|号段|号码|座位号|座号)|seat\s*(position|row|number)|seatmap|座位图|座席图/i.test(String(column || ""));
 }
 
+function isSeatmapImageColumnName(column = "") {
+  return /座位图|座席图|seat\s*map|seatmap/i.test(String(column || ""));
+}
+
 function isSeatLocationColumnName(column = "") {
   const text = normalize(column);
   if (!text) return false;
-  if (/座位图|座席图|seatmap|map/.test(text)) return false;
+  if (isSeatmapImageColumnName(column) || /seatmap|map/.test(text)) return false;
   return /(位置|席位|座位位置|座席位置|票面位置|门票位置|location|seatposition|구역|구|열|좌석)/i.test(String(column || "")) || /^位置$/.test(text);
 }
 
@@ -2989,6 +2995,9 @@ function getSalePriceCandidateFromRow(table, row, { afterIndex = -1, excludeInde
       if (!isSalePriceCandidateValue(value)) return false;
       const protectedColumn = isProtectedNonPriceColumnName(column);
       const hasExplicitCurrencyPrice = /[￥¥$€£₩]/.test(value) && Boolean(extractSalePriceText(value, { minPrice: 100 }));
+      const shiftedPriceInSeatmapColumn =
+        isSeatmapImageColumnName(column) && index >= Math.max(0, row.length - 2) && Boolean(extractSalePriceText(value, { minPrice: 1000 }));
+      if (shiftedPriceInSeatmapColumn) return true;
       if (protectedColumn && !hasExplicitCurrencyPrice && !isSalePriceColumnName(column) && !isRemarkColumnName(column) && !isDeliveryColumnName(column)) {
         return false;
       }
@@ -3913,8 +3922,9 @@ function getBestSalePriceFromRow(table, row) {
     .map((value, index) => ({ value, column: table.columns[index] || "", index }))
     .filter(({ column, value }) => !isInternalColorColumn(column) && !isLikelyRowColorValue(value))
     .filter(({ column }) => !isQuantityColumnName(column))
-    .filter(({ column }) => {
+    .filter(({ column, value, index }) => {
       if (isSalePriceColumnName(column)) return true;
+      if (isSeatmapImageColumnName(column) && index >= Math.max(0, row.length - 2) && extractSalePriceText(value, { minPrice: 1000 })) return true;
       if (isFaceValueColumnName(column) || isProtectedNonPriceColumnName(column)) return false;
       if (isRemarkColumnName(column) || isDeliveryColumnName(column)) return false;
       return true;
@@ -3948,6 +3958,7 @@ function findFallbackSalePriceFromAnyCell(table, row) {
     .filter(({ value, index, column }) => {
       if (!value || ignoredIndexes.has(index) || isInternalColorColumn(column) || isLikelyRowColorValue(value)) return false;
       if (isSoldText(value, { strict: true }) || isLikelyDateValue(value)) return false;
+      if (isSeatmapImageColumnName(column) && index < Math.max(0, row.length - 2)) return false;
       return Boolean(extractSalePriceText(value, { minPrice: 100 }));
     })
     .map((item) => {
@@ -4442,7 +4453,7 @@ function hasOpenCvCurrentRedWhiteFallback(table) {
 }
 
 function hasOpenCvSparseMappedRedPageSignal(table, rowIndex) {
-  if (!table?.rowColorSparseSourceRepair || !table.rowColorPartialSequenceAligned) return false;
+  if (!table?.rowColorSparseSourceRepair || !table.rowColorPartialSequenceAligned || table.rowColorReliable !== true) return false;
   const sourceIndex = Array.isArray(table.rowColorSourceIndexes) ? Number(table.rowColorSourceIndexes[rowIndex]) : -1;
   if (!Number.isInteger(sourceIndex) || sourceIndex < 0) return false;
   const labels = Array.isArray(table.rowColorPageLabels) ? table.rowColorPageLabels : [];
@@ -4456,12 +4467,17 @@ function hasOpenCvSparseMappedRedPageSignalForTable(table) {
 
 function shouldAutoSkipForRowColor(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
+  if ((table.rowColorSource === "opencv" || table.rowColorSource === "pdf_vector") && table.rowColorReliable !== true) return false;
   const item = table.rowColorRows?.[rowIndex];
   const label = getStrictRowLocalOpenCvColorLabel(item);
   if (!label || isAvailableRowColorLabel(label)) return false;
   if (hasOpenCvSoldTextColorAnchor(table)) {
     const anchorState = getOpenCvSoldTextColorAnchorState(table);
     return anchorState.labels.includes(label);
+  }
+  if (hasConfirmedOpenCvWhiteAndColoredConflict(table)) {
+    if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table)) return true;
+    if (hasOpenCvRawColorDifference(table) && isStrongOpenCvNonWhiteColorItem(item)) return true;
   }
   if (!isDefaultAutoSkipColorLabel(label)) return false;
   if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) return true;
@@ -4954,18 +4970,40 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
   if (table.rowColorSource === "ai_row_color") return applyAiRowColorActionDecision(table);
   table.publishRows = table.publishRows || {};
   let skipCount = 0;
+  let releasedCount = 0;
   table.rows.forEach((row, rowIndex) => {
     const ticket = { table, row, index: rowIndex };
     if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
     if (shouldAutoSkipForRowColor(table, rowIndex)) {
       table.publishRows[rowIndex] = false;
       skipCount += 1;
+    } else if (table.publishRows[rowIndex] === false && table.userEditedRows?.[rowIndex] !== true && isCustomerPublishableTicket(ticket)) {
+      delete table.publishRows[rowIndex];
+      releasedCount += 1;
     }
   });
   table.rowColorConfirmed = skipCount > 0;
   table.rowColorAutoApplied = skipCount > 0;
   table.rowColorAutoSkipCount = skipCount;
-  return skipCount;
+  return skipCount + releasedCount;
+}
+
+function clearUntrustedRowColorPublishHolds(table) {
+  if (!table || !Array.isArray(table.rows) || !table.publishRows) return 0;
+  let cleared = 0;
+  Object.keys(table.publishRows).forEach((rowIndexText) => {
+    const rowIndex = Number(rowIndexText);
+    if (!Number.isInteger(rowIndex) || table.publishRows[rowIndex] !== false || table.userEditedRows?.[rowIndex] === true) return;
+    const ticket = { table, row: table.rows[rowIndex], index: rowIndex };
+    if (isSoldTicket(ticket) || !hasTicketSalePrice(ticket) || isNonTicketPlaceholderRow(ticket)) return;
+    delete table.publishRows[rowIndex];
+    cleared += 1;
+  });
+  if (cleared > 0) {
+    table.rowColorAutoApplied = false;
+    table.rowColorAutoSkipCount = 0;
+  }
+  return cleared;
 }
 
 function getLastOcrColorAnalysisForPage(page) {
@@ -4974,28 +5012,65 @@ function getLastOcrColorAnalysisForPage(page) {
   return analyses[String(page)] || analyses[page] || null;
 }
 
-function getInferredRowColorSourceIndexesFromSequence(table, availableRowCount) {
+function isSourceSequenceColumnName(column = "") {
+  return /(^|[^a-z0-9])(序号|编号|no|number|index)([^a-z0-9]|$)/i.test(normalize(column || ""));
+}
+
+function getVisibleSourceSequenceNumbers(table) {
   const rows = Array.isArray(table?.rows) ? table.rows : [];
   const columns = Array.isArray(table?.columns) ? table.columns : [];
-  if (!rows.length || !availableRowCount) return [];
-  const firstColumnName = normalizeText(columns[0] || "");
-  if (!/(^|[^a-z0-9])(序号|编号|no|number|index)([^a-z0-9]|$)/i.test(firstColumnName)) return [];
-  const indexes = rows.map((row) => {
+  if (!rows.length || !isSourceSequenceColumnName(columns[0])) return [];
+  const numbers = rows.map((row) => {
     const raw = String(row?.[0] || "").trim();
     if (!/^\d{1,4}$/.test(raw)) return null;
-    const sourceIndex = Number(raw) - 1;
-    return sourceIndex >= 0 && sourceIndex < availableRowCount ? sourceIndex : null;
+    const number = Number(raw);
+    return number > 0 ? number : null;
   });
-  if (indexes.length !== rows.length || indexes.some((index) => index === null)) return [];
-  return indexes;
+  return numbers.length === rows.length && !numbers.some((number) => number === null) ? numbers : [];
+}
+
+function getReasonableRowColorSourceIndexesFromSequence(table, availableRowCount = 0) {
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const numbers = getVisibleSourceSequenceNumbers(table);
+  if (!rows.length || numbers.length !== rows.length) return [];
+  const max = Math.max(...numbers);
+  const min = Math.min(...numbers);
+  if (availableRowCount && max > availableRowCount) return [];
+  const sourceSpan = max - min + 1;
+  const looseLimit = Math.max(rows.length + 12, rows.length * 4);
+  if (!availableRowCount && max > looseLimit) return [];
+  if (!availableRowCount && sourceSpan > looseLimit) return [];
+  return numbers.map((number) => number - 1);
+}
+
+function ensurePendingTableSourceRowIndexes(table, { forceSequence = false } = {}) {
+  if (!table || !Array.isArray(table.rows) || !table.rows.length) return [];
+  const sequenceIndexes = getReasonableRowColorSourceIndexesFromSequence(table);
+  if (sequenceIndexes.length === table.rows.length) {
+    const current = Array.isArray(table.rowColorSourceIndexes) ? table.rowColorSourceIndexes.map((value) => Number(value)) : [];
+    const alreadySame = current.length === sequenceIndexes.length && current.every((value, index) => value === sequenceIndexes[index]);
+    if (forceSequence || table.rowColorSourceIndexMode !== "sequence" || !alreadySame) {
+      table.rowColorSourceIndexes = sequenceIndexes;
+      table.rowColorSourceIndexMode = "sequence";
+    }
+    return table.rowColorSourceIndexes;
+  }
+  if (Array.isArray(table.rowColorSourceIndexes) && table.rowColorSourceIndexes.length === table.rows.length) {
+    return table.rowColorSourceIndexes;
+  }
+  return [];
+}
+
+function getInferredRowColorSourceIndexesFromSequence(table, availableRowCount) {
+  if (!availableRowCount) return [];
+  return getReasonableRowColorSourceIndexesFromSequence(table, availableRowCount);
 }
 
 function getPartialRowColorSourceIndexesFromSequence(table, availableRowCount) {
   const rows = Array.isArray(table?.rows) ? table.rows : [];
   const columns = Array.isArray(table?.columns) ? table.columns : [];
   if (!rows.length || !availableRowCount) return [];
-  const firstColumnName = normalizeText(columns[0] || "");
-  if (!/(^|[^a-z0-9])(序号|编号|no|number|index)([^a-z0-9]|$)/i.test(firstColumnName)) return [];
+  if (!isSourceSequenceColumnName(columns[0])) return [];
   const indexes = rows.map((row) => {
     const raw = String(row?.[0] || "").trim();
     if (!/^\d{1,4}$/.test(raw)) return -1;
@@ -5003,6 +5078,12 @@ function getPartialRowColorSourceIndexesFromSequence(table, availableRowCount) {
     return sourceIndex >= 0 && sourceIndex < availableRowCount ? sourceIndex : -1;
   });
   const mappedCount = indexes.filter((index) => Number.isInteger(index) && index >= 0).length;
+  const validIndexes = indexes.filter((index) => Number.isInteger(index) && index >= 0);
+  if (validIndexes.length) {
+    const minIndex = Math.min(...validIndexes);
+    const maxIndex = Math.max(...validIndexes);
+    if (maxIndex - minIndex + 1 > validIndexes.length + 2) return [];
+  }
   return mappedCount > 0 && mappedCount < rows.length ? indexes : [];
 }
 
@@ -5012,11 +5093,26 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   const start = Math.max(0, Math.floor(Number(startIndex) || 0));
   if (!length || !rows.length) return { rows: [], startIndex: start, exact: false };
 
+  const rowsByIndex = new Map(
+    rows.map((row, index) => [Number.isFinite(Number(row?.index)) ? Number(row.index) : index, row]),
+  );
+  const storedIndexes = ensurePendingTableSourceRowIndexes(table)
+    .slice(0, length)
+    .map((value) => Number(value));
+  if (storedIndexes.length === length && storedIndexes.every((value) => Number.isInteger(value) && value >= 0 && value < rows.length)) {
+    const mappedRows = storedIndexes.map((sourceIndex) => rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null);
+    if (mappedRows.every(Boolean)) {
+      return {
+        rows: mappedRows,
+        startIndex: storedIndexes[0] || 0,
+        exact: true,
+        sourceIndexes: storedIndexes,
+      };
+    }
+  }
+
   const inferredIndexes = getInferredRowColorSourceIndexesFromSequence(table, rows.length);
   if (inferredIndexes.length === length) {
-    const rowsByIndex = new Map(
-      rows.map((row, index) => [Number.isFinite(Number(row?.index)) ? Number(row.index) : index, row]),
-    );
     const mappedRows = inferredIndexes.map((sourceIndex) => rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null);
     if (mappedRows.every(Boolean)) {
       return {
@@ -5029,15 +5125,10 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   }
 
   const sourceIndexes = Array.isArray(table?.rowColorSourceIndexes)
-    ? table.rowColorSourceIndexes
-        .slice(0, length)
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value) && value >= 0)
+    ? table.rowColorSourceIndexes.slice(0, length).map((value) => Number(value))
     : [];
-  if (sourceIndexes.length === length) {
-    const rowsByIndex = new Map(
-      rows.map((row, index) => [Number.isFinite(Number(row?.index)) ? Number(row.index) : index, row]),
-    );
+  const validStoredSourceIndexes = sourceIndexes.every((value) => Number.isInteger(value) && value >= 0 && value < rows.length);
+  if (sourceIndexes.length === length && validStoredSourceIndexes) {
     const mappedRows = sourceIndexes.map((sourceIndex) => rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null);
     if (mappedRows.every(Boolean)) {
       return {
@@ -5087,6 +5178,25 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   return { rows: [], startIndex: start, exact: false };
 }
 
+function hasSourceIndexedOpenCvAlignment(table, analysis, aligned, availableRows) {
+  if (!table || !analysis || !aligned || table.rowColorSourceIndexMode !== "sequence") return false;
+  if (!["opencv", "pdf_vector"].includes(analysis.source)) return false;
+  if (analysis.contiguous !== true) return false;
+  if (Array.isArray(analysis.lowConfidenceRows) && analysis.lowConfidenceRows.length) return false;
+  const sourceIndexes = Array.isArray(aligned.sourceIndexes) ? aligned.sourceIndexes.map((value) => Number(value)) : [];
+  if (!Array.isArray(table.rows) || sourceIndexes.length !== table.rows.length || aligned.rows?.length !== table.rows.length) return false;
+  const availableCount = Array.isArray(availableRows) ? availableRows.length : 0;
+  if (!availableCount) return false;
+  const maxSourceIndex = Math.max(...sourceIndexes);
+  if (!Number.isInteger(maxSourceIndex) || maxSourceIndex < 0 || maxSourceIndex >= availableCount) return false;
+  const expectedRows = Number(analysis.expectedRows || 0);
+  const detectedRows = Number(analysis.detectedRows || availableCount);
+  const sourceCoversExpectedRows = expectedRows > 0 && maxSourceIndex + 1 <= expectedRows && availableCount >= expectedRows;
+  const backendReturnedFullRows = detectedRows >= maxSourceIndex + 1 && availableCount >= maxSourceIndex + 1;
+  const selectionLooksTableLike = /(^|_)exact$/i.test(String(analysis.selectionMode || ""));
+  return selectionLooksTableLike && (sourceCoversExpectedRows || backendReturnedFullRows);
+}
+
 function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   if (!table || !Array.isArray(table.rows)) return 0;
   table.rowColorSource = "none";
@@ -5108,7 +5218,6 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorSelectionMode = analysis.selectionMode || "";
   table.rowColorContiguous = analysis.contiguous === true;
   table.rowColorMaxGap = Number(analysis.maxRowGap || 0);
-  table.rowColorExactBackendAligned = analysis.exactRowAligned === true;
   table.rowColorLowConfidenceRows = Array.isArray(analysis.lowConfidenceRows) ? analysis.lowConfidenceRows : [];
   table.rowColorUnreliableReasons = Array.isArray(analysis.unreliableReasons) ? analysis.unreliableReasons : [];
   table.rowColorWarningReasons = Array.isArray(analysis.warningReasons) ? analysis.warningReasons : [];
@@ -5130,13 +5239,15 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
         }
       : getAlignedOpenCvRowsForTable(table, availableRows, startIndex);
   const assignedRows = aligned.rows;
+  const sourceIndexedAlignment = hasSourceIndexedOpenCvAlignment(table, analysis, aligned, availableRows);
+  table.rowColorExactBackendAligned = analysis.exactRowAligned === true || sourceIndexedAlignment;
   table.rowColorAlignedStart = aligned.startIndex;
   table.rowColorPartialSequenceAligned = aligned.partialSequenceAligned === true;
   table.rowColorPageLabels = uniqueCleanValues(availableRows.map((row) => getOpenCvItemRawColorLabel(row)));
   table.rowColorExactRowAligned = Boolean(
     analysis.source === "ai_row_color" ||
       ((analysis.source === "opencv" || analysis.source === "pdf_vector") &&
-        analysis.exactRowAligned === true &&
+        table.rowColorExactBackendAligned &&
         aligned.exact === true &&
         assignedRows.length === table.rows.length),
   );
@@ -5168,7 +5279,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
     hasUsableOpenCvColorSignalForEffectiveTicket(table, table.rows[rowIndex], rowIndex, colorItem),
   );
   table.rowColorReliable = Boolean(
-    analysis.reliable &&
+    (analysis.reliable || sourceIndexedAlignment) &&
       table.rowColorExactBackendAligned &&
       exactRowCount &&
       allEffectiveRowsHaveSignal &&
@@ -5177,6 +5288,11 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const colorState = getOpenCvEffectiveColorState(table);
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
   applyOpenCvWhiteVsColoredAutoDecision(table);
+  const untrustedColorMapping =
+    !table.rowColorReliable &&
+    ((analysis.source === "opencv" || analysis.source === "pdf_vector") &&
+      (!table.rowColorExactBackendAligned || !table.rowColorExactRowAligned || table.rowColorPartialSequenceAligned));
+  if (untrustedColorMapping) clearUntrustedRowColorPublishHolds(table);
   if (
     !table.rowColorReliable &&
     !hasOpenCvSoldTextColorAnchor(table) &&
@@ -5766,6 +5882,7 @@ function makeCompactPendingTable(table) {
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
     rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
+    rowColorSourceIndexMode: table.rowColorSourceIndexMode || "",
     rowColorPartialSequenceAligned: Boolean(table.rowColorPartialSequenceAligned),
     rowColorSparseSourceRepair: Boolean(table.rowColorSparseSourceRepair),
     rowColorPageLabels: Array.isArray(table.rowColorPageLabels) ? [...table.rowColorPageLabels] : [],
@@ -6083,6 +6200,7 @@ function normalizeLoadedPendingTable(table) {
   }
   normalizedTable.rowColorLogicVersion = Number(normalizedTable.rowColorLogicVersion || 0);
   repairMisreadDataHeaderTable(normalizedTable);
+  ensurePendingTableSourceRowIndexes(normalizedTable);
   return normalizedTable;
 }
 
@@ -6749,8 +6867,9 @@ function findRightmostSalePriceInRow(table, row) {
       isGenericPriceColumnName(column) ||
       /售价|售價|价格|價格|单价|單價|报价|報價|金额|金額|price|ask/i.test(column);
     const trailingColumn = index >= Math.max(0, row.length - 3);
+    const shiftedSeatmapPrice = isSeatmapImageColumnName(column) && trailingColumn && extractNumber(price) >= 1000;
     if (!hasCurrency && !trustedPriceColumn && !trailingColumn) continue;
-    if (!hasCurrency && isProtectedNonPriceColumnName(column) && !trustedPriceColumn) continue;
+    if (!hasCurrency && isProtectedNonPriceColumnName(column) && !trustedPriceColumn && !shiftedSeatmapPrice) continue;
     return price;
   }
   return "";
@@ -8866,9 +8985,9 @@ function selectPendingTable(tableId, { scroll = false } = {}) {
   selectedPendingTableId = table.id;
   ensurePendingTableReviewFlags(table);
   pendingReviewFocusRowIndex = getReviewableRowIndexes(table)[0] ?? getVisibleReviewRowIndexes(table)[0] ?? null;
-  renderReviewPanel(pendingReviewFocusRowIndex);
-  repairPendingTableRowColors(table);
-  window.requestAnimationFrame(() => renderUploadRecords());
+  renderReviewPanel(pendingReviewFocusRowIndex, { normalize: false });
+  queuePendingTableRowColorRepair(table);
+  window.requestAnimationFrame(() => renderUploadRecords({ normalize: false }));
   if (scroll) document.querySelector("#reviewPanel")?.scrollIntoView({ behavior: "auto", block: "start" });
   return true;
 }
@@ -9344,6 +9463,7 @@ function createPublishedTableFromRows(table, rows, suffix = "") {
     aiReviewDecisions: [],
     rowColorRows: rowColorRows.length === rows.length ? rowColorRows : [],
     rowColorSourceIndexes: rowColorSourceIndexes.length === rows.length ? rowColorSourceIndexes : null,
+    rowColorSourceIndexMode: table.rowColorSourceIndexMode || "",
     rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
       ? {
           soldNonWhiteCount: Number(table.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
@@ -9368,6 +9488,7 @@ function keepPendingRows(table, rows) {
   const previousUserEditedRows = { ...(table.userEditedRows || {}) };
   const previousRowColorRows = Array.isArray(table.rowColorRows) ? table.rowColorRows : [];
   const previousRowColorSourceIndexes = Array.isArray(table.rowColorSourceIndexes) ? table.rowColorSourceIndexes : [];
+  const previousRowColorSourceIndexMode = table.rowColorSourceIndexMode || "";
   const nextPublishRows = {};
   const nextReviewedRows = {};
   const nextUserEditedRows = {};
@@ -9391,6 +9512,7 @@ function keepPendingRows(table, rows) {
   table.userEditedRows = nextUserEditedRows;
   if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
   if (Array.isArray(table.rowColorSourceIndexes)) table.rowColorSourceIndexes = nextRowColorSourceIndexes;
+  table.rowColorSourceIndexMode = previousRowColorSourceIndexMode;
   table.aiReviewDecisions = [];
   table.bulkSkipDraft = false;
   updatePendingTableReviewFlags(table);
@@ -9512,15 +9634,11 @@ function shouldAutoRepairRowColors(table) {
 
 function hasPageWideSequenceColumn(table) {
   const rows = Array.isArray(table?.rows) ? table.rows : [];
-  if (!rows.length) return false;
-  const firstColumnName = normalizeText(table?.columns?.[0] || "");
-  if (!/(^|[^a-z0-9])(序号|编号|no|number|index)([^a-z0-9]|$)/i.test(firstColumnName)) return false;
-  const numbers = rows
-    .map((row) => String(row?.[0] || "").trim())
-    .filter((value) => /^\d{1,4}$/.test(value))
-    .map(Number);
-  if (!numbers.length) return false;
-  return Math.max(...numbers) > rows.length || numbers.length === rows.length;
+  const numbers = getVisibleSourceSequenceNumbers(table);
+  if (!rows.length || numbers.length !== rows.length) return false;
+  const min = Math.min(...numbers);
+  const max = Math.max(...numbers);
+  return max > rows.length && max <= Math.max(rows.length + 12, rows.length * 4) && max - min + 1 <= Math.max(rows.length + 12, rows.length * 4);
 }
 
 function getMaxPageWideSequenceNumber(table) {
@@ -9534,17 +9652,55 @@ function getMaxPageWideSequenceNumber(table) {
 
 function getRowColorExpectedRowsForPendingTable(table) {
   const rowCount = Array.isArray(table?.rows) ? table.rows.length : 0;
+  const sourceIndexes = ensurePendingTableSourceRowIndexes(table);
+  const maxSourceIndex = sourceIndexes
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value >= 0)
+    .reduce((max, value) => Math.max(max, value), -1);
+  if (isPdfTableSource(table) && rowCount > 0 && maxSourceIndex + 1 > rowCount) return maxSourceIndex + 1;
   const maxSequence = getMaxPageWideSequenceNumber(table);
   if (isPdfTableSource(table) && rowCount > 0 && maxSequence > rowCount) return maxSequence;
   return rowCount;
+}
+
+function waitForPendingTableRowColorRepair(table) {
+  if (!table?._rowColorRepairing) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const check = () => {
+      if (!table._rowColorRepairing) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - startedAt > 8000) {
+        resolve(false);
+        return;
+      }
+      window.setTimeout(check, 100);
+    };
+    check();
+  });
+}
+
+function queuePendingTableRowColorRepair(table) {
+  if (!shouldAutoRepairRowColors(table) || table._rowColorRepairQueued) return false;
+  table._rowColorRepairQueued = true;
+  runWhenPageIdle(() => {
+    table._rowColorRepairQueued = false;
+    if (shouldAutoRepairRowColors(table)) {
+      repairPendingTableRowColors(table);
+    }
+  }, 1800);
+  return true;
 }
 
 async function repairPendingTableRowColors(table) {
   if (!shouldAutoRepairRowColors(table)) return false;
   table._rowColorRepairing = true;
   table._rowColorRepairTried = true;
+  const wasLightReview = table.lightReviewFlags === true;
   table.rowColorMessage = "正在用像素逐行检测原图行底色...";
-  renderUploadRecords();
+  renderUploadRecords({ normalize: false });
   try {
     const source = String(table.originalImage || "");
     const sourcePayload = source.startsWith("uploads/") ? { sourceUrl: source } : { image: await getReviewSourceDataUrl(table) };
@@ -9580,16 +9736,17 @@ async function repairPendingTableRowColors(table) {
     applyOpenCvRowColorsToTable(table, analysis, rowColorStart);
     table._rowColorRepairDone = true;
     table._rowColorRepairError = "";
-    updatePendingTableReviewFlags(table);
-    renderUploadRecords();
-    renderReviewPanel();
+    if (wasLightReview) markPendingTableReviewFlagsLightly(table);
+    else updatePendingTableReviewFlags(table);
+    renderUploadRecords({ normalize: false });
+    renderReviewPanel(undefined, { normalize: false });
     return true;
   } catch (error) {
     table._rowColorRepairError = error.message || "行底色重新检测失败。";
     table.rowColorMessage = table._rowColorRepairError;
     showToast(table._rowColorRepairError, "error");
-    renderUploadRecords();
-    renderReviewPanel();
+    renderUploadRecords({ normalize: false });
+    renderReviewPanel(undefined, { normalize: false });
     return false;
   } finally {
     table._rowColorRepairing = false;
@@ -9671,8 +9828,8 @@ function applyReviewAiSuggestions(table) {
   showToast("已应用 AI 建议。", "success");
 }
 
-function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
-  normalizePendingTablesInMemory({ save: true });
+function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normalize = true } = {}) {
+  if (normalize) normalizePendingTablesInMemory({ save: true });
   const table = getSelectedPendingTable();
   if (!table || table.eventId !== currentEvent.id) {
     reviewTitle.textContent = "选择一张待确认表";
@@ -9690,7 +9847,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
     table.reviewFlagsVersion = 0;
   }
   if (shouldAutoRepairRowColors(table)) {
-    repairPendingTableRowColors(table);
+    queuePendingTableRowColorRepair(table);
     repairMisreadDataHeaderTable(table);
     if (isPdfTableSource(table)) forceCanonicalOriginalDisplay(table);
     table.reviewFlagsVersion = 0;
@@ -9744,6 +9901,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
   const openCvPreviewRows =
     hasColorPreview && table.showOpenCvColorPreview
       ? table.rows
+          .slice(0, MAX_OPENCV_PREVIEW_ROWS_RENDERED)
           .map((row, index) => {
             const item = table.rowColorRows[index] || {};
             const rawLabel = normalizeRowColorLabel(item.label) || normalizeRowColorLabel(item.rawLabel);
@@ -9778,8 +9936,10 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
   const reviewRows = table.rows
     .map((row, rowIndex) => ({ row, rowIndex }))
     .filter(({ row, rowIndex }) => table.showSoldInReview || !isUnavailableTicket({ table, row, index: rowIndex }));
+  const renderedReviewRows = reviewRows.slice(0, MAX_REVIEW_ROWS_RENDERED);
+  const hiddenReviewRowCount = Math.max(0, reviewRows.length - renderedReviewRows.length);
   const reviewZoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
-  const rows = reviewRows
+  const rows = renderedReviewRows
     .map(({ row, rowIndex }) => {
       const currentRow = table.rows[rowIndex] || row;
       const shouldPublish = shouldPublishPendingRow(table, rowIndex);
@@ -9978,7 +10138,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
               openCvPreviewRows
                 ? `<div class="opencv-color-preview">
                     <strong>${escapeHtml(rowColorEngineName)} 逐行颜色</strong>
-                    <span>${openCvConflict ? "这张表同时有白底和其他底色；非白底行会自动设为不发布。" : "颜色会等待同表白底参照后再参与发布判断。"}</span>
+                    <span>${openCvConflict ? "这张表同时有白底和其他底色；非白底行会自动设为不发布。" : "颜色会等待同表白底参照后再参与发布判断。"}${table.rows.length > MAX_OPENCV_PREVIEW_ROWS_RENDERED ? ` 仅显示前 ${MAX_OPENCV_PREVIEW_ROWS_RENDERED} 行颜色明细。` : ""}</span>
                     <div class="opencv-color-grid">${openCvPreviewRows}</div>
                   </div>`
                 : ""
@@ -9999,6 +10159,11 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex) {
         </div>
         <p class="review-ai-status">${escapeHtml(table.aiReviewStatus || "输入这张表的颜色/标记规则，AI 会按原图给出哪些上传、哪些下架。")}</p>
       </div>
+      ${
+        hiddenReviewRowCount
+          ? `<div class="review-ticket-limit-note">为了避免大表卡住页面，本页先显示前 ${MAX_REVIEW_ROWS_RENDERED} 条可见票源，剩余 ${hiddenReviewRowCount} 条仍会参与确认发布和保存。</div>`
+          : ""
+      }
       ${
         rows ||
         `<div class="empty-state">这张表当前没有显示中的票；可以点“显示已跳过票源”恢复查看，或从“校对历史”恢复到上一步。</div>`
@@ -10249,7 +10414,14 @@ function cloneParsedTableForPageMerge(table) {
     Math.floor(Number(table?.rowColorPageStartIndex ?? table?.rowColorAlignedStart ?? table?.rowColorPageRowOffset ?? 0) || 0),
   );
   cloned.rowColorPageRowOffset = rowColorStart;
-  cloned.rowColorSourceIndexes = cloned.rows.map((_, index) => rowColorStart + index);
+  const sequenceIndexes = getReasonableRowColorSourceIndexesFromSequence(cloned);
+  if (sequenceIndexes.length === cloned.rows.length) {
+    cloned.rowColorSourceIndexes = sequenceIndexes;
+    cloned.rowColorSourceIndexMode = "sequence";
+  } else {
+    cloned.rowColorSourceIndexes = cloned.rows.map((_, index) => rowColorStart + index);
+    cloned.rowColorSourceIndexMode = "sequential";
+  }
   cloned.sourcePart = 1;
   return cloned;
 }
@@ -10259,8 +10431,12 @@ function appendParsedTableOnSamePdfPage(target, source) {
   repairMisreadDataHeaderTable(target);
   repairMisreadDataHeaderTable(source);
   if (!Array.isArray(target.rowColorSourceIndexes) || target.rowColorSourceIndexes.length !== target.rows.length) {
+    ensurePendingTableSourceRowIndexes(target);
+  }
+  if (!Array.isArray(target.rowColorSourceIndexes) || target.rowColorSourceIndexes.length !== target.rows.length) {
     const targetStart = Math.max(0, Math.floor(Number(target.rowColorPageRowOffset || 0) || 0));
     target.rowColorSourceIndexes = target.rows.map((_, index) => targetStart + index);
+    target.rowColorSourceIndexMode = target.rowColorSourceIndexMode || "sequential";
   }
   coerceSourceTableForSamePageMerge(source, target.columns);
   const existingColumnCount = target.columns.length;
@@ -10310,6 +10486,9 @@ function appendParsedTableOnSamePdfPage(target, source) {
       return targetColorIndexBase + index;
     }),
   );
+  if (target.rowColorSourceIndexMode !== "sequence" && source.rowColorSourceIndexMode === "sequence") {
+    target.rowColorSourceIndexMode = "sequence";
+  }
   extendColumnsForOverflowRows(target.columns, target.rows);
   repairMisreadDataHeaderTable(target);
   normalizePendingTableColumns(target);
@@ -10375,6 +10554,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
       rowColorSourceIndexes: Array.isArray(parsedTable.rowColorSourceIndexes) ? [...parsedTable.rowColorSourceIndexes] : null,
     };
     repairMisreadDataHeaderTable(table);
+    ensurePendingTableSourceRowIndexes(table);
     if (isPdf) forceCanonicalOriginalDisplay(table);
     const colorAnalysis = colorAnalyses[String(sourcePage)] || colorAnalyses[sourcePage] || null;
     if (colorAnalysis) {
@@ -10399,13 +10579,15 @@ function previewUploadedTable(tableId) {
   searchInput.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-function confirmSelectedPendingTable() {
+async function confirmSelectedPendingTable() {
   if (!requireSeatmapTestBeforePublish()) return;
   const table = getSelectedPendingTable();
   if (!table) {
     showToast("请先选择一张待确认表。", "error");
     return;
   }
+  if (table._rowColorRepairing) await waitForPendingTableRowColorRepair(table);
+  else if (shouldAutoRepairRowColors(table)) await repairPendingTableRowColors(table);
   const queueSnapshot = getCurrentPendingTables();
   const currentQueueIndex = queueSnapshot.findIndex((item) => item.id === table.id);
   const publishRows = [];

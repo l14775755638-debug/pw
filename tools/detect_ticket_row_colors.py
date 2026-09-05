@@ -399,17 +399,20 @@ def choose_data_intervals(intervals, expected_rows):
         return candidates[:expected_rows], mode
 
     def build_body(global_header_count):
-        selected = []
-        for group_index, group in enumerate(groups):
-            body = group
-            # Only the first visual table may contribute page-level title/header
-            # rows. Later groups often start right after a separator; dropping
-            # their first rows caused real tickets near a divider to inherit the
-            # divider color or disappear from color alignment.
-            if group_index == 0 and global_header_count > 0 and len(group) >= global_header_count:
-                body = group[global_header_count:]
-            selected.extend(item for item in body if not looks_like_non_data_row(item))
-        return selected
+        selected = [item for group in groups for item in group if not looks_like_non_data_row(item)]
+        # Page title/header rows are sometimes split into separate visual groups.
+        # Drop the first N header-like bands globally so data rows stay aligned
+        # with OCR row numbers on tables that use large merged cells.
+        return selected[global_header_count:] if global_header_count > 0 else selected
+
+    for group_index, group in enumerate(groups):
+        group_body = [item for item in group if not looks_like_non_data_row(item)]
+        for header_count in (4, 3, 2, 1, 0):
+            if len(group_body) <= header_count:
+                continue
+            candidates = group_body[header_count:]
+            if len(candidates) == expected_rows:
+                return candidates, f"group_{group_index}_header_{header_count}_exact"
 
     header_candidates = []
     for header_count in (2, 1, 0):
@@ -479,18 +482,21 @@ def detect_text_row_intervals(image, expected_rows):
     median_count = float(np.median(counts)) if counts else 0
     header_bottom = 0
     for item in runs:
-        if item["center"] > height * 0.45:
+        if item["center"] > height * 0.14:
             break
         if median_count and item["darkCount"] >= median_count * 1.45 and item["peak"] >= threshold * 6:
             header_bottom = max(header_bottom, item["textY2"])
 
+    data_min_center = height * 0.1
     candidates = [
         item
         for item in runs
-        if item["textY1"] > header_bottom + 3 and item["center"] > max(header_bottom + 3, height * 0.22)
+        if item["textY1"] > header_bottom + 3 and item["center"] > max(header_bottom + 3, data_min_center)
     ]
+    boundary_header_bottom = header_bottom
     if len(candidates) < expected_rows:
-        candidates = [item for item in runs if item["center"] > height * 0.22]
+        candidates = [item for item in runs if item["center"] > data_min_center]
+        boundary_header_bottom = 0
     if len(candidates) < expected_rows:
         return [], ""
 
@@ -525,7 +531,7 @@ def detect_text_row_intervals(image, expected_rows):
         return [], ""
 
     intervals = []
-    previous_boundary = max(header_bottom + 2, int(round(selected[0]["center"] - local_median_gap * 0.48)))
+    previous_boundary = max(boundary_header_bottom + 2, int(round(selected[0]["center"] - local_median_gap * 0.48)))
     for index, item in enumerate(selected):
         center = item["center"]
         if index < len(selected) - 1:
@@ -554,6 +560,29 @@ def detect_text_row_intervals(image, expected_rows):
             }
         )
         previous_boundary = next_boundary
+
+    if expected_rows > 0 and len(intervals) == expected_rows and selection_mode == "text_projection_prefix":
+        heights = [max(1, int(item.get("height", 0) or 0)) for item in intervals]
+        median_height = float(np.median(heights)) if heights else local_median_gap
+        repaired_intervals = []
+        split_count = 0
+        for item in intervals:
+            height_px = max(1, int(item.get("height", 0) or 0))
+            # OCR text projection can merge two sparse white rows into one tall
+            # band. Split only obvious double-height bands; otherwise a merged
+            # row shifts every following color decision onto the previous ticket.
+            if height_px >= max(52, median_height * 1.38) and split_count < 3:
+                mid = int(round((item["y1"] + item["y2"]) / 2))
+                if mid - item["y1"] >= 12 and item["y2"] - mid >= 12:
+                    first = {**item, "y2": mid, "height": mid - item["y1"]}
+                    second = {**item, "y1": mid, "height": item["y2"] - mid}
+                    repaired_intervals.extend([first, second])
+                    split_count += 1
+                    continue
+            repaired_intervals.append(item)
+        if split_count and len(repaired_intervals) >= expected_rows:
+            intervals = repaired_intervals[:expected_rows]
+            selection_mode = "text_projection_split_exact"
 
     return intervals, selection_mode
 
@@ -984,7 +1013,10 @@ def analyze(image_path, expected_rows=0):
         "first_group_drop_0_filtered",
         "first_group_drop_1_filtered",
         "first_group_drop_2_filtered",
+        "text_projection_split_exact",
     }
+    if selection_mode.startswith("group_") and selection_mode.endswith("_exact"):
+        safe_selection_modes.add(selection_mode)
     low_confidence_rows = [
         index
         for index, row in enumerate(rows)
