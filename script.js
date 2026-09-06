@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 65;
+const ROW_COLOR_LOGIC_VERSION = 66;
 const PUBLISH_DECISION_LOGIC_VERSION = 2;
 const MAX_REVIEW_ROWS_RENDERED = 120;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
@@ -5155,14 +5155,23 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   const rows = Array.isArray(availableRows) ? availableRows.filter(Boolean) : [];
   const start = Math.max(0, Math.floor(Number(startIndex) || 0));
   if (!length || !rows.length) return { rows: [], startIndex: start, exact: false };
+  const canTrustPrefixSlice = rows.length === length;
 
   const rowsByIndex = new Map(
     rows.map((row, index) => [Number.isFinite(Number(row?.index)) ? Number(row.index) : index, row]),
   );
+  const isTrustedStoredIndexMap = (indexes) => {
+    if (!Array.isArray(indexes) || indexes.length !== length) return false;
+    const numericIndexes = indexes.map((value) => Number(value));
+    if (!numericIndexes.every((value) => Number.isInteger(value) && value >= 0 && value < rows.length)) return false;
+    if (canTrustPrefixSlice) return true;
+    if (table?.rowColorSourceIndexMode === "sequence") return true;
+    return Math.min(...numericIndexes) > 0;
+  };
   const storedIndexes = ensurePendingTableSourceRowIndexes(table)
     .slice(0, length)
     .map((value) => Number(value));
-  if (storedIndexes.length === length && storedIndexes.every((value) => Number.isInteger(value) && value >= 0 && value < rows.length)) {
+  if (isTrustedStoredIndexMap(storedIndexes)) {
     const mappedRows = storedIndexes.map((sourceIndex) => rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null);
     if (mappedRows.every(Boolean)) {
       return {
@@ -5190,8 +5199,7 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
   const sourceIndexes = Array.isArray(table?.rowColorSourceIndexes)
     ? table.rowColorSourceIndexes.slice(0, length).map((value) => Number(value))
     : [];
-  const validStoredSourceIndexes = sourceIndexes.every((value) => Number.isInteger(value) && value >= 0 && value < rows.length);
-  if (sourceIndexes.length === length && validStoredSourceIndexes) {
+  if (isTrustedStoredIndexMap(sourceIndexes)) {
     const mappedRows = sourceIndexes.map((sourceIndex) => rowsByIndex.get(sourceIndex) || rows[sourceIndex] || null);
     if (mappedRows.every(Boolean)) {
       return {
@@ -5221,21 +5229,21 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
     };
   }
 
-  const directRows = rows.slice(start, start + length);
-  if (directRows.length === length) {
-    return {
-      rows: directRows,
-      startIndex: start,
-      exact: true,
-      sourceIndexes: directRows.map((row, index) => (Number.isFinite(Number(row?.index)) ? Number(row.index) : start + index)),
-    };
-  }
   if (rows.length === length) {
     return {
       rows: rows.slice(0, length),
       startIndex: 0,
       exact: true,
       sourceIndexes: rows.slice(0, length).map((row, index) => (Number.isFinite(Number(row?.index)) ? Number(row.index) : index)),
+    };
+  }
+  const directRows = rows.slice(start, start + length);
+  if (start > 0 && directRows.length === length) {
+    return {
+      rows: directRows,
+      startIndex: start,
+      exact: true,
+      sourceIndexes: directRows.map((row, index) => (Number.isFinite(Number(row?.index)) ? Number(row.index) : start + index)),
     };
   }
   return { rows: [], startIndex: start, exact: false };
@@ -10876,7 +10884,8 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
     if (isPdf) forceCanonicalOriginalDisplay(table);
     const colorAnalysis = colorAnalyses[String(sourcePage)] || colorAnalyses[sourcePage] || null;
     if (colorAnalysis) {
-      applyOpenCvRowColorsToTable(table, colorAnalysis, 0);
+      const rowColorStart = Math.max(0, Math.floor(Number(table.rowColorPageRowOffset || 0) || 0));
+      applyOpenCvRowColorsToTable(table, colorAnalysis, rowColorStart);
     }
     if (useLightReviewFlags || (table.rows || []).length > 250) {
       return markPendingTableReviewFlagsLightly(table);
