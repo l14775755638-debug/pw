@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 66;
+const ROW_COLOR_LOGIC_VERSION = 67;
 const PUBLISH_DECISION_LOGIC_VERSION = 2;
 const MAX_REVIEW_ROWS_RENDERED = 120;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
@@ -5166,7 +5166,7 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
     if (!numericIndexes.every((value) => Number.isInteger(value) && value >= 0 && value < rows.length)) return false;
     if (canTrustPrefixSlice) return true;
     if (table?.rowColorSourceIndexMode === "sequence") return true;
-    return Math.min(...numericIndexes) > 0;
+    return false;
   };
   const storedIndexes = ensurePendingTableSourceRowIndexes(table)
     .slice(0, length)
@@ -5235,15 +5235,6 @@ function getAlignedOpenCvRowsForTable(table, availableRows, startIndex = 0) {
       startIndex: 0,
       exact: true,
       sourceIndexes: rows.slice(0, length).map((row, index) => (Number.isFinite(Number(row?.index)) ? Number(row.index) : index)),
-    };
-  }
-  const directRows = rows.slice(start, start + length);
-  if (start > 0 && directRows.length === length) {
-    return {
-      rows: directRows,
-      startIndex: start,
-      exact: true,
-      sourceIndexes: directRows.map((row, index) => (Number.isFinite(Number(row?.index)) ? Number(row.index) : start + index)),
     };
   }
   return { rows: [], startIndex: start, exact: false };
