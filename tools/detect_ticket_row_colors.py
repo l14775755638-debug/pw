@@ -648,6 +648,9 @@ def detect_dense_grid_row_intervals(image, expected_rows):
         # column-header bands. Try every leading trim that still leaves the
         # exact OCR row count, and prefer the deeper start when scores tie.
         extra_count = max(0, len(group) - expected_rows)
+        max_header_like_extra = max(5, int(np.ceil(expected_rows * 0.45)))
+        if extra_count > max_header_like_extra:
+            continue
         possible_starts = list(range(extra_count, -1, -1))
 
         for offset in possible_starts:
