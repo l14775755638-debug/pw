@@ -587,6 +587,130 @@ def detect_text_row_intervals(image, expected_rows):
     return intervals, selection_mode
 
 
+def detect_dense_grid_row_intervals(image, expected_rows):
+    """Detect regular spreadsheet-like rows from horizontal grid boundaries.
+
+    Large red/orange ticket tables are the worst case for the generic detector:
+    the colored row background is dark enough in grayscale to look like one
+    giant horizontal feature. This path ignores filled color bands and rebuilds
+    rows from repeated horizontal edge boundaries instead.
+    """
+    if expected_rows <= 3:
+        return [], ""
+
+    height, width = image.shape[:2]
+    if height < 240 or width < 360:
+        return [], ""
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    row_gradient = np.abs(cv2.Sobel(gray, cv2.CV_16S, 0, 1, ksize=3))
+    projection = np.count_nonzero(row_gradient > 48, axis=1)
+    ys = np.where(projection >= max(36, int(width * 0.18)))[0]
+    if ys.size < expected_rows:
+        return [], ""
+
+    runs = merge_runs(ys, gap=2)
+    centers = []
+    for run in runs:
+        if int(run[1]) - int(run[0]) > max(9, int(height * 0.006)):
+            continue
+        centers.append(int(round((int(run[0]) + int(run[1])) / 2)))
+    centers = sorted(set(centers))
+    if len(centers) < expected_rows + 1:
+        return [], ""
+
+    gaps = [centers[index + 1] - centers[index] for index in range(len(centers) - 1)]
+    usable_gap_indexes = [index for index, gap in enumerate(gaps) if 16 <= gap <= max(82, int(height * 0.045))]
+    if len(usable_gap_indexes) < expected_rows:
+        return [], ""
+
+    groups = []
+    current = [usable_gap_indexes[0]]
+    for index in usable_gap_indexes[1:]:
+        if index == current[-1] + 1:
+            current.append(index)
+        else:
+            groups.append(current)
+            current = [index]
+    groups.append(current)
+
+    best_intervals = []
+    best_score = None
+    for group in groups:
+        if len(group) < expected_rows:
+            continue
+        group_gaps = [gaps[index] for index in group]
+        median_gap = float(np.median(group_gaps))
+        if median_gap < 18:
+            continue
+
+        # Extra intervals before the data rows are normally title, notice, and
+        # column-header bands. Try every leading trim that still leaves the
+        # exact OCR row count, and prefer the deeper start when scores tie.
+        extra_count = max(0, len(group) - expected_rows)
+        possible_starts = list(range(extra_count, -1, -1))
+
+        for offset in possible_starts:
+            if offset + expected_rows > len(group):
+                continue
+            window = group[offset : offset + expected_rows]
+            window_gaps = [gaps[index] for index in window]
+            regularity = sum(abs(gap - median_gap) for gap in window_gaps) / max(1, len(window_gaps))
+            intervals = []
+            for gap_index in window:
+                upper = centers[gap_index]
+                lower = centers[gap_index + 1]
+                pad = max(2, min(5, int((lower - upper) * 0.08)))
+                y1 = max(0, min(height - 1, upper + pad))
+                y2 = max(y1 + 9, min(height, lower - pad))
+                band_gray = gray[y1:y2, :]
+                dark_density = float(np.count_nonzero(band_gray < 150)) / max(1, band_gray.size)
+                dark_band = band_gray < 130
+                col_counts = np.count_nonzero(dark_band, axis=0)
+                xs = np.where(col_counts >= max(2, int((y2 - y1) * 0.45)))[0]
+                vertical_runs = [run for run in merge_runs(xs, gap=3) if run[1] - run[0] <= 8]
+                intervals.append(
+                    {
+                        "y1": int(y1),
+                        "y2": int(y2),
+                        "height": int(y2 - y1),
+                        "darkDensity": round(dark_density, 4),
+                        "verticalLines": int(len(vertical_runs)),
+                    }
+                )
+
+            if len(intervals) != expected_rows:
+                continue
+            color_rows = [classify_interval(image, item) for item in intervals]
+            labels = [color_family(row) for row in color_rows]
+            known_count = sum(1 for label in labels if label != "unknown")
+            nonwhite_count = sum(1 for label in labels if label not in ("neutral", "unknown"))
+            white_count = sum(1 for label in labels if label == "neutral")
+            if known_count < max(3, int(expected_rows * 0.45)):
+                continue
+            # Prefer starts that have both neutral and colored rows when
+            # available; those are the only ones that can safely drive mixed
+            # color downlisting. For equal candidates, use the regular grid.
+            conflict_bonus = 0 if (white_count and nonwhite_count) else 12
+            header_penalty = 0
+            if offset == 0 and len(group) >= expected_rows + 1:
+                first_label = labels[0]
+                last_extra_gap_index = group[expected_rows]
+                last_extra_y1 = centers[last_extra_gap_index] + 2
+                last_extra_y2 = centers[last_extra_gap_index + 1] - 2
+                last_extra = classify_interval(image, {"y1": last_extra_y1, "y2": last_extra_y2, "height": last_extra_y2 - last_extra_y1})
+                if first_label == "neutral" and color_family(last_extra) != "unknown":
+                    header_penalty = 20
+            score = regularity + conflict_bonus + header_penalty - offset * 0.2
+            if best_score is None or score < best_score:
+                best_score = score
+                best_intervals = intervals
+
+    if len(best_intervals) == expected_rows:
+        return best_intervals, "dense_grid_exact"
+    return [], ""
+
+
 def find_x_bounds(image, y1, y2):
     height, width = image.shape[:2]
     inner_y1 = min(y2, y1 + max(1, int((y2 - y1) * 0.2)))
@@ -1071,7 +1195,9 @@ def analyze(image_path, expected_rows=0):
         raise RuntimeError("image cannot be read")
     intervals = detect_horizontal_intervals(image)
     line_selected, line_selection_mode = choose_data_intervals(intervals, expected_rows)
+    dense_selected, dense_selection_mode = detect_dense_grid_row_intervals(image, expected_rows)
     text_selected, text_selection_mode = detect_text_row_intervals(image, expected_rows)
+    dense_exact = bool(dense_selected and expected_rows > 0 and len(dense_selected) == expected_rows)
     line_exact = bool(
         line_selected
         and (expected_rows <= 0 or len(line_selected) == expected_rows)
@@ -1081,7 +1207,9 @@ def analyze(image_path, expected_rows=0):
             or line_selection_mode == "merged_small_table"
         )
     )
-    if line_exact:
+    if dense_exact:
+        selected, selection_mode = dense_selected, dense_selection_mode
+    elif line_exact:
         selected, selection_mode = line_selected, line_selection_mode
     elif text_selected:
         selected, selection_mode = text_selected, text_selection_mode
@@ -1157,6 +1285,7 @@ def analyze(image_path, expected_rows=0):
         "first_group_drop_2_filtered",
         "text_projection_split_exact",
         "compact_color_anchor_exact",
+        "dense_grid_exact",
     }
     if selection_mode.startswith("group_") and selection_mode.endswith("_exact"):
         safe_selection_modes.add(selection_mode)
