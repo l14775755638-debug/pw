@@ -1,8 +1,9 @@
-const REVIEW_FLAGS_VERSION = 34;
+const REVIEW_FLAGS_VERSION = 35;
 const ROW_COLOR_LOGIC_VERSION = 62;
 const PUBLISH_DECISION_LOGIC_VERSION = 2;
 const MAX_REVIEW_ROWS_RENDERED = 120;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
+const DATE_COLUMN_NAMES = ["日期", "演出日期", "门票时间", "票期", "场次日期", "date", "day", "일자"];
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -2768,7 +2769,7 @@ function mergeDuplicateColumnsByName(table, names = ["备注", "售价"]) {
 }
 
 function repairDuplicateDateColumns(table) {
-  const dateIndexes = findColumnIndexes(table.columns || [], ["日期", "演出日期", "date", "day", "일자"]);
+  const dateIndexes = findColumnIndexes(table.columns || [], DATE_COLUMN_NAMES);
   if (dateIndexes.length <= 1) return false;
   let changed = false;
   dateIndexes.forEach((index) => {
@@ -2838,7 +2839,7 @@ function repairSemanticColumnRoles(table) {
     }
   });
 
-  if (!findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]).length) {
+  if (!findColumnIndexes(columns, DATE_COLUMN_NAMES).length) {
     const likelyDateIndex = findLikelyDateColumnIndex(table);
     if (likelyDateIndex >= 0) {
       changed = setSemanticColumnName(table, likelyDateIndex, "日期") || changed;
@@ -3183,7 +3184,7 @@ function rowHasTicketContentOutsideDate(table, row, dateIndex) {
 
 function repairMisplacedDateAndPriceValues(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
-  const dateIndexes = findColumnIndexes(table.columns, ["日期", "演出日期", "date", "day", "일자"]);
+  const dateIndexes = findColumnIndexes(table.columns, DATE_COLUMN_NAMES);
   if (!dateIndexes.length) return false;
   let changed = false;
 
@@ -3842,7 +3843,7 @@ function findSeatmapZoneValueInRow(table, row) {
   if (!zones.length) return "";
   const columns = table.columns || [];
   const ignoredIndexes = new Set([
-    ...findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]),
+    ...findColumnIndexes(columns, DATE_COLUMN_NAMES),
     ...findSalePriceColumnIndexes(columns),
     ...findColumnIndexes(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]),
     ...findColumnIndexes(columns, ["备注", "remark", "note", "说明", "状态", "status"]),
@@ -3859,7 +3860,7 @@ function findSeatmapZoneValueInRow(table, row) {
 function findLikelyZoneValueInRow(table, row) {
   const columns = table.columns || [];
   const ignoredIndexes = new Set([
-    ...findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]),
+    ...findColumnIndexes(columns, DATE_COLUMN_NAMES),
     ...findSalePriceColumnIndexes(columns),
     ...findColumnIndexes(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]),
     ...findColumnIndexes(columns, ["状态", "售卖状态", "销售状态", "status", "是否售出", "售出"]),
@@ -3947,7 +3948,7 @@ function getBestSalePriceFromRow(table, row) {
 function findFallbackSalePriceFromAnyCell(table, row) {
   const columns = table.columns || [];
   const ignoredIndexes = new Set([
-    ...findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]),
+    ...findColumnIndexes(columns, DATE_COLUMN_NAMES),
     ...findColumnIndexes(columns, ["序号", "编号", "no", "id"]),
     ...findColumnIndexes(columns, ["区域", "区", "block", "section", "구역"]),
     ...findSeatRowColumnIndexes(columns),
@@ -4046,7 +4047,7 @@ function repairSalePriceAndQuantity(table, row) {
 function repairMergedContextValues(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
   let changed = false;
-  const dateIndex = findColumnIndex(table.columns, ["日期", "演出日期", "date", "day", "일자"]);
+  const dateIndex = findColumnIndex(table.columns, DATE_COLUMN_NAMES);
   const zoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
   const rowIndex = ensureSeatRowColumn(table);
   const seatIndex = ensureSeatNumberColumn(table);
@@ -5495,7 +5496,7 @@ function analyzePendingTableRisk(table) {
   const rows = table.rows || [];
   const reviewTickets = rows.map((row, index) => ({ table, row, index })).filter((ticket) => !isUnavailableTicket(ticket));
   const reviewRows = reviewTickets.map((ticket) => ticket.row);
-  const dateIndex = findColumnIndex(columns, ["日期", "演出日期", "date", "day", "일자"]);
+  const dateIndex = findColumnIndex(columns, DATE_COLUMN_NAMES);
   const zoneIndex = findColumnIndex(columns, ["区域", "区", "block", "section", "구역"]);
   const priceIndex = findColumnIndex(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]);
   const hasDerivedDate = reviewTickets.some((ticket) => getTicketDateValues(ticket).length > 0);
@@ -5531,15 +5532,19 @@ function analyzePendingTableRiskLightly(table) {
   const reasons = [];
   const columns = table.columns || [];
   const rows = table.rows || [];
-  const dateIndex = findColumnIndex(columns, ["日期", "演出日期", "date", "day", "일자"]);
+  const reviewTickets = rows.map((row, index) => ({ table, row, index })).filter((ticket) => !isUnavailableTicket(ticket));
+  const dateIndex = findColumnIndex(columns, DATE_COLUMN_NAMES);
   const zoneIndex = findColumnIndex(columns, ["区域", "区", "block", "section", "구역"]);
   const priceIndex = findColumnIndex(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]);
+  const hasDerivedDate = reviewTickets.some((ticket) => getTicketDateValues(ticket).length > 0);
+  const hasDerivedZone = reviewTickets.some((ticket) => Boolean(getTicketZoneValue(ticket)));
+  const hasDerivedPrice = reviewTickets.some((ticket) => hasTicketSalePrice(ticket));
 
   if (columns.length < 4) reasons.push("识别到的列数偏少");
   if (rows.length < 1) reasons.push("没有识别到票源行");
-  if (dateIndex < 0) reasons.push("缺少日期列");
-  if (zoneIndex < 0) reasons.push("缺少区域列");
-  if (priceIndex < 0) reasons.push("缺少售价列");
+  if (dateIndex < 0 && !hasDerivedDate) reasons.push("缺少日期列");
+  if (zoneIndex < 0 && !hasDerivedZone) reasons.push("缺少区域列");
+  if (priceIndex < 0 && !hasDerivedPrice) reasons.push("缺少售价列");
 
   return {
     needsManualReview: reasons.length > 0,
@@ -5685,7 +5690,7 @@ function normalizeDateCellValue(value, { allowDayOnly = true } = {}) {
 }
 
 function getTicketDateValues(ticket) {
-  const dateIndexes = findColumnIndexes(ticket.table.columns || [], ["日期", "演出日期", "date", "day", "일자"]);
+  const dateIndexes = findColumnIndexes(ticket.table.columns || [], DATE_COLUMN_NAMES);
   const dateValues = dateIndexes.map((index) => normalizeDateCellValue(ticket.row[index], { allowDayOnly: true })).filter(Boolean);
   if (dateValues.length) return dateValues;
   if (dateIndexes.length) return [];
@@ -6587,7 +6592,7 @@ function soldScanRowMatchesCurrentSource(currentSource, candidateSource) {
   if (currentSerialKey && candidateSerialKey && currentSerialKey === candidateSerialKey) return true;
 
   const checks = [
-    [["日期", "演出日期", "date", "day", "일자"], (value) => getDateKeysFromText(value)[0] || normalize(value)],
+    [DATE_COLUMN_NAMES, (value) => getDateKeysFromText(value)[0] || normalize(value)],
     [["区域", "区", "block", "section", "구역"], (value) => cleanZoneToken(value)],
     [["排", "排数", "行", "行数", "row", "열"], (value) => normalize(extractSeatRowFromText(value, { allowBareRange: true }) || value)],
     [["座位号", "座位", "号段", "号码", "seat", "번호", "좌석번호"], (value) => normalize(extractSeatNumberFromText(value, { allowBareRange: true }) || value)],
@@ -7160,7 +7165,7 @@ function ensureSeatNumberColumn(table) {
 }
 
 function ensureDateColumn(table) {
-  return ensureNamedColumn(table, "日期", ["日期", "演出日期", "date", "day", "일자"]);
+  return ensureNamedColumn(table, "日期", DATE_COLUMN_NAMES);
 }
 
 function hasTicketSalePrice(ticket) {
@@ -7207,7 +7212,7 @@ function findCompositeSeatInfoInTicket(ticket) {
   if (!ticket?.table || !Array.isArray(ticket.row)) return null;
   const columns = ticket.table.columns || [];
   const ignoredIndexes = new Set([
-    ...findColumnIndexes(columns, ["日期", "演出日期", "date", "day", "일자"]),
+    ...findColumnIndexes(columns, DATE_COLUMN_NAMES),
     ...findSalePriceColumnIndexes(columns),
     ...findColumnIndexes(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]),
     ...findColumnIndexes(columns, ["数量", "张数", "连坐", "qty", "count", "매수", "수량"]),
@@ -7271,7 +7276,7 @@ function getTicketRowValue(ticket) {
   const index = ranked[0]?.index ?? -1;
   if (index >= 0) return extractSeatRowFromText(ticket.row[index], { allowBareRange: isSeatRowColumnName(ticket.table.columns[index]) }) || ticket.row[index];
   const ignoredIndexes = new Set([
-    ...findColumnIndexes(ticket.table.columns || [], ["日期", "演出日期", "date", "day", "일자"]),
+    ...findColumnIndexes(ticket.table.columns || [], DATE_COLUMN_NAMES),
     ...findColumnIndexes(ticket.table.columns || [], ["序号", "编号", "no", "number"]),
     ...findColumnIndexes(ticket.table.columns || [], ["数量", "张数", "连坐", "连坐数量", "count", "qty", "매수"]),
     ...findSeatNumberColumnIndexes(ticket.table.columns || []),
@@ -7352,7 +7357,7 @@ function getTicketPrimaryDateValue(ticket) {
 }
 
 function getStandardTicketFields(ticket) {
-  const date = getTicketPrimaryDateValue(ticket) || getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["日期", "演出日期", "date", "day", "일자"]);
+  const date = getTicketPrimaryDateValue(ticket) || getFirstNonEmptyColumnValue(ticket.table, ticket.row, DATE_COLUMN_NAMES);
   const face = getFirstFaceValue(ticket.table, ticket.row);
   const zone = getTicketZoneValue(ticket);
   const rowValue = getTicketRowValue(ticket);
@@ -10216,11 +10221,17 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
           })
           .join("")
       : "";
-  const dateColumnIndex = findColumnIndex(table.columns, ["日期", "演出日期", "date", "day", "일자"]);
+  const dateColumnIndex = findColumnIndex(table.columns, DATE_COLUMN_NAMES);
   const missingDateCount =
     dateColumnIndex < 0
-      ? table.rows.length
-      : table.rows.filter((row, rowIndex) => !isUnavailableTicket({ table, row, index: rowIndex }) && !String(row[dateColumnIndex] || "").trim()).length;
+      ? table.rows.filter((row, rowIndex) => {
+          const ticket = { table, row, index: rowIndex };
+          return !isUnavailableTicket(ticket) && !getTicketDateValues(ticket).length;
+        }).length
+      : table.rows.filter((row, rowIndex) => {
+          const ticket = { table, row, index: rowIndex };
+          return !isUnavailableTicket(ticket) && !String(row[dateColumnIndex] || "").trim() && !getTicketDateValues(ticket).length;
+        }).length;
   const reviewRows = table.rows
     .map((row, rowIndex) => ({ row, rowIndex }))
     .filter(({ row, rowIndex }) => table.showSoldInReview || !isUnavailableTicket({ table, row, index: rowIndex }));
