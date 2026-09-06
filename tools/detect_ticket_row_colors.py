@@ -786,6 +786,37 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
     # cell, sequence cell, or a neighboring divider is colored, keep it neutral.
     color_cell_ratio = nonwhite_count / max(1, len(cell_results))
     white_cell_ratio = white_cells / max(1, len(cell_results))
+    sorted_cell_results = sorted(cell_results, key=lambda item: (int(item.get("x1", 0) or 0), int(item.get("x2", 0) or 0)))
+    rightmost_cell = sorted_cell_results[-1] if sorted_cell_results else {}
+    rightmost_label = rightmost_cell.get("label") or rightmost_cell.get("rawLabel") or ""
+    rightmost_white = bool(
+        rightmost_label == COLOR_NAMES["white"]
+        or (
+            float(rightmost_cell.get("whiteRatio", 0) or 0) >= 0.3
+            and float(rightmost_cell.get("coloredRatio", 0) or 0)
+            <= max(0.34, float(rightmost_cell.get("whiteRatio", 0) or 0) * 1.2)
+        )
+    )
+    cell_summaries = [
+        {
+            "label": result.get("label") or "",
+            "rawLabel": result.get("rawLabel") or "",
+            "coloredRatio": result.get("coloredRatio", 0),
+            "whiteRatio": result.get("whiteRatio", 0),
+            "confidence": result.get("confidence", 0),
+            "reason": result.get("reason", ""),
+            "x1": result.get("x1", 0),
+            "x2": result.get("x2", 0),
+        }
+        for result in sorted_cell_results
+    ]
+    common = {
+        "rightmostCellLabel": rightmost_label,
+        "rightmostCellWhite": rightmost_white,
+        "rightmostCellColoredRatio": round(float(rightmost_cell.get("coloredRatio", 0) or 0), 3),
+        "rightmostCellWhiteRatio": round(float(rightmost_cell.get("whiteRatio", 0) or 0), 3),
+        "cellResults": cell_summaries,
+    }
     if nonwhite_count >= max(2, int(np.ceil(len(cell_results) * 0.42))) and nonwhite_count >= white_cells + 1:
         return {
             "label": dominant_nonwhite,
@@ -802,6 +833,7 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
             "whiteCellCount": int(white_cells),
             "strong": True,
             "reason": "cell_majority_color",
+            **common,
         }
 
     if white_cells >= max(2, int(np.ceil(len(cell_results) * 0.4))):
@@ -820,6 +852,7 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
             "whiteCellCount": int(white_cells),
             "strong": True,
             "reason": "cell_majority_white",
+            **common,
         }
 
     return {
@@ -837,6 +870,7 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
         "whiteCellCount": int(white_cells),
         "strong": False,
         "reason": "cell_mixed_or_weak",
+        **common,
     }
 
 
@@ -1036,11 +1070,24 @@ def analyze(image_path, expected_rows=0):
     if image is None:
         raise RuntimeError("image cannot be read")
     intervals = detect_horizontal_intervals(image)
+    line_selected, line_selection_mode = choose_data_intervals(intervals, expected_rows)
     text_selected, text_selection_mode = detect_text_row_intervals(image, expected_rows)
-    if text_selected:
+    line_exact = bool(
+        line_selected
+        and (expected_rows <= 0 or len(line_selected) == expected_rows)
+        and (
+            expected_rows <= 0
+            or line_selection_mode.endswith("_exact")
+            or line_selection_mode == "merged_small_table"
+        )
+    )
+    if line_exact:
+        selected, selection_mode = line_selected, line_selection_mode
+    elif text_selected:
         selected, selection_mode = text_selected, text_selection_mode
     else:
-        selected, selection_mode = choose_data_intervals(intervals, expected_rows)
+        selected, selection_mode = line_selected, line_selection_mode
+    selected = sorted(selected, key=lambda item: (int(item.get("y1", 0) or 0), int(item.get("y2", 0) or 0)))
     rows = [classify_interval(image, interval) for interval in selected]
     compact_selected, compact_mode = detect_compact_colored_table_intervals(image, expected_rows)
     if compact_selected:
@@ -1048,8 +1095,15 @@ def analyze(image_path, expected_rows=0):
         current_has_color = any(color_family(row) not in ("neutral", "unknown") for row in rows)
         compact_has_color = any(color_family(row) not in ("neutral", "unknown") for row in compact_rows)
         compact_exact = len(compact_rows) == expected_rows
-        if compact_exact and compact_has_color and (selection_mode.endswith("prefix") or not current_has_color):
+        compact_starts_below_current = bool(
+            rows
+            and compact_rows
+            and expected_rows <= 3
+            and int(compact_rows[0].get("y1", 0) or 0) > int(rows[0].get("y1", 0) or 0) + max(20, int(image.shape[0] * 0.08))
+        )
+        if compact_exact and compact_has_color and (selection_mode.endswith("prefix") or not current_has_color or compact_starts_below_current):
             selected, selection_mode, rows = compact_selected, compact_mode, compact_rows
+    rows = sorted(rows, key=lambda item: (int(item.get("y1", 0) or 0), int(item.get("y2", 0) or 0)))
     labels = [row["label"] for row in rows if row.get("label")]
     unique_labels = sorted(set(labels))
     if len(rows) <= 1:

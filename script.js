@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 62;
+const ROW_COLOR_LOGIC_VERSION = 63;
 const PUBLISH_DECISION_LOGIC_VERSION = 2;
 const MAX_REVIEW_ROWS_RENDERED = 120;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
@@ -4296,6 +4296,14 @@ function getOpenCvCellStats(item) {
   };
 }
 
+function hasOpenCvWhitePriceSideCell(item) {
+  if (!item || item.userCleared || item.source === "ai_row_color") return false;
+  if (item.rightmostCellWhite === true) return true;
+  const rightWhiteRatio = Number(item.rightmostCellWhiteRatio || 0);
+  const rightColoredRatio = Number(item.rightmostCellColoredRatio || 0);
+  return rightWhiteRatio >= 0.3 && rightColoredRatio <= Math.max(0.34, rightWhiteRatio * 1.2);
+}
+
 function isOpenCvCellMajorityWhite(item) {
   const { cellCount, coloredCellCount, whiteCellCount, whiteCellRatio } = getOpenCvCellStats(item);
   if (cellCount < 3) return false;
@@ -4313,6 +4321,7 @@ function isOpenCvCellMajorityNonWhite(item) {
 function isOpenCvCellNonWhiteTicketSignal(item) {
   if (!item || item.userCleared || item.source === "ai_row_color") return false;
   if (isOpenCvCellMajorityWhite(item)) return false;
+  if (hasOpenCvWhitePriceSideCell(item)) return false;
   if (isOpenCvCellMajorityNonWhite(item)) return true;
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return false;
@@ -4348,6 +4357,7 @@ function getStrictRowLocalOpenCvColorLabel(item) {
     return enoughWhiteCells || weakColorBleed ? "白底" : "";
   }
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return "";
+  if (hasOpenCvWhitePriceSideCell(item)) return "白底";
 
   // Only auto-drop when this exact row's own cells are clearly non-white.
   // Pixel-level labels alone can bleed from separators or adjacent sold rows.
@@ -4692,9 +4702,10 @@ function getOpenCvItemConflictSignalLabel(item) {
 function getOpenCvItemConflictActionLabel(item) {
   if (!item || item.userCleared) return "";
   if (isOpenCvCellMajorityWhite(item)) return "白底";
+  if (hasOpenCvWhitePriceSideCell(item)) return "白底";
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return "";
-  if (item.strong === true) return rawLabel;
+  if (item.strong === true && isOpenCvCellNonWhiteTicketSignal(item)) return rawLabel;
   return isOpenCvCellNonWhiteTicketSignal(item) ? rawLabel : "";
 }
 
@@ -5323,6 +5334,11 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
     cellCount: row?.cellCount || 0,
     coloredCellCount: row?.coloredCellCount || 0,
     whiteCellCount: row?.whiteCellCount || 0,
+    rightmostCellLabel: row?.rightmostCellLabel || "",
+    rightmostCellWhite: row?.rightmostCellWhite === true,
+    rightmostCellColoredRatio: row?.rightmostCellColoredRatio || 0,
+    rightmostCellWhiteRatio: row?.rightmostCellWhiteRatio || 0,
+    cellResults: Array.isArray(row?.cellResults) ? row.cellResults : [],
     strong: row?.strong === true,
     action: row?.action || "",
     reason: row?.reason || "",
