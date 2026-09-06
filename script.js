@@ -6582,13 +6582,16 @@ function soldScanRowMatchesCurrentSource(currentSource, candidateSource) {
   const candidateRow = candidateSource?.row || [];
   const currentSerial = getSoldScanSourceValue(currentSource, ["序号", "编号", "no", "id"]);
   const candidateSerial = getSoldScanSourceValue(candidateSource, ["序号", "编号", "no", "id"]);
-  if (currentSerial && candidateSerial) return normalize(currentSerial) === normalize(candidateSerial);
+  const currentSerialKey = normalize(currentSerial);
+  const candidateSerialKey = normalize(candidateSerial);
+  if (currentSerialKey && candidateSerialKey && currentSerialKey === candidateSerialKey) return true;
 
   const checks = [
     [["日期", "演出日期", "date", "day", "일자"], (value) => getDateKeysFromText(value)[0] || normalize(value)],
     [["区域", "区", "block", "section", "구역"], (value) => cleanZoneToken(value)],
     [["排", "排数", "行", "行数", "row", "열"], (value) => normalize(extractSeatRowFromText(value, { allowBareRange: true }) || value)],
     [["座位号", "座位", "号段", "号码", "seat", "번호", "좌석번호"], (value) => normalize(extractSeatNumberFromText(value, { allowBareRange: true }) || value)],
+    [["备注", "remark", "note", "说明"], (value) => normalize(value)],
   ];
   let compared = 0;
   let matched = 0;
@@ -6599,6 +6602,7 @@ function soldScanRowMatchesCurrentSource(currentSource, candidateSource) {
     compared += 1;
     if (currentValue === candidateValue) matched += 1;
   });
+  if (currentSerialKey && candidateSerialKey && currentSerialKey !== candidateSerialKey && compared >= 3) return matched >= 2;
   if (compared >= 2) return matched >= 2;
 
   const currentTokens = new Set(currentRow.map((cell) => normalize(cell)).filter((cell) => cell && !isSoldText(cell, { strict: true })));
