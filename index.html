@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>票务搜索管理模拟页</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260919-perf-59" />
   </head>
   <body>
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
@@ -347,8 +347,15 @@
 9月19日	1888	205	H	1X	2	4800
 9月19日	1888	204	J	3X	1	4500</textarea>
               </label>
-              <button class="small-button" id="publishUploadButton" type="button">生成待确认表</button>
+              <div class="upload-action-row">
+                <button class="small-button" id="publishUploadButton" type="button">生成待确认表</button>
+                <button class="small-button ghost" id="quickManualUploadButton" type="button">快速人工生成</button>
+                <button class="small-button ghost" id="saveOcrTextButton" type="button">保存 OCR 文本</button>
+                <button class="small-button danger ghost" id="clearGeneratedPendingButton" type="button">清空确认表重来</button>
+                <button class="small-button danger ghost" id="clearOcrTextButton" type="button">删除 OCR 文本</button>
+              </div>
               <p class="upload-status" id="uploadStatus">先选择原始图片/PDF，再生成待确认表。</p>
+              <p class="local-save-status" id="localSaveStatus">本地保存：等待操作</p>
             </form>
             <div class="field-mapping-panel hidden" id="fieldMappingPanel">
               <div class="field-mapping-head">
@@ -448,6 +455,6 @@
       </main>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=20260919-perf-62"></script>
   </body>
 </html>

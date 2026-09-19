@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>座位图手动上色工具</title>
+  <style>
+    :root {
+      --ink: #142027;
+      --muted: #60707b;
+      --line: #d9e2e4;
+      --bg: #f6f7f2;
+      --panel: #fffdf8;
+      --teal: #117d82;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      padding: 18px;
+      border-right: 1px solid var(--line);
+      background: #fff;
+      overflow: auto;
+    }
+
+    main {
+      min-width: 0;
+      padding: 18px;
+      overflow: auto;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      line-height: 1.25;
+    }
+
+    .hint {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .panel {
+      margin-bottom: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .panel strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+
+    input[type="file"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px dashed #b6c9cf;
+      border-radius: 8px;
+      background: #f2fbfc;
+    }
+
+    .palette {
+      display: grid;
+      gap: 8px;
+    }
+
+    .swatch {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      min-height: 48px;
+      padding: 7px;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .swatch.active {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(17, 125, 130, 0.14);
+    }
+
+    .swatch-chip {
+      width: 42px;
+      height: 30px;
+      border: 2px solid #fff;
+      border-radius: 6px;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+    }
+
+    .swatch-chip.hatch {
+      background-image: repeating-linear-gradient(135deg, rgba(25, 31, 34, 0.72) 0 3px, transparent 3px 12px);
+      background-blend-mode: normal;
+    }
+
+    .swatch span {
+      display: block;
+      min-width: 0;
+    }
+
+    .swatch b {
+      display: block;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+
+    .swatch em {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      font-style: normal;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: 1fr 74px;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 0;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    input[type="range"] {
+      width: 100%;
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    button.action {
+      min-height: 42px;
+      border: 1px solid #b9d1d5;
+      border-radius: 8px;
+      background: #fff;
+      color: #0c5960;
+      font: inherit;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    button.action.primary {
+      border-color: var(--teal);
+      background: var(--teal);
+      color: #fff;
+    }
+
+    button.action:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .status {
+      min-height: 40px;
+      margin-top: 12px;
+      padding: 10px;
+      border: 1px solid #e2ded3;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .canvas-shell {
+      min-height: calc(100vh - 36px);
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: auto;
+    }
+
+    .canvas-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .canvas-wrap {
+      position: relative;
+      display: inline-block;
+      min-width: 720px;
+      min-height: 520px;
+      border: 1px solid #d5dde0;
+      border-radius: 8px;
+      background:
+        linear-gradient(45deg, #eef3f4 25%, transparent 25%),
+        linear-gradient(-45deg, #eef3f4 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #eef3f4 75%),
+        linear-gradient(-45deg, transparent 75%, #eef3f4 75%);
+      background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+      background-size: 24px 24px;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      max-width: min(1180px, calc(100vw - 390px));
+      height: auto;
+      cursor: crosshair;
+    }
+
+    .empty {
+      display: grid;
+      width: 720px;
+      height: 520px;
+      place-items: center;
+      color: var(--muted);
+      font-weight: 900;
+    }
+
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      canvas { max-width: calc(100vw - 36px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <h1>座位图手动上色</h1>
+      <p class="hint">先选价位色，再在图上单击或双击一个区域块。工具会按相邻同底色自动填充，不会靠 AI 猜。</p>
+
+      <section class="panel">
+        <strong>图片</strong>
+        <input id="fileInput" type="file" accept="image/*" />
+      </section>
+
+      <section class="panel">
+        <strong>价位色</strong>
+        <div class="palette" id="palette"></div>
+      </section>
+
+      <section class="panel">
+        <strong>识别范围</strong>
+        <label class="control-row">
+          <span>颜色容差</span>
+          <output id="toleranceOutput">34</output>
+        </label>
+        <input id="tolerance" type="range" min="8" max="88" value="34" />
+        <p class="hint">点到同一个区域但只染了一小块，就调大；染到旁边区域，就调小。</p>
+      </section>
+
+      <section class="panel">
+        <strong>操作</strong>
+        <div class="buttons">
+          <button class="action" id="undoButton" type="button" disabled>撤销</button>
+          <button class="action" id="resetButton" type="button" disabled>恢复原图</button>
+          <button class="action primary" id="downloadButton" type="button" disabled>导出 PNG</button>
+          <button class="action" id="fitButton" type="button" disabled>适合屏幕</button>
+        </div>
+        <div class="status" id="status">请选择一张座位图。</div>
+      </section>
+    </aside>
+
+    <main>
+      <div class="canvas-shell">
+        <div class="canvas-toolbar">
+          <span id="imageInfo">未载入图片</span>
+          <span>单击/双击区域块即可上色</span>
+        </div>
+        <div class="canvas-wrap" id="canvasWrap">
+          <div class="empty" id="emptyState">载入图片后开始</div>
+          <canvas id="canvas" hidden></canvas>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const PRICES = [
+      { id: "vip1", label: "VIP1", price: "HKD 3,099", color: [246, 235, 43], hatch: false },
+      { id: "vip2", label: "VIP2", price: "HKD 2,699", color: [246, 148, 43], hatch: false },
+      { id: "vip3", label: "VIP3", price: "HKD 2,399", color: [18, 181, 146], hatch: false },
+      { id: "2099", label: "2099", price: "HKD 2,099", color: [124, 209, 223], hatch: false },
+      { id: "2099rv", label: "2099 RV", price: "HKD 2,099", color: [196, 242, 242], hatch: true },
+      { id: "1899", label: "1899", price: "HKD 1,899", color: [184, 137, 200], hatch: false },
+      { id: "1299", label: "1299", price: "HKD 1,299", color: [199, 26, 125], hatch: false },
+      { id: "1699rv", label: "1699 RV", price: "HKD 1,699", color: [225, 45, 66], hatch: true },
+      { id: "899", label: "899", price: "HKD 899", color: [241, 214, 237], hatch: false },
+      { id: "899rv", label: "899 RV", price: "HKD 899", color: [241, 214, 237], hatch: true },
+      { id: "699rv", label: "699 RV", price: "HKD 699", color: [18, 111, 176], hatch: true },
+      { id: "clear", label: "恢复原底色", price: "从原图取回", color: [208, 226, 226], hatch: false, restore: true },
+    ];
+
+    const fileInput = document.querySelector("#fileInput");
+    const palette = document.querySelector("#palette");
+    const canvas = document.querySelector("#canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const emptyState = document.querySelector("#emptyState");
+    const statusEl = document.querySelector("#status");
+    const tolerance = document.querySelector("#tolerance");
+    const toleranceOutput = document.querySelector("#toleranceOutput");
+    const undoButton = document.querySelector("#undoButton");
+    const resetButton = document.querySelector("#resetButton");
+    const downloadButton = document.querySelector("#downloadButton");
+    const fitButton = document.querySelector("#fitButton");
+    const imageInfo = document.querySelector("#imageInfo");
+
+    let active = PRICES[0];
+    let originalImageData = null;
+    let history = [];
+    let fileName = "seatmap-colored.png";
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function rgb(color) {
+      return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+    }
+
+    function renderPalette() {
+      palette.innerHTML = "";
+      PRICES.forEach((item) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `swatch${item.id === active.id ? " active" : ""}`;
+        button.innerHTML = `
+          <i class="swatch-chip${item.hatch ? " hatch" : ""}" style="background-color:${rgb(item.color)}"></i>
+          <span><b>${item.label}</b><em>${item.price}</em></span>
+        `;
+        button.addEventListener("click", () => {
+          active = item;
+          renderPalette();
+          setStatus(`当前价位：${item.label} ${item.price}。单击区域块上色。`);
+        });
+        palette.append(button);
+      });
+    }
+
+    function enableTools(enabled) {
+      resetButton.disabled = !enabled;
+      downloadButton.disabled = !enabled;
+      fitButton.disabled = !enabled;
+      undoButton.disabled = !enabled || history.length === 0;
+    }
+
+    function pushHistory() {
+      if (!canvas.width || !canvas.height) return;
+      history.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+      if (history.length > 24) history.shift();
+      enableTools(true);
+    }
+
+    function loadImageFromFile(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0);
+          originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          history = [];
+          fileName = file.name.replace(/\.[^.]+$/, "") + "-colored.png";
+          emptyState.hidden = true;
+          canvas.hidden = false;
+          imageInfo.textContent = `${file.name} · ${canvas.width} × ${canvas.height}`;
+          enableTools(true);
+          setStatus("图片已载入。选价位色后，单击座位区域块上色。");
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function getCanvasPoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(canvas.width - 1, Math.floor((event.clientX - rect.left) * canvas.width / rect.width))),
+        y: Math.max(0, Math.min(canvas.height - 1, Math.floor((event.clientY - rect.top) * canvas.height / rect.height))),
+      };
+    }
+
+    function colorDistance(data, idx, target) {
+      const dr = data[idx] - target[0];
+      const dg = data[idx + 1] - target[1];
+      const db = data[idx + 2] - target[2];
+      return Math.sqrt(dr * dr + dg * dg + db * db);
+    }
+
+    function isWhiteGap(data, idx) {
+      return data[idx] > 238 && data[idx + 1] > 238 && data[idx + 2] > 238;
+    }
+
+    function isLikelyTextOrLine(data, idx) {
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      return max < 115 || (max < 165 && max - min < 35);
+    }
+
+    function findPaintSeed(imageData, startX, startY) {
+      const { width, height, data } = imageData;
+      const centerIdx = (startY * width + startX) * 4;
+      if (!isWhiteGap(data, centerIdx) && !isLikelyTextOrLine(data, centerIdx)) return { x: startX, y: startY };
+      let best = null;
+      let bestScore = Infinity;
+      for (let radius = 1; radius <= 34; radius += 1) {
+        const x1 = Math.max(0, startX - radius);
+        const x2 = Math.min(width - 1, startX + radius);
+        const y1 = Math.max(0, startY - radius);
+        const y2 = Math.min(height - 1, startY + radius);
+        for (let y = y1; y <= y2; y += 1) {
+          for (let x = x1; x <= x2; x += 1) {
+            if (x !== x1 && x !== x2 && y !== y1 && y !== y2) continue;
+            const idx = (y * width + x) * 4;
+            if (isWhiteGap(data, idx) || isLikelyTextOrLine(data, idx)) continue;
+            const score = (x - startX) ** 2 + (y - startY) ** 2;
+            if (score < bestScore) {
+              best = { x, y };
+              bestScore = score;
+            }
+          }
+        }
+        if (best) return best;
+      }
+      return null;
+    }
+
+    function floodMask(imageData, startX, startY, limit) {
+      const { width, height, data } = imageData;
+      const startIdx = (startY * width + startX) * 4;
+      const target = [data[startIdx], data[startIdx + 1], data[startIdx + 2]];
+      const visited = new Uint8Array(width * height);
+      const mask = new Uint8Array(width * height);
+      const queue = [[startX, startY]];
+      let count = 0;
+      visited[startY * width + startX] = 1;
+
+      while (queue.length) {
+        const [x, y] = queue.pop();
+        const pixel = y * width + x;
+        const idx = pixel * 4;
+        if (isWhiteGap(data, idx) || isLikelyTextOrLine(data, idx) || colorDistance(data, idx, target) > limit) continue;
+        mask[pixel] = 1;
+        count += 1;
+        const neighbors = [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]];
+        for (const [nx, ny] of neighbors) {
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const nPixel = ny * width + nx;
+          if (visited[nPixel]) continue;
+          visited[nPixel] = 1;
+          queue.push([nx, ny]);
+        }
+      }
+      return { mask, count, target };
+    }
+
+    function applyHatch(imageData, mask, color) {
+      const { width, height, data } = imageData;
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const pixel = y * width + x;
+          if (!mask[pixel]) continue;
+          if (((x + y) % 34) < 4) {
+            const idx = pixel * 4;
+            data[idx] = Math.round(color[0] * 0.42);
+            data[idx + 1] = Math.round(color[1] * 0.42);
+            data[idx + 2] = Math.round(color[2] * 0.42);
+          }
+        }
+      }
+    }
+
+    function colorRegion(event) {
+      if (!originalImageData) return;
+      const point = getCanvasPoint(event);
+      const seed = findPaintSeed(originalImageData, point.x, point.y);
+      if (!seed) {
+        setStatus("这里像背景/文字，没有找到可上色块。请点在色块内部。");
+        return;
+      }
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const maskResult = floodMask(originalImageData, seed.x, seed.y, Number(tolerance.value));
+      if (maskResult.count < 20) {
+        setStatus("没有识别到足够大的区域。请点在色块内部，或调大容差。");
+        return;
+      }
+      if (maskResult.count > canvas.width * canvas.height * 0.18) {
+        setStatus("这次识别范围太大，可能点到背景了。请调小容差或点到色块中间。");
+        return;
+      }
+      pushHistory();
+      const { data } = imageData;
+      const source = active.restore ? originalImageData.data : null;
+      for (let i = 0; i < maskResult.mask.length; i += 1) {
+        if (!maskResult.mask[i]) continue;
+        const idx = i * 4;
+        if (source) {
+          data[idx] = source[idx];
+          data[idx + 1] = source[idx + 1];
+          data[idx + 2] = source[idx + 2];
+          data[idx + 3] = source[idx + 3];
+        } else {
+          data[idx] = active.color[0];
+          data[idx + 1] = active.color[1];
+          data[idx + 2] = active.color[2];
+          data[idx + 3] = 255;
+        }
+      }
+      if (active.hatch && !active.restore) applyHatch(imageData, maskResult.mask, active.color);
+      ctx.putImageData(imageData, 0, 0);
+      enableTools(true);
+      setStatus(`已上色：${active.label} ${active.price}，覆盖约 ${maskResult.count.toLocaleString()} 个像素。`);
+    }
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files?.[0];
+      if (file) loadImageFromFile(file);
+    });
+
+    tolerance.addEventListener("input", () => {
+      toleranceOutput.textContent = tolerance.value;
+    });
+
+    let lastPaintAt = 0;
+    canvas.addEventListener("dblclick", colorRegion);
+    canvas.addEventListener("click", (event) => {
+      if (!originalImageData) return;
+      const now = Date.now();
+      if (now - lastPaintAt < 260) return;
+      lastPaintAt = now;
+      colorRegion(event);
+    });
+
+    undoButton.addEventListener("click", () => {
+      const previous = history.pop();
+      if (!previous) return;
+      ctx.putImageData(previous, 0, 0);
+      enableTools(true);
+      setStatus("已撤销上一步。");
+    });
+
+    resetButton.addEventListener("click", () => {
+      if (!originalImageData) return;
+      pushHistory();
+      ctx.putImageData(originalImageData, 0, 0);
+      setStatus("已恢复原图。");
+    });
+
+    downloadButton.addEventListener("click", () => {
+      const link = document.createElement("a");
+      link.download = fileName;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      setStatus("已导出 PNG。");
+    });
+
+    fitButton.addEventListener("click", () => {
+      canvas.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+      setStatus("已定位到画布。");
+    });
+
+    renderPalette();
+  </script>
+</body>
+</html>

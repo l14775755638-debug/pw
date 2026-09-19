@@ -8,17 +8,30 @@ const { execFile, spawn } = require("child_process");
 
 const root = __dirname;
 const depsRoot = "/Users/macbook/.cache/codex-runtimes/codex-primary-runtime/dependencies";
-const pdftoppmPath = path.join(depsRoot, "bin", "pdftoppm");
-const pdfinfoPath = path.join(depsRoot, "bin", "pdfinfo");
+const bundledPdftoppmPath = path.join(depsRoot, "bin", "pdftoppm");
+const bundledPdfinfoPath = path.join(depsRoot, "bin", "pdfinfo");
+const pdftoppmPath = process.env.PDFTOPPM_PATH || (fs.existsSync(bundledPdftoppmPath) ? bundledPdftoppmPath : "pdftoppm");
+const pdfinfoPath = process.env.PDFINFO_PATH || (fs.existsSync(bundledPdfinfoPath) ? bundledPdfinfoPath : "pdfinfo");
 const nodeModuleRoot = path.join(depsRoot, "node", "node_modules");
 const pythonPath = process.env.PYTHON || "/usr/bin/python3";
 const rowColorScriptPath = path.join(root, "tools", "detect_ticket_row_colors.py");
 const pdfRowColorScriptPath = path.join(root, "tools", "detect_pdf_row_colors.py");
+const ppStructureScriptPath = path.join(root, "tools", "analyze_ppstructure_table.py");
+const ticketRowAnchorColorScriptPath = path.join(root, "tools", "analyze_ticket_row_anchor_colors.py");
 const depsPythonPath = path.join(depsRoot, "python", "bin", "python3");
+const localPaddlePythonPath = path.join(root, "tmp", "paddleocr-eval", "venv", "bin", "python");
 const seatmapTemplateDir = path.join(root, "seatmap-templates");
 const uploadSourceDir = path.join(root, "uploads");
 const uploadBackupDir = path.join(os.homedir(), ".ticket-admin-source-cache");
 const ticketOcrJobs = new Map();
+
+function loadSharp() {
+  try {
+    return require(path.join(nodeModuleRoot, "sharp"));
+  } catch {
+    return require("sharp");
+  }
+}
 
 function loadLocalEnv() {
   const envPath = path.join(root, ".env");
@@ -44,8 +57,11 @@ const maxBatchOcrPages = readPositiveIntegerEnv("TICKET_OCR_MAX_PAGES", Number.P
 const batchOcrConcurrency = Math.max(1, Math.min(readPositiveIntegerEnv("TICKET_OCR_CONCURRENCY", 1), 3));
 const batchOcrRetries = Math.max(0, Math.min(readPositiveIntegerEnv("TICKET_OCR_RETRIES", 3), 6));
 const batchOcrRetryDelayMs = Math.max(300, readPositiveIntegerEnv("TICKET_OCR_RETRY_DELAY_MS", 1800));
+const aiRequestTimeoutSeconds = Math.max(25, readPositiveIntegerEnv("AI_REQUEST_TIMEOUT_SECONDS", 180));
 const ocrCompletenessCheckEnabled = process.env.TICKET_OCR_COMPLETENESS_CHECK === "1";
 const ocrRowColorDuringScanEnabled = process.env.TICKET_OCR_ROW_COLOR_DURING_SCAN === "1";
+const ocrPpStructureDuringScanEnabled = process.env.TICKET_OCR_PPSTRUCTURE_DURING_SCAN === "1";
+const rowColorLogicVersion = 77;
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const defaultProxy = "http://127.0.0.1:7897";
@@ -145,6 +161,19 @@ function runFile(command, args) {
   });
 }
 
+function runFileWithTimeout(command, args, timeout) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
 function dataUrlToBuffer(dataUrl) {
   const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
   if (!match) throw new Error("文件数据格式不正确。");
@@ -172,7 +201,7 @@ function getMimeForExtension(fileName = "") {
 function safeFileStem(fileName) {
   return path
     .basename(String(fileName || "source"), path.extname(String(fileName || "")))
-    .replace(/[^\w\u4e00-\u9fa5-]+/g, "-")
+    .replace(/[^\w-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "source";
 }
@@ -194,15 +223,26 @@ function getUploadBackupPath(fileName) {
   return path.join(uploadBackupDir, path.basename(String(fileName || "")));
 }
 
+function isReadableSavedFile(filePath) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return false;
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) return false;
+    return stat.size > 1024;
+  } catch {
+    return false;
+  }
+}
+
 function getReadableUploadPath(sourceUrl) {
   if (!String(sourceUrl || "").startsWith("uploads/")) return null;
   const fileName = path.basename(sourceUrl);
   const sourcePath = path.resolve(uploadSourceDir, fileName);
   const uploadRoot = path.resolve(uploadSourceDir);
   if (!sourcePath.startsWith(`${uploadRoot}${path.sep}`)) return null;
-  if (fs.existsSync(sourcePath)) return sourcePath;
   const backupPath = getUploadBackupPath(fileName);
-  if (fs.existsSync(backupPath)) return backupPath;
+  if (isReadableSavedFile(backupPath)) return backupPath;
+  if (isReadableSavedFile(sourcePath)) return sourcePath;
   return null;
 }
 
@@ -253,7 +293,7 @@ async function parseSpreadsheetPreview(request, response) {
   const ext = path.extname(fileName).toLowerCase() || ".xlsx";
   const tempPath = path.join(os.tmpdir(), `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeFileStem(fileName)}${ext}`);
   fs.writeFileSync(tempPath, buffer);
-  const python = path.join(depsRoot, "python", "bin", "python3");
+  const python = fs.existsSync(depsPythonPath) ? depsPythonPath : pythonPath;
   const script = String.raw`
 import csv, json, os, sys
 path = sys.argv[1]
@@ -323,8 +363,15 @@ function normalizeRegion(region, index) {
   return { label: safeLabel, polygon: normalizedPolygon, labelPoint, missingIndex: safeLabel ? null : index + 1 };
 }
 
-function requestJson(url, payload, headers = {}) {
-  return proxyAgent ? requestJsonViaCurl(url, payload, headers) : requestJsonDirect(url, payload, headers);
+async function requestJson(url, payload, headers = {}) {
+  if (!proxyAgent) return requestJsonDirect(url, payload, headers);
+  try {
+    return await requestJsonViaCurl(url, payload, headers);
+  } catch (error) {
+    if (getActiveProvider() !== "aliyun") throw error;
+    console.warn(`Aliyun proxy request failed, retrying direct: ${error.message || error}`);
+    return requestJsonDirect(url, payload, headers);
+  }
 }
 
 function getApiErrorMessage(apiResponse, fallback, providerName = "") {
@@ -377,7 +424,7 @@ function requestJsonDirect(url, payload, headers = {}) {
   return new Promise((resolve, reject) => {
     const { target, body, options } = buildRequestOptions(url, payload, headers);
     const request = https.request(options, (apiResponse) => parseApiResponse(resolve, apiResponse));
-    request.setTimeout(25000, () => request.destroy(new Error(`连接 ${target.hostname} 超时，请检查网络或稍后重试。`)));
+    request.setTimeout(aiRequestTimeoutSeconds * 1000, () => request.destroy(new Error(`连接 ${target.hostname} 超时，请检查网络或稍后重试。`)));
     request.on("error", reject);
     request.write(body);
     request.end();
@@ -390,8 +437,9 @@ function requestJsonViaCurl(url, payload, headers = {}) {
     const args = [
       "--silent",
       "--show-error",
+      "--http1.1",
       "--max-time",
-      String(Number(process.env.AI_REQUEST_TIMEOUT_SECONDS || 180)),
+      String(aiRequestTimeoutSeconds),
       "--write-out",
       "\n%{http_code}",
       "--proxy",
@@ -605,7 +653,9 @@ function buildTablePrompt(pageNumber) {
     "如果列名是“票面位置/位置/排数”，内容为“1-4排”，必须输出完整“1-4排”，不能截成 1；如果列名是“票面号段/号段/座位号”，内容为“15-16号”，必须输出完整“15-16号”，不能截成 15。",
     "列名“座位图/座席图/seat map”是原表给买家看的座位方向参考，不是座位号列；不要因为里面有“座位”两个字就把它当成座位号。",
     "例如原表列为：编号、状态、门票时间、席位、区域、票面位置、票面号段、座位图、售价；输出也必须是这些列，不能改成“序号 日期 票面 区域 排 座位号 数量 售价”。",
-    "韩文座位词请按中文字段理解：구역/구=区/区域，열=排。例如 101구역 P열 -> 区域 101、排 P；II1구역 2열 -> 区域 I1、排 2。",
+    "韩文座位词请按中文字段理解：구역/구=区/区域，열=排，층=层，번/호/입장번호=座位号或入场号。例如 101구역 P열 -> 区域 101、排 P；1층 10구역 15열 1x번 -> 区域 10、排 15、座位号 1x、备注 1层；Floor층 EXO구역 입장번호 2x번 -> 区域 EXO、座位号 2x、备注 Floor层/入场号；II1구역 2열 -> 区域 I1、排 2。",
+    "如果任何可见单元格包含韩文座位信息，例如 층、구역、구、열、번、호、입장번호，必须把这整格韩文原文输出到原来的列里；即使不确定含义，也不能省略、不能留空、不能只输出 VIP 和价格。",
+    "韩文位置格常出现在“位置/票面/座位/区域/备注”列，例如“1층 10구역 15열 1x번”“Floor층 are구역 입장번호15x번”。必须照抄原文，后台会自动翻译拆分；不要在 OCR 阶段把韩文翻译后替换原文。",
     "如果表头叫“位置”或“票面”，但每行内容实际是 101구역 P열、R1구역 3열、211区 A排 这类位置，照抄在原列中，不要把它误判成票价或售价。",
     "如果表头叫“大小号/座位号/号段”，内容是 X、x号、1X、2X、3X，请原样输出，不要改成 1，不要放到排，也不要当数量；没写座位号时留空。",
     "数量列只能照抄张数或连坐说明，例如 1、2、3、单张、二连、2x；价格数字例如 5200、11800 绝不能写到数量列。",
@@ -929,7 +979,7 @@ async function renderPdfPagesToImages(pdfDataUrl, maxPages = 6) {
   fs.writeFileSync(pdfPath, buffer);
   try {
     await runFile(pdftoppmPath, ["-jpeg", "-r", "150", "-f", "1", "-l", String(maxPages), pdfPath, outputPrefix]);
-    const sharp = require(path.join(nodeModuleRoot, "sharp"));
+    const sharp = loadSharp();
     const files = fs
       .readdirSync(tempDir)
       .filter((file) => /^page-\d+\.jpg$/.test(file))
@@ -959,7 +1009,7 @@ async function renderPdfPageToImage(pdfDataUrl, pageNumber = 1) {
   fs.writeFileSync(pdfPath, buffer);
   try {
     await runFile(pdftoppmPath, ["-jpeg", "-r", "150", "-f", String(page), "-l", String(page), pdfPath, outputPrefix]);
-    const sharp = require(path.join(nodeModuleRoot, "sharp"));
+    const sharp = loadSharp();
     const file = fs
       .readdirSync(tempDir)
       .filter((name) => /^page-\d+\.jpg$/.test(name))
@@ -974,18 +1024,26 @@ async function renderPdfPageToImage(pdfDataUrl, pageNumber = 1) {
 
 async function renderPdfPagePathToImage(pdfPath, pageNumber = 1) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-pdf-page-"));
+  const safePdfPath = path.join(tempDir, "source.pdf");
   const outputPrefix = path.join(tempDir, "page");
   const page = Math.max(1, Math.floor(Number(pageNumber) || 1));
   try {
-    await runFile(pdftoppmPath, ["-jpeg", "-r", "150", "-f", String(page), "-l", String(page), pdfPath, outputPrefix]);
-    const sharp = require(path.join(nodeModuleRoot, "sharp"));
+    if (!isReadableSavedFile(pdfPath)) {
+      throw new Error(`PDF 原文件不可读，无法渲染第 ${page} 页。`);
+    }
+    fs.copyFileSync(pdfPath, safePdfPath);
+    await runFileWithTimeout(pdftoppmPath, ["-jpeg", "-r", "150", "-f", String(page), "-l", String(page), safePdfPath, outputPrefix], 180000);
+    const sharp = loadSharp();
     const file = fs
       .readdirSync(tempDir)
       .filter((name) => /^page-\d+\.jpg$/.test(name))
       .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]))[0];
-    if (!file) return "";
+    if (!file) throw new Error(`PDF 第 ${page} 页没有渲染出图片。`);
     const compressed = await sharp(path.join(tempDir, file)).resize({ width: 1600, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
     return `data:image/jpeg;base64,${compressed.toString("base64")}`;
+  } catch (error) {
+    const detail = formatErrorMessage(error);
+    throw new Error(`PDF 第 ${page} 页渲染失败：${detail}`);
   } finally {
     fs.rm(tempDir, { recursive: true, force: true }, () => {});
   }
@@ -993,7 +1051,7 @@ async function renderPdfPagePathToImage(pdfPath, pageNumber = 1) {
 
 async function cropImageDataUrl(imageDataUrl, { topRatio = 0.45, heightRatio = 0.55 } = {}) {
   const { buffer } = dataUrlToBuffer(imageDataUrl);
-  const sharp = require(path.join(nodeModuleRoot, "sharp"));
+  const sharp = loadSharp();
   const image = sharp(buffer);
   const metadata = await image.metadata();
   const width = Number(metadata.width || 0);
@@ -1101,6 +1159,29 @@ function countRecognizedDataRows(text) {
     }, 0);
 }
 
+function parseRecognizedRowsForAiRowColor(text) {
+  const cleaned = cleanRecognizedTableText([stripRecognizedColorColumns(text)]);
+  const pageColumns = [];
+  const rows = [];
+  cleaned.split(/\n\s*\n/).forEach((block) => {
+    const lines = String(block || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !/^-{2,}\s*PDF\s*第\s*\d+\s*页\s*-{2,}$/i.test(line));
+    if (lines.length < 1) return;
+    const firstCells = splitRecognizedTableLine(lines[0]).map((cell) => cell.trim());
+    const firstLineIsData = looksLikeRecognizedDataCells(firstCells);
+    const columns = firstLineIsData ? firstCells.map((_, index) => `列${index + 1}`) : firstCells;
+    if (!pageColumns.length && columns.length) pageColumns.push(...columns);
+    lines.slice(firstLineIsData ? 0 : 1).forEach((line) => {
+      const cells = splitRecognizedTableLine(line).map((cell) => cell.trim());
+      if (cells.some(Boolean)) rows.push(cells);
+    });
+  });
+  return { columns: pageColumns, rows };
+}
+
 async function analyzeTicketRowColorsFromDataUrl(imageDataUrl, expectedRows) {
   if (!fs.existsSync(rowColorScriptPath)) {
     return { source: "opencv", reliable: false, error: "OpenCV 行色脚本不存在", rows: [] };
@@ -1115,6 +1196,8 @@ async function analyzeTicketRowColorsFromDataUrl(imageDataUrl, expectedRows) {
     const parsed = JSON.parse(stdout || "{}");
     return {
       source: "opencv",
+      imageWidth: Number(parsed.imageWidth || 0),
+      imageHeight: Number(parsed.imageHeight || 0),
       expectedRows: Number(parsed.expectedRows || expectedRows || 0),
       detectedRows: Number(parsed.detectedRows || 0),
       selectionMode: parsed.selectionMode || "",
@@ -1126,6 +1209,7 @@ async function analyzeTicketRowColorsFromDataUrl(imageDataUrl, expectedRows) {
       unreliableReasons: Array.isArray(parsed.unreliableReasons) ? parsed.unreliableReasons : [],
       warningReasons: Array.isArray(parsed.warningReasons) ? parsed.warningReasons : [],
       labels: Array.isArray(parsed.labels) ? parsed.labels : [],
+      rowActionTextRows: Array.isArray(parsed.rowActionTextRows) ? parsed.rowActionTextRows : [],
       rows: Array.isArray(parsed.rows) ? parsed.rows : [],
       error: parsed.error || "",
     };
@@ -1153,6 +1237,8 @@ async function analyzeTicketRowColorsFromPdfPath(pdfPath, page, expectedRows) {
     const parsed = JSON.parse(stdout || "{}");
     return {
       source: "pdf_vector",
+      imageWidth: Number(parsed.imageWidth || 0),
+      imageHeight: Number(parsed.imageHeight || 0),
       expectedRows: Number(parsed.expectedRows || expectedRows || 0),
       detectedRows: Number(parsed.detectedRows || 0),
       selectionMode: parsed.selectionMode || "",
@@ -1184,6 +1270,458 @@ async function analyzeTicketRowColorsFromPdfDataUrl(pdfDataUrl, page, expectedRo
   }
 }
 
+async function analyzeTicketAnchorRowColorsFromDataUrl(imageDataUrl, rows, columns = []) {
+  if (!fs.existsSync(ticketRowAnchorColorScriptPath)) {
+    return { source: "ticket_row_anchor", reliable: false, autoApplyAllowed: false, error: "票行锚点取色脚本不存在。", rows: [] };
+  }
+  const { mimeType, buffer } = dataUrlToBuffer(imageDataUrl);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-row-anchor-color-"));
+  const imagePath = path.join(tempDir, `page${getExtensionForMime(mimeType, "page.jpg")}`);
+  fs.writeFileSync(imagePath, buffer);
+  try {
+    const { stdout } = await runFileWithTimeout(
+      getPpStructurePythonPath(),
+      [
+        ticketRowAnchorColorScriptPath,
+        imagePath,
+        "--rows-json",
+        JSON.stringify(Array.isArray(rows) ? rows : []),
+        "--columns-json",
+        JSON.stringify(Array.isArray(columns) ? columns : []),
+      ],
+      90000,
+    );
+    const parsed = JSON.parse(stdout || "{}");
+    return {
+      source: "ticket_row_anchor",
+      expectedRows: Number(parsed.expectedRows || 0),
+      imageWidth: Number(parsed.imageWidth || 0),
+      imageHeight: Number(parsed.imageHeight || 0),
+      detectedRows: Number(parsed.matchedRows || 0),
+      matchedRows: Number(parsed.matchedRows || 0),
+      selectionMode: parsed.selectionMode || "ocr_text_anchor_center_band",
+      reliable: parsed.reliable === true,
+      exactRowAligned: parsed.exactRowAligned === true,
+      contiguous: parsed.reliable === true,
+      autoApplyAllowed: parsed.autoApplyAllowed === true,
+      rowGeometryVerified: parsed.exactRowAligned === true,
+      rowTextVerified: parsed.reliable === true,
+      rows: Array.isArray(parsed.rows) ? parsed.rows : [],
+      visualRows: Array.isArray(parsed.visualRows) ? parsed.visualRows.slice(0, 80) : [],
+      unreliableReasons: parsed.reliable === true ? [] : ["ticket_row_anchor_not_fully_matched"],
+      warningReasons: [],
+      error: parsed.error || "",
+      initSeconds: parsed.initSeconds,
+      inferSeconds: parsed.inferSeconds,
+    };
+  } catch (error) {
+    return { source: "ticket_row_anchor", reliable: false, autoApplyAllowed: false, error: formatErrorMessage(error), rows: [] };
+  } finally {
+    fs.rm(tempDir, { recursive: true, force: true }, () => {});
+  }
+}
+
+async function analyzeTicketAnchorRowColorsBatch(payload, tables = []) {
+  if (!fs.existsSync(ticketRowAnchorColorScriptPath)) {
+    return { error: "票行锚点取色脚本不存在。", rowColorAnalyses: {} };
+  }
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-row-anchor-color-batch-"));
+  try {
+    const batch = [];
+    for (const table of tables) {
+      const page = Math.max(1, Math.floor(Number(table?.sourcePage || 1)));
+      const rows = Array.isArray(table?.rows) ? table.rows : [];
+      if (!rows.length || rows.length > 80) continue;
+      const image = await resolveRowColorSourceImage({ ...payload, sourcePage: page });
+      const { mimeType, buffer } = dataUrlToBuffer(image);
+      const imagePath = path.join(tempDir, `page-${page}${getExtensionForMime(mimeType, ".jpg")}`);
+      fs.writeFileSync(imagePath, buffer);
+      batch.push({
+        page,
+        image: imagePath,
+        columns: Array.isArray(table?.columns) ? table.columns : [],
+        rows,
+      });
+    }
+    if (!batch.length) return { rowColorAnalyses: {} };
+    const { stdout } = await runFileWithTimeout(
+      getPpStructurePythonPath(),
+      [ticketRowAnchorColorScriptPath, "--batch-json", JSON.stringify(batch)],
+      Math.max(120000, batch.length * 25000),
+    );
+    const parsed = JSON.parse(stdout || "{}");
+    const rowColorAnalyses = {};
+    (Array.isArray(parsed.results) ? parsed.results : []).forEach((analysis) => {
+      const page = Math.max(1, Math.floor(Number(analysis?.page || 1)));
+      rowColorAnalyses[String(page)] = {
+        source: "ticket_row_anchor",
+        expectedRows: Number(analysis.expectedRows || 0),
+        imageWidth: Number(analysis.imageWidth || 0),
+        imageHeight: Number(analysis.imageHeight || 0),
+        detectedRows: Number(analysis.matchedRows || 0),
+        matchedRows: Number(analysis.matchedRows || 0),
+        selectionMode: analysis.selectionMode || "ocr_text_anchor_center_band",
+        reliable: analysis.reliable === true,
+        exactRowAligned: analysis.exactRowAligned === true,
+        contiguous: analysis.reliable === true,
+        autoApplyAllowed: analysis.autoApplyAllowed === true,
+        rowGeometryVerified: analysis.exactRowAligned === true,
+        rowTextVerified: analysis.reliable === true,
+        rows: Array.isArray(analysis.rows) ? analysis.rows : [],
+        visualRows: Array.isArray(analysis.visualRows) ? analysis.visualRows.slice(0, 80) : [],
+        unreliableReasons: analysis.reliable === true ? [] : ["ticket_row_anchor_not_fully_matched"],
+        warningReasons: [],
+        error: analysis.error || "",
+        initSeconds: parsed.initSeconds,
+        inferSeconds: analysis.inferSeconds,
+      };
+    });
+    return { rowColorAnalyses, initSeconds: parsed.initSeconds, count: Number(parsed.count || batch.length) };
+  } finally {
+    fs.rm(tempDir, { recursive: true, force: true }, () => {});
+  }
+}
+
+function getPpStructurePythonPath() {
+  if (process.env.PADDLEOCR_PYTHON) return process.env.PADDLEOCR_PYTHON;
+  if (fs.existsSync(localPaddlePythonPath)) return localPaddlePythonPath;
+  return pythonPath;
+}
+
+async function analyzePpStructureImageFile(imagePath) {
+  if (!fs.existsSync(ppStructureScriptPath)) {
+    return { source: "paddle_ppstructure", error: "PP-Structure 分析脚本不存在。" };
+  }
+  const { stdout } = await runFileWithTimeout(getPpStructurePythonPath(), [ppStructureScriptPath, imagePath], 180000);
+  return JSON.parse(stdout || "{}");
+}
+
+async function analyzePpStructureImageDataUrl(imageDataUrl) {
+  const { mimeType, buffer } = dataUrlToBuffer(imageDataUrl);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-ppstructure-image-"));
+  const imagePath = path.join(tempDir, `page${getExtensionForMime(mimeType, "page.jpg")}`);
+  fs.writeFileSync(imagePath, buffer);
+  try {
+    return await analyzePpStructureImageFile(imagePath);
+  } finally {
+    fs.rm(tempDir, { recursive: true, force: true }, () => {});
+  }
+}
+
+async function analyzePpStructurePdfPath(pdfPath, page) {
+  const imageDataUrl = await renderPdfPagePathToImage(pdfPath, page);
+  if (!imageDataUrl) {
+    return { source: "paddle_ppstructure", error: "PDF 页面渲染失败，无法做 PP-Structure 测试。" };
+  }
+  return analyzePpStructureImageDataUrl(imageDataUrl);
+}
+
+async function analyzeTicketPpStructure(request, response) {
+  const raw = await readBody(request);
+  const payload = JSON.parse(raw || "{}");
+  const page = Math.max(1, Math.floor(Number(payload.page || 1)));
+  const sourceUrl = String(payload.sourceUrl || "");
+  const image = String(payload.image || payload.file || (sourceUrl.startsWith("data:") ? sourceUrl : ""));
+  const columns = Array.isArray(payload.columns) ? payload.columns : [];
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const startedAt = Date.now();
+  let result;
+  if (sourceUrl.startsWith("uploads/")) {
+    const sourcePath = getReadableUploadPath(sourceUrl);
+    if (!sourcePath) {
+      sendJson(response, 404, { error: "Source file not found", message: "找不到已上传的原始文件，请重新上传票源 PDF。" });
+      return;
+    }
+    if (getMimeForExtension(sourcePath) === "application/pdf") {
+      result = await analyzePpStructurePdfPath(sourcePath, page);
+    } else {
+      result = await analyzePpStructureImageFile(sourcePath);
+    }
+  } else if (image.startsWith("data:application/pdf")) {
+    const rendered = await renderPdfPageToImage(image, page);
+    if (!rendered) {
+      sendJson(response, 422, { error: "No page image rendered", message: "PDF 页面渲染失败，无法做 PP-Structure 测试。" });
+      return;
+    }
+    result = await analyzePpStructureImageDataUrl(rendered);
+  } else if (image.startsWith("data:image/")) {
+    result = await analyzePpStructureImageDataUrl(image);
+  } else {
+    sendJson(response, 400, { error: "Missing source", message: "请传 sourceUrl、PDF dataURL 或图片 dataURL。" });
+    return;
+  }
+  const status = result?.error ? 500 : 200;
+  const ticketRowMatches = rows.length ? matchTicketRowsToPpStructure(columns, rows, result) : [];
+  if (ticketRowMatches.length) {
+    result.ticketRowMatches = ticketRowMatches;
+    result.ticketAlignedRowColorAnalysis = buildTicketAlignedPpRowColorAnalysis(ticketRowMatches, rows.length);
+  }
+  sendJson(response, status, {
+    ...result,
+    page,
+    elapsedMs: Date.now() - startedAt,
+    ppStructurePython: getPpStructurePythonPath(),
+  });
+}
+
+function publicPpStructureAnalysis(analysis) {
+  if (!analysis || typeof analysis !== "object") return null;
+  const rowColorAnalysis = analysis.rowColorAnalysis
+    ? {
+        source: analysis.rowColorAnalysis.source || "paddle_ppstructure",
+        expectedRows: Number(analysis.rowColorAnalysis.expectedRows || 0),
+        detectedRows: Number(analysis.rowColorAnalysis.detectedRows || 0),
+        selectionMode: analysis.rowColorAnalysis.selectionMode || "",
+        reliable: analysis.rowColorAnalysis.reliable === true,
+        exactRowAligned: analysis.rowColorAnalysis.exactRowAligned === true,
+        unreliableReasons: Array.isArray(analysis.rowColorAnalysis.unreliableReasons) ? analysis.rowColorAnalysis.unreliableReasons : [],
+        warningReasons: Array.isArray(analysis.rowColorAnalysis.warningReasons) ? analysis.rowColorAnalysis.warningReasons : [],
+      }
+    : null;
+  return {
+    source: analysis.source || "paddle_ppstructure",
+    error: analysis.error || "",
+    imageWidth: analysis.imageWidth || 0,
+    imageHeight: analysis.imageHeight || 0,
+    initSeconds: analysis.initSeconds || 0,
+    inferSeconds: analysis.inferSeconds || 0,
+    tableCount: analysis.tableCount || 0,
+    tables: Array.isArray(analysis.tables)
+      ? analysis.tables.map((table) => ({
+          bbox: table.bbox || null,
+          rowCount: table.rowCount || 0,
+          cellCount: table.cellCount || 0,
+          cellBBoxCount: table.cellBBoxCount || 0,
+          ocrBoxCount: table.ocrBoxCount || 0,
+          htmlCellCount: table.htmlCellCount || 0,
+          cellAlignmentExact: table.cellAlignmentExact === true,
+        }))
+      : [],
+    rowColorAnalysis,
+    ticketRowMatches: Array.isArray(analysis.ticketRowMatches) ? analysis.ticketRowMatches : [],
+    ticketAlignedRowColorAnalysis: analysis.ticketAlignedRowColorAnalysis || null,
+  };
+}
+
+function normalizeTicketMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[￥¥₩$,，]/g, "")
+    .replace(/[（）()[\]{}]/g, " ")
+    .replace(/[~～至—–-]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTicketMatchTokens(value) {
+  const text = normalizeTicketMatchText(value);
+  const stopWords = new Set([
+    "序号",
+    "编号",
+    "日期",
+    "区域",
+    "排数",
+    "座位",
+    "座位号",
+    "范围",
+    "价格",
+    "售价",
+    "备注",
+    "配送",
+    "转寄",
+    "现场",
+    "面取",
+    "sold",
+  ]);
+  return (text.match(/[a-z]{1,4}\d{0,4}|\d{1,6}|[\u4e00-\u9fa5]{1,8}/gi) || [])
+    .map((token) => normalizeTicketMatchText(token))
+    .filter((token) => token && !stopWords.has(token));
+}
+
+function extractTicketPriceTokens(value) {
+  return (normalizeTicketMatchText(value).match(/\d{3,6}/g) || []).filter((token) => Number(token) >= 100);
+}
+
+function extractTicketDateTokens(value) {
+  const text = normalizeTicketMatchText(value);
+  const tokens = [];
+  const fullDates = text.match(/20\d{2}[.\/-]?\d{1,2}[.\/-]?\d{1,2}/g) || [];
+  fullDates.forEach((token) => tokens.push(token.replace(/[.\/-]/g, "")));
+  const shortDates = text.match(/\d{1,2}[.\/月-]\d{1,2}日?/g) || [];
+  shortDates.forEach((token) => tokens.push(token.replace(/[.\/月日-]/g, "")));
+  return tokens;
+}
+
+function normalizeRowColorLabel(value) {
+  const text = String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+  if (!text) return "";
+  if (/白|white/.test(text)) return "白底";
+  if (/红|赤|red/.test(text)) return "红底";
+  if (/橙|orange/.test(text)) return "橙底";
+  if (/黄|yellow/.test(text)) return "黄底";
+  if (/绿|green/.test(text)) return "绿底";
+  if (/蓝|blue/.test(text)) return "蓝底";
+  if (/紫|purple/.test(text)) return "紫底";
+  if (/粉|pink/.test(text)) return "粉底";
+  if (/灰|gray|grey/.test(text)) return "灰底";
+  if (/黑|black/.test(text)) return "黑底";
+  return value;
+}
+
+function getPpStructureRowsForMatching(analysis) {
+  if (!analysis || typeof analysis !== "object") return [];
+  const rows = [];
+  (Array.isArray(analysis.tables) ? analysis.tables : []).forEach((table, tableIndex) => {
+    (Array.isArray(table.rows) ? table.rows : []).forEach((row) => {
+      rows.push({
+        tableIndex,
+        rowIndex: Number(row.rowIndex),
+        text: String(row.text || ""),
+        bbox: row.bbox || null,
+        color: row.color || null,
+      });
+    });
+  });
+  return rows;
+}
+
+function rowLooksLikeTicketData(text) {
+  const normalized = normalizeTicketMatchText(text);
+  const headerHits = (normalized.match(/序号|编号|日期|区域|排数|座位|价格|售价|备注/g) || []).length;
+  const priceHits = extractTicketPriceTokens(normalized).length;
+  const tokenHits = extractTicketMatchTokens(normalized).length;
+  return priceHits > 0 && tokenHits >= 2 && headerHits < 3;
+}
+
+function scoreTicketRowAgainstPpRow(ticketRow, ppRow) {
+  const ticketText = Array.isArray(ticketRow) ? ticketRow.join(" ") : String(ticketRow || "");
+  const ppText = String(ppRow?.text || "");
+  const ticketTokens = [...new Set(extractTicketMatchTokens(ticketText))];
+  const ppTokens = new Set(extractTicketMatchTokens(ppText));
+  const ticketPrices = extractTicketPriceTokens(ticketText);
+  const ppPrices = new Set(extractTicketPriceTokens(ppText));
+  const ticketDates = extractTicketDateTokens(ticketText);
+  const ppDates = new Set(extractTicketDateTokens(ppText));
+  const matchedTokens = ticketTokens.filter((token) => ppTokens.has(token));
+  const tokenScore = ticketTokens.length ? matchedTokens.length / ticketTokens.length : 0;
+  const priceMatched = ticketPrices.length ? ticketPrices.some((price) => ppPrices.has(price)) : false;
+  const dateMatched = ticketDates.length ? ticketDates.some((date) => ppDates.has(date)) : true;
+  const exactCellMatches = (Array.isArray(ticketRow) ? ticketRow : [ticketText]).filter((cell) => {
+    const normalized = normalizeTicketMatchText(cell);
+    return normalized.length >= 2 && normalizeTicketMatchText(ppText).includes(normalized);
+  }).length;
+  let score = 0;
+  score += Math.min(0.45, tokenScore * 0.45);
+  if (priceMatched) score += 0.35;
+  if (ticketDates.length && dateMatched) score += 0.1;
+  score += Math.min(0.1, exactCellMatches * 0.025);
+  if (!rowLooksLikeTicketData(ppText)) score -= 0.15;
+  return {
+    score: Math.max(0, Math.min(1, Number(score.toFixed(3)))),
+    matchedTokens,
+    priceMatched,
+    dateMatched,
+  };
+}
+
+function matchTicketRowsToPpStructure(columns, rows, ppStructureAnalysis) {
+  const ticketRows = Array.isArray(rows) ? rows : [];
+  const ppRows = getPpStructureRowsForMatching(ppStructureAnalysis);
+  const candidates = [];
+  ticketRows.forEach((row, ticketRowIndex) => {
+    ppRows.forEach((ppRow, ppRowIndex) => {
+      const scored = scoreTicketRowAgainstPpRow(row, ppRow);
+      if (scored.score >= 0.45) {
+        candidates.push({ ticketRowIndex, ppRowIndex, ppRow, ...scored });
+      }
+    });
+  });
+  candidates.sort((a, b) => b.score - a.score);
+  const usedTickets = new Set();
+  const usedPpRows = new Set();
+  const matches = Array.from({ length: ticketRows.length }, (_, ticketRowIndex) => ({
+    ticketRowIndex,
+    matched: false,
+    score: 0,
+    confidence: "none",
+    reason: "no_ppstructure_row_match",
+  }));
+  candidates.forEach((candidate) => {
+    if (usedTickets.has(candidate.ticketRowIndex) || usedPpRows.has(candidate.ppRowIndex)) return;
+    usedTickets.add(candidate.ticketRowIndex);
+    usedPpRows.add(candidate.ppRowIndex);
+    matches[candidate.ticketRowIndex] = {
+      ticketRowIndex: candidate.ticketRowIndex,
+      matched: candidate.score >= 0.62,
+      score: candidate.score,
+      confidence: candidate.score >= 0.82 ? "high" : candidate.score >= 0.62 ? "medium" : "low",
+      reason: candidate.score >= 0.62 ? "matched_by_ticket_fields" : "low_score_match",
+      ppTableIndex: candidate.ppRow.tableIndex,
+      ppRowIndex: candidate.ppRow.rowIndex,
+      ppText: candidate.ppRow.text,
+      bbox: candidate.ppRow.bbox,
+      color: candidate.ppRow.color,
+      matchedTokens: candidate.matchedTokens,
+      priceMatched: candidate.priceMatched,
+      dateMatched: candidate.dateMatched,
+      columns: Array.isArray(columns) ? columns : [],
+      row: ticketRows[candidate.ticketRowIndex],
+    };
+  });
+  return matches;
+}
+
+function buildTicketAlignedPpRowColorAnalysis(matches, expectedRows) {
+  const safeMatches = Array.isArray(matches) ? matches : [];
+  const totalRows = Math.max(0, Number(expectedRows || safeMatches.length || 0));
+  const allRowsHighConfidence =
+    totalRows > 0 &&
+    safeMatches.length === totalRows &&
+    safeMatches.every((match, index) =>
+      match?.matched === true &&
+      Number(match.ticketRowIndex) === index &&
+      Number(match.score || 0) >= 0.82 &&
+      normalizeRowColorLabel(match.color?.label || match.color?.rawLabel || ""),
+    );
+  return {
+    source: "paddle_ppstructure",
+    expectedRows: totalRows,
+    detectedRows: safeMatches.filter((match) => match?.matched).length,
+    selectionMode: "ppstructure_ticket_row_match",
+    reliable: false,
+    exactRowAligned: false,
+    contiguous: allRowsHighConfidence,
+    autoApplyAllowed: false,
+    rowGeometryVerified: false,
+    rowTextVerified: allRowsHighConfidence,
+    diagnosticOnly: true,
+    rows: safeMatches.map((match, index) => {
+      const label = normalizeRowColorLabel(match?.color?.label || match?.color?.rawLabel || "");
+      return {
+        index,
+        label,
+        rawLabel: label,
+        confidence: Math.min(1, Math.max(0, Number(match?.score || 0))),
+        coloredRatio: Number(match?.color?.coloredRatio || 0),
+        whiteRatio: Number(match?.color?.whiteRatio || 0),
+        coverageRatio: Number(match?.color?.coverageRatio || 0),
+        strong: Number(match?.score || 0) >= 0.82,
+        reason: match?.matched ? "ppstructure_ticket_row_match" : "no_ppstructure_row_match",
+        rowTextVerified: match?.matched === true,
+        rowGeometryVerified: match?.matched === true,
+        matchedText: match?.ppText || "",
+        sourceIndex: Number(match?.ppRowIndex ?? index),
+        bbox: match?.bbox || null,
+      };
+    }),
+    lowConfidenceRows: safeMatches
+      .map((match, index) => (match?.matched === true && Number(match.score || 0) >= 0.82 ? -1 : index))
+      .filter((index) => index >= 0),
+    unreliableReasons: allRowsHighConfidence ? [] : ["ppstructure_ticket_row_match_not_complete"],
+    warningReasons: [],
+  };
+}
+
 function getTicketOcrText(job) {
   const blocks = job.results
     .slice()
@@ -1196,10 +1734,22 @@ function getTicketOcrText(job) {
 function publicTicketOcrJob(job) {
   const text = getTicketOcrText(job);
   const failedPages = job.errors.map((item) => item.page);
+  const aiColorErrors = job.results
+    .filter((item) => item.rowColorAnalysis?.aiFallbackError)
+    .map((item) => ({
+      page: item.page,
+      message: item.rowColorAnalysis.aiFallbackError,
+    }))
+    .sort((a, b) => a.page - b.page);
   const rowColorAnalyses = Object.fromEntries(
     job.results
       .filter((item) => item.rowColorAnalysis)
       .map((item) => [String(item.page), item.rowColorAnalysis]),
+  );
+  const ppStructureAnalyses = Object.fromEntries(
+    job.results
+      .filter((item) => item.ppStructureAnalysis)
+      .map((item) => [String(item.page), publicPpStructureAnalysis(item.ppStructureAnalysis)]),
   );
   return {
     id: job.id,
@@ -1210,13 +1760,90 @@ function publicTicketOcrJob(job) {
     pagesProcessed: job.pagesProcessed,
     pagesSucceeded: job.results.filter((item) => item.text).length,
     pagesFailed: job.errors.length,
+    aiColorPagesQueued: job.aiColorPagesQueued || 0,
+    aiColorPagesProcessed: job.aiColorPagesProcessed || 0,
+    aiColorPagesFailed: job.aiColorPagesFailed || 0,
+    aiColorErrors,
+    ppStructurePagesQueued: job.ppStructurePagesQueued || 0,
+    ppStructurePagesProcessed: job.ppStructurePagesProcessed || 0,
+    ppStructurePagesFailed: job.ppStructurePagesFailed || 0,
     failedPages,
     errors: job.errors.slice().sort((a, b) => a.page - b.page),
     rowColorAnalyses,
+    ppStructureAnalyses,
     partialText: text,
     text: job.status === "done" ? text : "",
     message: job.message,
   };
+}
+
+function startTicketRowColorAnalysisForPage(job, item, result) {
+  if (!ocrRowColorDuringScanEnabled) return null;
+  if (!result?.text || !item?.image) return null;
+  const parsed = parseRecognizedRowsForAiRowColor(result.text);
+  if (!parsed.rows.length || parsed.rows.length > 80) return null;
+  job.aiColorPagesQueued = (job.aiColorPagesQueued || 0) + 1;
+  const task = (async () => {
+    try {
+      const analyzeWithVision = getActiveProvider() === "openai" ? analyzeTicketRowColorsWithOpenAI : analyzeTicketRowColorsWithAliyun;
+      const analysis = await analyzeWithVision(item.image, {
+        columns: parsed.columns,
+        rows: parsed.rows,
+        page: item.page,
+      });
+      result.rowColorAnalysis = {
+        ...analysis,
+        rowColorLogicVersion,
+      };
+    } catch (error) {
+      result.rowColorAnalysis = {
+        source: "ai_row_color",
+        reliable: false,
+        exactRowAligned: false,
+        rows: [],
+        expectedRows: parsed.rows.length,
+        aiFallbackError: formatErrorMessage(error),
+        unreliableReasons: ["ai_during_ocr_failed"],
+      };
+      job.aiColorPagesFailed = (job.aiColorPagesFailed || 0) + 1;
+    } finally {
+      job.aiColorPagesProcessed = (job.aiColorPagesProcessed || 0) + 1;
+    }
+  })();
+  job.aiColorTasks.push(task);
+  return task;
+}
+
+function startTicketPpStructureAnalysisForPage(job, item, result) {
+  if (!job.ppStructureEnabled || !result?.text || !item?.image) return null;
+  job.ppStructurePagesQueued = (job.ppStructurePagesQueued || 0) + 1;
+  const task = (async () => {
+    try {
+      const analysis = await analyzePpStructureImageDataUrl(item.image);
+      const parsedRows = parseRecognizedRowsForAiRowColor(result.text);
+      analysis.ticketRowMatches = matchTicketRowsToPpStructure(parsedRows.columns, parsedRows.rows, analysis);
+      analysis.ticketAlignedRowColorAnalysis = buildTicketAlignedPpRowColorAnalysis(analysis.ticketRowMatches, parsedRows.rows.length);
+      if (analysis?.rowColorAnalysis) {
+        analysis.rowColorAnalysis = {
+          ...analysis.rowColorAnalysis,
+          rowColorLogicVersion,
+        };
+      }
+      result.ppStructureAnalysis = analysis;
+    } catch (error) {
+      result.ppStructureAnalysis = {
+        source: "paddle_ppstructure",
+        reliable: false,
+        error: formatErrorMessage(error),
+        unreliableReasons: ["ppstructure_failed"],
+      };
+      job.ppStructurePagesFailed = (job.ppStructurePagesFailed || 0) + 1;
+    } finally {
+      job.ppStructurePagesProcessed = (job.ppStructurePagesProcessed || 0) + 1;
+    }
+  })();
+  job.ppStructureTasks.push(task);
+  return task;
 }
 
 async function recognizeTicketPageWithRetry(item, job) {
@@ -1225,16 +1852,7 @@ async function recognizeTicketPageWithRetry(item, job) {
     try {
       const checked = await recognizeTicketPageTextWithCompletenessCheck(item);
       const text = checked.text;
-      const expectedRows = checked.recognizedRows;
-      let rowColorAnalysis = null;
-      if (expectedRows && item.pdfPath) {
-        rowColorAnalysis = await analyzeTicketRowColorsFromPdfPath(item.pdfPath, item.page, expectedRows);
-        if (!rowColorAnalysis.reliable && !rowColorAnalysis.rows?.length) rowColorAnalysis = null;
-      }
-      if (!rowColorAnalysis && ocrRowColorDuringScanEnabled && expectedRows) {
-        rowColorAnalysis = await analyzeTicketRowColorsFromDataUrl(item.image, expectedRows);
-      }
-      return { page: item.page, text, attempts: attempt, rowColorAnalysis };
+      return { page: item.page, text, attempts: attempt, recognizedRows: checked.recognizedRows };
     } catch (error) {
       lastError = error;
       if (attempt > batchOcrRetries || !isRetryableOcrError(error)) break;
@@ -1288,11 +1906,13 @@ async function recognizeTicketPageTextWithCompletenessCheck(item) {
 async function runTicketOcrBatch(job, source, maxPages) {
   let pdfVectorTempDir = "";
   try {
-    let pdfVectorPath = source.sourcePath || "";
-    if (!pdfVectorPath) {
+    pdfVectorTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-ocr-pdf-vector-"));
+    const pdfVectorPath = path.join(pdfVectorTempDir, "source.pdf");
+    if (source.sourcePath) {
+      job.sourcePath = source.sourcePath;
+      fs.copyFileSync(source.sourcePath, pdfVectorPath);
+    } else {
       const { buffer } = dataUrlToBuffer(source.dataUrl);
-      pdfVectorTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-ocr-pdf-vector-"));
-      pdfVectorPath = path.join(pdfVectorTempDir, "source.pdf");
       fs.writeFileSync(pdfVectorPath, buffer);
     }
     job.totalPages = await getPdfPageCountFromPath(pdfVectorPath).catch(() => Number(maxPages) || 1);
@@ -1305,6 +1925,14 @@ async function runTicketOcrBatch(job, source, maxPages) {
     let cursor = 0;
     job.status = "running";
     job.message = `正在批量识别 0/${pages.length} 页...`;
+    job.aiColorTasks = [];
+    job.aiColorPagesQueued = 0;
+    job.aiColorPagesProcessed = 0;
+    job.aiColorPagesFailed = 0;
+    job.ppStructureTasks = [];
+    job.ppStructurePagesQueued = 0;
+    job.ppStructurePagesProcessed = 0;
+    job.ppStructurePagesFailed = 0;
     const workers = Array.from({ length: Math.min(batchOcrConcurrency, pages.length) }, async () => {
       while (cursor < pages.length) {
         const page = pages[cursor];
@@ -1315,24 +1943,38 @@ async function runTicketOcrBatch(job, source, maxPages) {
           if (!image) throw new Error("PDF 页面渲染失败，请换一个 PDF 再试。");
           const item = { page, image, pdfPath: pdfVectorPath };
           const result = await recognizeTicketPageWithRetry(item, job);
-          if (result.text) job.results.push(result);
+          if (result.text) {
+            job.results.push(result);
+            startTicketRowColorAnalysisForPage(job, item, result);
+            startTicketPpStructureAnalysisForPage(job, item, result);
+          }
         } catch (error) {
           if (image) job.failedImages[page] = image;
-          job.errors.push({ page, message: formatErrorMessage(error) });
+          job.errors.push({ page, stage: image ? "ocr" : "render", message: formatErrorMessage(error) });
         } finally {
           job.pagesProcessed += 1;
           const success = job.results.filter((result) => result.text).length;
           const failed = job.errors.length;
-          job.message = `正在批量识别 ${job.pagesProcessed}/${pages.length} 页，已读到 ${success} 页${failed ? `，失败 ${failed} 页` : ""}...`;
+          const aiQueued = job.aiColorPagesQueued || 0;
+          const aiDone = job.aiColorPagesProcessed || 0;
+          job.message = `正在批量识别 ${job.pagesProcessed}/${pages.length} 页，已读到 ${success} 页，AI 已复核 ${aiDone}/${aiQueued} 页${failed ? `，失败 ${failed} 页` : ""}...`;
         }
       }
     });
     await Promise.all(workers);
+    if (job.aiColorTasks.length) {
+      job.message = `OCR 已完成，正在等待 AI 逐行底色复核 ${job.aiColorPagesProcessed || 0}/${job.aiColorPagesQueued || 0} 页...`;
+      await Promise.allSettled(job.aiColorTasks);
+    }
+    if (job.ppStructureTasks.length) {
+      job.message = `OCR 已完成，正在等待 PP-Structure 表格坐标复核 ${job.ppStructurePagesProcessed || 0}/${job.ppStructurePagesQueued || 0} 页...`;
+      await Promise.allSettled(job.ppStructureTasks);
+    }
 
     const text = getTicketOcrText(job);
     job.status = text ? "done" : "error";
     job.message = text
-      ? `已批量识别 ${job.pagesProcessed} 页，其中 ${job.results.filter((item) => item.text).length} 页有票源内容${job.errors.length ? `，${job.errors.length} 页失败可单独补扫` : ""}。`
+      ? `已批量识别 ${job.pagesProcessed} 页，其中 ${job.results.filter((item) => item.text).length} 页有票源内容，AI 已复核 ${job.aiColorPagesProcessed || 0}/${job.aiColorPagesQueued || 0} 页，结构复核 ${job.ppStructurePagesProcessed || 0}/${job.ppStructurePagesQueued || 0} 页${job.aiColorPagesFailed ? `，AI 失败 ${job.aiColorPagesFailed} 页会在待确认里保留人工校对` : ""}${job.ppStructurePagesFailed ? `，结构复核失败 ${job.ppStructurePagesFailed} 页` : ""}${job.errors.length ? `，${job.errors.length} 页失败可单独补扫` : ""}。`
       : `已扫描 ${job.pagesProcessed} 页，但没有识别到可用表格内容。`;
   } catch (error) {
     job.status = "error";
@@ -1349,8 +1991,7 @@ async function retryTicketOcrFailedPages(job) {
   const retryItems = job.errors
     .slice()
     .sort((a, b) => a.page - b.page)
-    .map((error) => ({ page: error.page, image: job.failedImages[error.page] }))
-    .filter((item) => item.image);
+    .map((error) => ({ page: error.page, image: job.failedImages[error.page] || "", stage: error.stage || "" }));
 
   if (!retryItems.length) {
     job.message = "失败页图片缓存已过期，请重新上传 PDF 后再识别。";
@@ -1359,21 +2000,33 @@ async function retryTicketOcrFailedPages(job) {
 
   job.status = "running";
   job.message = `正在重试 ${retryItems.length} 个失败页...`;
+  job.aiColorTasks = Array.isArray(job.aiColorTasks) ? job.aiColorTasks : [];
   const remainingErrors = [];
   let retryProcessed = 0;
   for (const item of retryItems) {
     try {
+      if (!item.image && job.sourcePath) {
+        item.image = await renderPdfPagePathToImage(job.sourcePath, item.page);
+      }
+      if (!item.image) {
+        throw new Error("失败页图片缓存已过期，请重新上传 PDF 后再识别。");
+      }
       const result = await recognizeTicketPageWithRetry(item, job);
       if (result.text && !job.results.some((existing) => existing.page === item.page)) {
         job.results.push(result);
+        startTicketRowColorAnalysisForPage(job, item, result);
       }
       delete job.failedImages[item.page];
     } catch (error) {
-      remainingErrors.push({ page: item.page, message: formatErrorMessage(error) });
+      remainingErrors.push({ page: item.page, stage: item.image ? "ocr" : "render", message: formatErrorMessage(error) });
     } finally {
       retryProcessed += 1;
       job.message = `正在重试失败页 ${retryProcessed}/${retryItems.length}...`;
     }
+  }
+  if (job.aiColorTasks.length) {
+    job.message = `失败页 OCR 已完成，正在等待 AI 逐行底色复核 ${job.aiColorPagesProcessed || 0}/${job.aiColorPagesQueued || 0} 页...`;
+    await Promise.allSettled(job.aiColorTasks);
   }
 
   const untouchedErrors = job.errors.filter((error) => !retryItems.some((item) => item.page === error.page));
@@ -1458,7 +2111,6 @@ async function analyzeTicketRowColors(request, response) {
       sendJson(response, 404, { error: "Source image not found", message: "没有找到已保存的原始图片，请重新选择图片。" });
       return;
     }
-    const buffer = fs.readFileSync(sourcePath);
     const mimeType = getMimeForExtension(sourcePath);
     if (mimeType === "application/pdf") {
       if (expectedRows) {
@@ -1468,8 +2120,9 @@ async function analyzeTicketRowColors(request, response) {
           return;
         }
       }
-      image = await renderPdfPageToImage(`data:application/pdf;base64,${buffer.toString("base64")}`, sourcePage);
+      image = await renderPdfPagePathToImage(sourcePath, sourcePage);
     } else {
+      const buffer = fs.readFileSync(sourcePath);
       image = `data:${mimeType};base64,${buffer.toString("base64")}`;
     }
   }
@@ -1502,11 +2155,11 @@ async function resolveRowColorSourceImage(payload) {
       error.status = 404;
       throw error;
     }
-    const buffer = fs.readFileSync(sourcePath);
     const mimeType = getMimeForExtension(sourcePath);
     if (mimeType === "application/pdf") {
-      image = await renderPdfPageToImage(`data:application/pdf;base64,${buffer.toString("base64")}`, sourcePage);
+      image = await renderPdfPagePathToImage(sourcePath, sourcePage);
     } else {
+      const buffer = fs.readFileSync(sourcePath);
       image = `data:${mimeType};base64,${buffer.toString("base64")}`;
     }
   }
@@ -1521,10 +2174,43 @@ async function resolveRowColorSourceImage(payload) {
   return image;
 }
 
+async function serveSourcePageImage(request, response) {
+  const url = new URL(request.url, `http://127.0.0.1:${port}`);
+  const sourceUrl = decodeURIComponent(String(url.searchParams.get("source") || ""));
+  const page = Math.max(1, Math.floor(Number(url.searchParams.get("page") || 1)));
+  if (!sourceUrl.startsWith("uploads/")) {
+    sendJson(response, 400, { error: "Invalid source", message: "只能预览已上传的本地票源文件。" });
+    return;
+  }
+  const sourcePath = getReadableUploadPath(sourceUrl);
+  if (!sourcePath) {
+    sendJson(response, 404, { error: "Source file not found", message: "找不到已上传的原始文件，请重新上传票源。" });
+    return;
+  }
+  const mimeType = getMimeForExtension(sourcePath);
+  if (mimeType !== "application/pdf") {
+    response.writeHead(302, { Location: `/${sourceUrl}` });
+    response.end();
+    return;
+  }
+  const dataUrl = await renderPdfPagePathToImage(sourcePath, page);
+  if (!dataUrl) {
+    sendJson(response, 422, { error: "No page image rendered", message: "PDF 页面渲染失败，无法显示贴行操作。" });
+    return;
+  }
+  const { buffer } = dataUrlToBuffer(dataUrl);
+  response.writeHead(200, {
+    "Content-Type": "image/jpeg",
+    "Cache-Control": "no-store",
+  });
+  response.end(buffer);
+}
+
 function buildRowColorVisionPrompt({ columns, rows, page }) {
   const compactRows = (rows || []).slice(0, 80).map((row, index) => ({
     index,
     cells: Array.isArray(row) ? row.map((cell) => String(cell || "").slice(0, 80)) : [],
+    requiredMatchText: getAiRowMatchTokens(row),
   }));
   return [
     "你是票务表格行底色审核器。请逐条判断每一条 OCR 行在原图中对应整行的底色，并根据这张表自己的颜色语境判断是否应该发布。",
@@ -1532,8 +2218,14 @@ function buildRowColorVisionPrompt({ columns, rows, page }) {
     JSON.stringify({ columns, rows: compactRows }, null, 2),
     "请逐条匹配这些行在图片表格中的真实视觉行，判断该行底色和发布动作。",
     "匹配行时必须先核对该行的关键文字，例如日期、区域、排、号、售价；只有文字内容能对应上的那一行，才可以判断该输入行的底色。",
+    "每条输入行都有 requiredMatchText；你必须在原图同一视觉行里找到这些关键文字中的主要文字，尤其是区域/排/座位/售价。",
+    "返回每一行时必须填写 matchedText，写出你在原图对应视觉行里实际看见的关键文字。matchedText 必须包含用于定位的区域/排/座位，并且如果输入行有售价数字或 SOLD/已售，matchedText 也必须包含这个价格或 SOLD/已售证据。",
+    "不要把输入行原样复制到 matchedText；只写你从图片里看到并用于定位的文字。",
     "同一页可能有多个独立表格、多个相似行、多个颜色块；不能把上一个表格或下一个表格的底色套到当前输入行。",
     "如果找不到与输入行关键文字一致的视觉行，action=uncertain，label=无法确定。",
+    "如果红底表里夹着白底/浅底可售行，必须把夹在中间的白底行单独识别为白底；不能因为上下相邻红行或整表红色很多，就把这条白底行判成红底。",
+    "如果某一行的售价列是数字但相邻行售价列是 SOLD，必须分别判断，不能把 SOLD 套到数字售价行，也不能把数字售价套到 SOLD 行。",
+    "如果一行有数字售价但底色是红底/明显已售色，action=skip；如果一行是白底/正常底且有数字售价，action=publish。",
     "只看数据行整行的背景底色：白底、红底、黄底、绿底、蓝底、灰底、其他、无法确定。",
     "不能预设某个颜色一定可售或一定下架。必须先观察同一张表/同一表块里哪些颜色是正常可售底色，哪些颜色明显是已售/下架/异常标色。",
     "例如浅蓝、灰、紫、黄、绿、红都有可能是正常表格底色，也都有可能是下架标色；必须根据这张表自身上下文判断。",
@@ -1544,10 +2236,271 @@ function buildRowColorVisionPrompt({ columns, rows, page }) {
     "不要因为文字颜色、边框、滚动条、截图压缩、选中高亮、页面背景色而判成非白底。",
     "如果单元格文字明确写 sold/已售/售出/下架/판매완료/매진，action=skip；如果明确可售且颜色正常，action=publish。",
     "无法一一对应或看不清的行 label=无法确定 且 action=uncertain。",
-    "返回严格 JSON：{\"rows\":[{\"index\":0,\"label\":\"白底\",\"action\":\"publish\",\"confidence\":0.95,\"reason\":\"...\"}]}。",
+    "每一行必须返回 rowBox，表示你在图片里看到的同一视觉行的大致位置，格式为 {\"y1\":数字,\"y2\":数字}；如果无法定位就返回 {\"y1\":0,\"y2\":0}，并且 action=uncertain。",
+    "返回严格 JSON：{\"rows\":[{\"index\":0,\"label\":\"白底\",\"action\":\"publish\",\"confidence\":0.95,\"matchedText\":\"8.22 206 G 2900\",\"rowBox\":{\"y1\":120,\"y2\":145},\"reason\":\"...\"}]}。",
     "action 只能是 publish、skip、uncertain。",
     "index 必须使用后台给出的 index，必须覆盖每一条输入行。不要返回 Markdown。",
   ].join("\n");
+}
+
+function normalizeAiVisionText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[￥¥₩,，\s]/g, "")
+    .replace(/sold/g, "sold")
+    .trim();
+}
+
+function aiTextHasSoldCue(value) {
+  return /(?:sold|已售|售出|下架|sold\s*out|매진|판매완료)/i.test(String(value || ""));
+}
+
+function aiTextHasNumericSalePrice(value) {
+  return /(?:^|[^\d])(?:￥|¥|₩|\$)?\s*\d{3,6}(?:[,.]\d{3})?(?:원|cny|rmb)?(?:$|[^\d])/i.test(String(value || ""));
+}
+
+function isAiNonWhiteColorLabel(label) {
+  const text = String(label || "");
+  if (!text || /无法|不确定/.test(text)) return false;
+  if (/白底/.test(text)) return false;
+  return /红底|黄底|橙底|绿底|蓝底|粉底|紫底|灰底|黑底|非白|其他/.test(text);
+}
+
+function getAiRowMatchTokens(row) {
+  const values = (Array.isArray(row) ? row : [])
+    .map((cell) => String(cell || "").trim())
+    .filter(Boolean)
+    .filter((value) => !/^[xX/／\-]+$/.test(value))
+    .filter((value) => !/^(配送|转寄|过户|内场|外场|floor)$/i.test(value));
+  const tokens = [];
+  values.forEach((value) => {
+    const normalized = normalizeAiVisionText(value);
+    if (!normalized || normalized.length < 2) return;
+    if (/^\d+$/.test(normalized) && Number(normalized) < 10) return;
+    tokens.push(value);
+  });
+  return [...new Set(tokens)].slice(0, 5);
+}
+
+function isAiRowTextMatchVerified(item, inputRow) {
+  const tokens = getAiRowMatchTokens(inputRow);
+  if (!tokens.length) return true;
+  const evidence = normalizeAiVisionText(
+    [
+      item?.matchedText,
+      item?.matched_text,
+      item?.visibleText,
+      item?.visible_text,
+      Array.isArray(item?.matchedValues) ? item.matchedValues.join(" ") : "",
+      Array.isArray(item?.matched_values) ? item.matched_values.join(" ") : "",
+    ].join(" "),
+  );
+  if (!evidence) return false;
+  const matched = tokens.filter((token) => evidence.includes(normalizeAiVisionText(token)));
+  const numericTokens = tokens.filter((token) => /\d/.test(normalizeAiVisionText(token)));
+  const matchedNumeric = numericTokens.filter((token) => evidence.includes(normalizeAiVisionText(token)));
+  const requiredCount = Math.min(tokens.length, Math.max(2, Math.ceil(tokens.length * 0.6)));
+  return matched.length >= requiredCount && (!numericTokens.length || matchedNumeric.length >= Math.min(2, numericTokens.length));
+}
+
+function isAiRowEvidenceSelfConsistent(item, inputRow) {
+  const inputText = Array.isArray(inputRow) ? inputRow.join(" ") : String(inputRow || "");
+  const evidenceText = [
+    item?.matchedText,
+    item?.matched_text,
+    item?.visibleText,
+    item?.visible_text,
+    Array.isArray(item?.matchedValues) ? item.matchedValues.join(" ") : "",
+    Array.isArray(item?.matched_values) ? item.matched_values.join(" ") : "",
+  ].join(" ");
+  const reasonText = String(item?.reason || "");
+  const action = String(item?.action || "");
+  const inputHasPrice = aiTextHasNumericSalePrice(inputText);
+  const evidenceHasPrice = aiTextHasNumericSalePrice(evidenceText);
+  const inputHasSold = aiTextHasSoldCue(inputText);
+  const evidenceHasSold = aiTextHasSoldCue(evidenceText);
+  if (inputHasSold || evidenceHasSold) return true;
+  if (inputHasPrice && evidenceHasPrice && action === "skip" && aiTextHasSoldCue(reasonText) && !isAiNonWhiteColorLabel(item?.label)) {
+    return false;
+  }
+  return true;
+}
+
+function classifyRgbForAiRowBox(r, g, b) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const saturation = max - min;
+  if (max < 55) return "dark";
+  if (r > 215 && g > 215 && b > 205 && saturation < 35) return "white";
+  if (r > 150 && g < 115 && b < 115 && r - Math.max(g, b) > 45) return "red";
+  if (r > 200 && g > 150 && b < 90 && r - b > 80) return g > 190 ? "yellow" : "orange";
+  if (g > 140 && r < 180 && b < 160 && g - Math.max(r, b) > 25) return "green";
+  if (b > 140 && r < 180 && g < 190 && b - Math.max(r, g) > 20) return "blue";
+  if (r > 180 && b > 120 && g < 150) return "pink";
+  if (saturation < 35 && max > 155) return "white";
+  return saturation > 45 ? "colored" : "neutral";
+}
+
+function getAiRowBoxLocalLabel(counts) {
+  const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+  if (!total) return { label: "无法确定", whiteRatio: 0, coloredRatio: 0, redRatio: 0 };
+  const coloredCount = (counts.red || 0) + (counts.orange || 0) + (counts.yellow || 0) + (counts.green || 0) + (counts.blue || 0) + (counts.pink || 0) + (counts.colored || 0);
+  const whiteRatio = (counts.white || 0) / total;
+  const coloredRatio = coloredCount / total;
+  const redRatio = (counts.red || 0) / total;
+  const palette = [
+    ["红底", counts.red || 0],
+    ["橙底", counts.orange || 0],
+    ["黄底", counts.yellow || 0],
+    ["绿底", counts.green || 0],
+    ["蓝底", counts.blue || 0],
+    ["粉底", counts.pink || 0],
+  ].sort((a, b) => b[1] - a[1]);
+  if (redRatio >= 0.18 || (palette[0][0] === "红底" && palette[0][1] >= Math.max(25, (counts.white || 0) * 0.55))) {
+    return { label: "红底", whiteRatio, coloredRatio, redRatio };
+  }
+  if (coloredRatio >= 0.24 && palette[0][1] > 0) return { label: palette[0][0], whiteRatio, coloredRatio, redRatio };
+  if (whiteRatio >= 0.45 && whiteRatio >= coloredRatio * 1.35) return { label: "白底", whiteRatio, coloredRatio, redRatio };
+  return { label: coloredRatio > whiteRatio ? "非白底" : "白底", whiteRatio, coloredRatio, redRatio };
+}
+
+async function verifyAiRowsByLocalRowBoxColor(image, rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  let parsed;
+  try {
+    parsed = dataUrlToBuffer(image);
+  } catch {
+    return [];
+  }
+  const sharp = loadSharp();
+  const { data, info } = await sharp(parsed.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const invalidRows = [];
+  rows.forEach((row, index) => {
+    const box = row?.rowBox;
+    if (!box) return;
+    const y1 = Math.max(0, Math.min(info.height - 1, Math.floor(Number(box.y1))));
+    const y2 = Math.max(y1 + 1, Math.min(info.height, Math.ceil(Number(box.y2))));
+    const columnSignal = new Uint16Array(info.width);
+    for (let y = y1; y < y2; y += 1) {
+      const offsetY = y * info.width * 4;
+      for (let x = 0; x < info.width; x += 1) {
+        const offset = offsetY + x * 4;
+        const r = data[offset];
+        const g = data[offset + 1];
+        const b = data[offset + 2];
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        if (max < 110 || max - min > 45) columnSignal[x] += 1;
+      }
+    }
+    const threshold = Math.max(1, Math.floor((y2 - y1) * 0.04));
+    let x1 = -1;
+    let x2 = -1;
+    for (let x = 0; x < info.width; x += 1) {
+      if (columnSignal[x] >= threshold) {
+        if (x1 < 0) x1 = x;
+        x2 = x;
+      }
+    }
+    if (x1 < 0 || x2 - x1 < info.width * 0.15) {
+      x1 = Math.floor(info.width * 0.06);
+      x2 = Math.ceil(info.width * 0.94);
+    }
+    const pad = Math.floor(info.width * 0.01);
+    x1 = Math.max(0, x1 - pad);
+    x2 = Math.min(info.width - 1, x2 + pad);
+    const counts = {};
+    for (let y = y1; y < y2; y += 1) {
+      const offsetY = y * info.width * 4;
+      for (let x = x1; x <= x2; x += 1) {
+        const offset = offsetY + x * 4;
+        const family = classifyRgbForAiRowBox(data[offset], data[offset + 1], data[offset + 2]);
+        if (family === "dark") continue;
+        counts[family] = (counts[family] || 0) + 1;
+      }
+    }
+    const local = getAiRowBoxLocalLabel(counts);
+    row.localPixelLabel = local.label;
+    row.localPixelWhiteRatio = Number(local.whiteRatio.toFixed(3));
+    row.localPixelColoredRatio = Number(local.coloredRatio.toFixed(3));
+    row.localPixelRedRatio = Number(local.redRatio.toFixed(3));
+    const aiLabel = String(row.label || "");
+    const aiWantsSkip = String(row.action || "") === "skip";
+    const aiWantsPublish = String(row.action || "") === "publish";
+    const aiSaysNonWhite = isAiNonWhiteColorLabel(aiLabel);
+    const localStrongWhite = local.label === "白底" && local.whiteRatio >= 0.45 && local.whiteRatio >= local.coloredRatio * 1.35;
+    const localStrongRed = local.label === "红底" && local.redRatio >= 0.18;
+    if (aiWantsSkip && aiSaysNonWhite && localStrongWhite) invalidRows.push(index);
+    if (aiWantsPublish && /白底/.test(aiLabel) && localStrongRed) invalidRows.push(index);
+  });
+  return invalidRows;
+}
+
+function normalizeAiRowColorRows(parsedRows, inputRows) {
+  const returnedIndexes = new Set();
+  const byIndex = new Map(
+    (Array.isArray(parsedRows) ? parsedRows : []).map((item) => {
+      const index = Number(item.index);
+      if (Number.isInteger(index)) returnedIndexes.add(index);
+      return [index, item];
+    }),
+  );
+  const missingRows = [];
+  const lowConfidenceRows = [];
+  const unverifiedRows = [];
+  const normalizedRows = (Array.isArray(inputRows) ? inputRows : []).map((inputRow, index) => {
+    const item = byIndex.get(index) || {};
+    if (!byIndex.has(index)) missingRows.push(index);
+    const textVerified = isAiRowTextMatchVerified(item, inputRow);
+    const evidenceConsistent = textVerified && isAiRowEvidenceSelfConsistent(item, inputRow);
+    const verified = textVerified && evidenceConsistent;
+    const inputText = Array.isArray(inputRow) ? inputRow.join(" ") : String(inputRow || "");
+    const inputIsSold = aiTextHasSoldCue(inputText);
+    if (!verified) unverifiedRows.push(index);
+    const aiAction = verified && ["publish", "skip", "uncertain"].includes(String(item.action || "")) ? String(item.action) : "uncertain";
+    const action = inputIsSold && verified ? "skip" : aiAction;
+    const confidence = verified ? Math.max(0, Math.min(1, Number(item.confidence || 0))) : Math.min(0.49, Math.max(0, Math.min(1, Number(item.confidence || 0))));
+    if (action === "uncertain" || confidence < 0.7) lowConfidenceRows.push(index);
+    const label = String(item.label || "无法确定").trim();
+    const rowBox = item.rowBox || item.row_box || item.box || null;
+    const y1 = Number(rowBox?.y1 ?? rowBox?.top ?? NaN);
+    const y2 = Number(rowBox?.y2 ?? rowBox?.bottom ?? NaN);
+    const hasRowBox = Number.isFinite(y1) && Number.isFinite(y2) && y2 > y1;
+    return {
+      index,
+      label,
+      rawLabel: label,
+      action,
+      confidence,
+      matchedText: String(item.matchedText || item.matched_text || item.visibleText || item.visible_text || "").slice(0, 180),
+      rowTextVerified: verified,
+      rowBox: hasRowBox ? { y1, y2 } : null,
+      rowGeometryVerified: hasRowBox,
+      coloredRatio: 0,
+      whiteRatio: /白/.test(label) ? 1 : 0,
+      coverageRatio: /白|无法|不确定/.test(label) ? 0 : 1,
+      strong: confidence >= 0.78 && action !== "uncertain",
+      reason: verified ? String(item.reason || "").slice(0, 180) : `AI未能证明匹配到本行关键文字或证据自洽，保留人工确认。${String(item.reason || "").slice(0, 120)}`,
+    };
+  });
+  const extraRows = [...returnedIndexes].filter((index) => index < 0 || index >= normalizedRows.length);
+  const boxes = normalizedRows.map((row) => row.rowBox).filter(Boolean);
+  const rowBoxCenters = normalizedRows.map((row) => {
+    if (!row.rowBox) return NaN;
+    return (row.rowBox.y1 + row.rowBox.y2) / 2;
+  });
+  const geometryVerified =
+    boxes.length === normalizedRows.length &&
+    rowBoxCenters.every((center, index) => Number.isFinite(center) && (index === 0 || center > rowBoxCenters[index - 1]));
+  return {
+    rows: normalizedRows,
+    missingRows,
+    extraRows,
+    lowConfidenceRows,
+    unverifiedRows,
+    geometryVerified,
+    reliable: missingRows.length === 0 && extraRows.length === 0,
+  };
 }
 
 async function analyzeTicketRowColorsWithOpenAI(image, { columns, rows, page }) {
@@ -1589,9 +2542,19 @@ async function analyzeTicketRowColorsWithOpenAI(image, { columns, rows, page }) 
                     label: { type: "string" },
                     action: { type: "string", enum: ["publish", "skip", "uncertain"] },
                     confidence: { type: "number" },
+                    matchedText: { type: "string" },
+                    rowBox: {
+                      type: "object",
+                      additionalProperties: false,
+                      properties: {
+                        y1: { type: "number" },
+                        y2: { type: "number" },
+                      },
+                      required: ["y1", "y2"],
+                    },
                     reason: { type: "string" },
                   },
-                  required: ["index", "label", "action", "confidence", "reason"],
+                  required: ["index", "label", "action", "confidence", "matchedText", "rowBox", "reason"],
                 },
               },
             },
@@ -1618,30 +2581,37 @@ async function analyzeTicketRowColorsWithOpenAI(image, { columns, rows, page }) 
     error.status = 502;
     throw error;
   }
-  const inputRows = Array.isArray(rows) ? rows : [];
-  const byIndex = new Map(parsed.rows.map((item) => [Number(item.index), item]));
-  const normalizedRows = inputRows.map((_, index) => {
-    const item = byIndex.get(index) || {};
-    const action = ["publish", "skip", "uncertain"].includes(String(item.action || "")) ? String(item.action) : "uncertain";
-    return {
-      index,
-      label: String(item.label || "无法确定").trim(),
-      rawLabel: String(item.label || "").trim(),
-      action,
-      confidence: Math.max(0, Math.min(1, Number(item.confidence || 0))),
-      coloredRatio: 0,
-      whiteRatio: /白/.test(String(item.label || "")) ? 1 : 0,
-      coverageRatio: /白|无法|不确定/.test(String(item.label || "")) ? 0 : 1,
-      strong: Number(item.confidence || 0) >= 0.78,
-      reason: String(item.reason || "").slice(0, 160),
-    };
+  const normalized = normalizeAiRowColorRows(parsed.rows, rows);
+  const pixelMismatchRows = await verifyAiRowsByLocalRowBoxColor(image, normalized.rows);
+  const pixelMismatchSet = new Set(pixelMismatchRows);
+  normalized.rows.forEach((row, index) => {
+    row.pixelMismatch = pixelMismatchSet.has(index);
   });
+  const unreliableReasons = [];
+  if (!normalized.reliable) unreliableReasons.push("ai_row_index_mismatch");
+  if (normalized.unverifiedRows.length) unreliableReasons.push("ai_row_text_mismatch");
+  const warningReasons = [...(normalized.lowConfidenceRows.length ? ["ai_uncertain_rows"] : []), ...(pixelMismatchRows.length ? ["ai_pixel_reference_mismatch"] : [])];
+  const rowTextVerified = normalized.reliable && !normalized.unverifiedRows.length;
+  const rowGeometryVerified = rowTextVerified && normalized.geometryVerified === true;
+  const autoApplyAllowed = rowGeometryVerified && pixelMismatchRows.length === 0;
   return {
     source: "ai_row_color",
-    reliable: true,
+    reliable: rowGeometryVerified,
     contiguous: true,
+    exactRowAligned: rowGeometryVerified,
     selectionMode: "openai_row_by_row",
-    rows: normalizedRows,
+    aiGeometryVerified: rowGeometryVerified,
+    rowGeometryVerified,
+    rowTextVerified,
+    autoApplyAllowed,
+    rows: normalized.rows,
+    detectedRows: normalized.rows.length,
+    expectedRows: Array.isArray(rows) ? rows.length : 0,
+    lowConfidenceRows: normalized.lowConfidenceRows,
+    unverifiedRows: normalized.unverifiedRows,
+    unreliableReasons,
+    warningReasons,
+    pixelMismatchRows,
     provider: "openai",
     model: config.model,
   };
@@ -1689,30 +2659,37 @@ async function analyzeTicketRowColorsWithAliyun(image, { columns, rows, page }) 
     error.status = 502;
     throw error;
   }
-  const inputRows = Array.isArray(rows) ? rows : [];
-  const byIndex = new Map(parsed.rows.map((item) => [Number(item.index), item]));
-  const normalizedRows = inputRows.map((_, index) => {
-    const item = byIndex.get(index) || {};
-    const action = ["publish", "skip", "uncertain"].includes(String(item.action || "")) ? String(item.action) : "uncertain";
-    return {
-      index,
-      label: String(item.label || "无法确定").trim(),
-      rawLabel: String(item.label || "").trim(),
-      action,
-      confidence: Math.max(0, Math.min(1, Number(item.confidence || 0))),
-      coloredRatio: 0,
-      whiteRatio: /白/.test(String(item.label || "")) ? 1 : 0,
-      coverageRatio: /白|无法|不确定/.test(String(item.label || "")) ? 0 : 1,
-      strong: Number(item.confidence || 0) >= 0.78,
-      reason: String(item.reason || "").slice(0, 160),
-    };
+  const normalized = normalizeAiRowColorRows(parsed.rows, rows);
+  const pixelMismatchRows = await verifyAiRowsByLocalRowBoxColor(image, normalized.rows);
+  const pixelMismatchSet = new Set(pixelMismatchRows);
+  normalized.rows.forEach((row, index) => {
+    row.pixelMismatch = pixelMismatchSet.has(index);
   });
+  const unreliableReasons = [];
+  if (!normalized.reliable) unreliableReasons.push("ai_row_index_mismatch");
+  if (normalized.unverifiedRows.length) unreliableReasons.push("ai_row_text_mismatch");
+  const warningReasons = [...(normalized.lowConfidenceRows.length ? ["ai_uncertain_rows"] : []), ...(pixelMismatchRows.length ? ["ai_pixel_reference_mismatch"] : [])];
+  const rowTextVerified = normalized.reliable && !normalized.unverifiedRows.length;
+  const rowGeometryVerified = rowTextVerified && normalized.geometryVerified === true;
+  const autoApplyAllowed = rowGeometryVerified && pixelMismatchRows.length === 0;
   return {
     source: "ai_row_color",
-    reliable: true,
+    reliable: rowGeometryVerified,
     contiguous: true,
+    exactRowAligned: rowGeometryVerified,
     selectionMode: "aliyun_row_by_row",
-    rows: normalizedRows,
+    aiGeometryVerified: rowGeometryVerified,
+    rowGeometryVerified,
+    rowTextVerified,
+    autoApplyAllowed,
+    rows: normalized.rows,
+    detectedRows: normalized.rows.length,
+    expectedRows: Array.isArray(rows) ? rows.length : 0,
+    lowConfidenceRows: normalized.lowConfidenceRows,
+    unverifiedRows: normalized.unverifiedRows,
+    unreliableReasons,
+    warningReasons,
+    pixelMismatchRows,
     provider: "aliyun",
     model: config.model,
   };
@@ -1728,13 +2705,39 @@ async function analyzeTicketRowColorsAi(request, response) {
     sendJson(response, 400, { error: "Missing rows", message: "请提供需要逐行判断底色的票源行。" });
     return;
   }
-  const analyzeWithVision = process.env.OPENAI_API_KEY ? analyzeTicketRowColorsWithOpenAI : analyzeTicketRowColorsWithAliyun;
+  const analyzeWithVision = getActiveProvider() === "openai" ? analyzeTicketRowColorsWithOpenAI : analyzeTicketRowColorsWithAliyun;
   const analysis = await analyzeWithVision(image, {
     columns,
     rows,
     page: Math.max(1, Math.floor(Number(payload.sourcePage || 1))),
   });
   sendJson(response, 200, { rowColorAnalysis: analysis });
+}
+
+async function analyzeTicketRowColorsAnchor(request, response) {
+  const raw = await readBody(request);
+  const payload = JSON.parse(raw || "{}");
+  const image = await resolveRowColorSourceImage(payload);
+  const columns = Array.isArray(payload.columns) ? payload.columns : [];
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  if (!rows.length) {
+    sendJson(response, 400, { error: "Missing rows", message: "请提供需要定位到底色的票源行。" });
+    return;
+  }
+  const analysis = await analyzeTicketAnchorRowColorsFromDataUrl(image, rows, columns);
+  sendJson(response, 200, { rowColorAnalysis: analysis });
+}
+
+async function analyzeTicketRowColorsAnchorBatch(request, response) {
+  const raw = await readBody(request);
+  const payload = JSON.parse(raw || "{}");
+  const tables = Array.isArray(payload.tables) ? payload.tables : [];
+  if (!tables.length) {
+    sendJson(response, 400, { error: "Missing tables", message: "请提供需要批量定位底色的票源表。" });
+    return;
+  }
+  const result = await analyzeTicketAnchorRowColorsBatch(payload, tables);
+  sendJson(response, 200, result);
 }
 
 async function assistTicketReview(request, response) {
@@ -1794,6 +2797,7 @@ async function startTicketOcrJob(request, response) {
   const sourceUrl = String(payload.sourceUrl || "");
   const fileName = String(payload.fileName || "票源文件");
   const maxPages = Number(payload.maxPages || 0) > 0 ? getRequestedTicketOcrPages(payload.maxPages, Number(payload.maxPages)) : null;
+  const ppStructureEnabled = payload.ppStructure === true || payload.ppStructure === "true" || ocrPpStructureDuringScanEnabled;
   const sourcePath = sourceUrl.startsWith("uploads/") ? getReadableUploadPath(sourceUrl) : "";
   const sourceIsPdf = sourcePath ? getMimeForExtension(sourcePath) === "application/pdf" : file.startsWith("data:application/pdf");
   if (!sourceIsPdf) {
@@ -1811,6 +2815,8 @@ async function startTicketOcrJob(request, response) {
     results: [],
     errors: [],
     failedImages: {},
+    sourcePath,
+    ppStructureEnabled,
     message: "已加入批量识别队列。",
     createdAt: Date.now(),
     finishedAt: null,
@@ -1853,6 +2859,13 @@ function sendTicketOcrJob(request, response) {
     return;
   }
   sendJson(response, 200, publicTicketOcrJob(job));
+}
+
+function sendTicketOcrJobs(request, response) {
+  const jobs = Array.from(ticketOcrJobs.values())
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+    .map(publicTicketOcrJob);
+  sendJson(response, 200, { jobs });
 }
 
 function readSeatmapTemplateFiles() {
@@ -1910,6 +2923,14 @@ const server = http.createServer((request, response) => {
     sendStatus(response);
     return;
   }
+  if (request.method === "GET" && request.url.startsWith("/api/source/page-image")) {
+    serveSourcePageImage(request, response).catch((error) => {
+      console.error("Source page image failed", error);
+      const message = formatErrorMessage(error);
+      sendJson(response, error.status || 500, { error: message, message });
+    });
+    return;
+  }
   if (request.method === "GET" && request.url === "/api/seatmap/templates") {
     sendSeatmapTemplates(response);
     return;
@@ -1962,6 +2983,30 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
+  if (request.method === "POST" && request.url === "/api/tables/analyze-row-colors-anchor") {
+    analyzeTicketRowColorsAnchor(request, response).catch((error) => {
+      console.error("Ticket anchor row-color analysis failed", error);
+      const message = formatErrorMessage(error);
+      sendJson(response, error.status || 500, { error: message, message });
+    });
+    return;
+  }
+  if (request.method === "POST" && request.url === "/api/tables/analyze-row-colors-anchor-batch") {
+    analyzeTicketRowColorsAnchorBatch(request, response).catch((error) => {
+      console.error("Ticket anchor row-color batch analysis failed", error);
+      const message = formatErrorMessage(error);
+      sendJson(response, error.status || 500, { error: message, message });
+    });
+    return;
+  }
+  if (request.method === "POST" && request.url === "/api/tables/ppstructure-preview") {
+    analyzeTicketPpStructure(request, response).catch((error) => {
+      console.error("Ticket PP-Structure preview failed", error);
+      const message = formatErrorMessage(error);
+      sendJson(response, error.status || 500, { error: message, message });
+    });
+    return;
+  }
   if (request.method === "POST" && request.url === "/api/tables/review-assist") {
     assistTicketReview(request, response).catch((error) => {
       console.error("Ticket review assist failed", error);
@@ -1976,6 +3021,10 @@ const server = http.createServer((request, response) => {
       const message = formatErrorMessage(error);
       sendJson(response, error.status || 500, { error: message, message });
     });
+    return;
+  }
+  if (request.method === "GET" && request.url === "/api/tables/recognize/jobs") {
+    sendTicketOcrJobs(request, response);
     return;
   }
   if (request.method === "GET" && request.url.startsWith("/api/tables/recognize/job")) {

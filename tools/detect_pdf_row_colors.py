@@ -181,6 +181,7 @@ def classify_row(row, rects, page):
             "coloredRatio": 0,
             "whiteRatio": 0,
             "coverageRatio": 0,
+            "rowBox": {"y1": round(max(0, row_top), 2), "y2": round(min(page.height, row_bottom), 2)},
             "strong": False,
             "reason": "no_vector_fill",
         }
@@ -201,6 +202,7 @@ def classify_row(row, rects, page):
         "cellCount": 1,
         "coloredCellCount": 0 if is_white else 1,
         "whiteCellCount": 1 if is_white else 0,
+        "rowBox": {"y1": round(max(0, row_top), 2), "y2": round(min(page.height, row_bottom), 2)},
         "strong": coverage >= 0.35 and confidence >= 0.45,
         "reason": "pdf_vector_fill",
     }
@@ -225,6 +227,8 @@ def analyze(path, page_number, expected_rows):
                 labels.append(label)
         return {
             "source": "pdf_vector",
+            "imageWidth": float(page.width),
+            "imageHeight": float(page.height),
             "expectedRows": int(expected_rows or 0),
             "detectedRows": len(rows),
             "selectionMode": "pdf_text_rows" if page.chars else "no_pdf_text",

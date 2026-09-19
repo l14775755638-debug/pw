@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>快速人工兜底布局测试</title>
+    <link rel="stylesheet" href="./styles.css?v=20260912-row-action-5" />
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f7f4ec;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="review-layout quick-manual-review-layout">
+      <div class="manual-review-note ok">
+        <strong>快速人工通道</strong>
+        <span>测试定位失败后的兜底布局。</span>
+      </div>
+      <div class="review-source-panel">
+        <div class="review-source-head">
+          <span>原始图片/PDF 页面</span>
+          <button class="small-button ghost" type="button">放大查看</button>
+        </div>
+        <strong>EXO安可合集（标色已售）09-10 13_17.pdf · PDF 第 1 页</strong>
+        <p class="review-source-action-status">本地行定位未能一一对应票行；已保留右侧表格兜底。</p>
+        <div class="review-source-with-actions">
+          <img class="review-source-image" src="./assets/exo-source-row-action-test.png" alt="EXO 安可原始票源表" />
+        </div>
+      </div>
+      <div class="review-ticket-list quick-manual-list">
+        <div class="review-ticket-list-head">
+          <div>
+            <strong>快速逐行选择</strong>
+            <span data-quick-manual-counts>当前上传 26 条 / 下架 0 条。</span>
+          </div>
+          <div class="review-bulk-actions">
+            <button class="small-button ghost" type="button">一键全打勾</button>
+            <button class="small-button ghost danger" type="button">一键全打叉</button>
+            <button class="small-button ghost" type="button">反选</button>
+          </div>
+        </div>
+        <div class="quick-table-wrap">
+          <table class="quick-decision-table">
+            <thead>
+              <tr>
+                <th class="quick-row-number">#</th>
+                <th>日期</th>
+                <th>票面</th>
+                <th>区域</th>
+                <th>排</th>
+                <th>售价</th>
+                <th class="quick-decision-head">操作</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <div class="quick-submit-footer">
+          <button class="small-button ghost" type="button">保存本页</button>
+          <button class="small-button ghost" type="button">保存并下一页</button>
+          <button class="small-button ghost" type="button">保存全部已选</button>
+          <button class="small-button" type="button">全部提交已选择</button>
+        </div>
+      </div>
+    </main>
+    <script>
+      const tbody = document.querySelector("#rows");
+      tbody.innerHTML = Array.from({ length: 26 }, (_, index) => `
+        <tr class="quick-ticket-row publish">
+          <td class="quick-row-number">${index + 1}</td>
+          <td>11月${index < 22 ? "6" : "8"}日</td>
+          <td>内场普票</td>
+          <td>are</td>
+          <td>${index < 2 ? "41x" : "42x"}</td>
+          <td>${index < 22 ? "2700" : "2800"}</td>
+          <td class="quick-decision-cell">
+            <div class="quick-decision-status">上传</div>
+            <div class="quick-decision-buttons">
+              <button class="quick-check-button active" type="button">✓</button>
+              <button class="quick-check-button danger" type="button">×</button>
+              <button class="quick-edit-button" type="button">改</button>
+            </div>
+          </td>
+        </tr>
+      `).join("");
+    </script>
+  </body>
+</html>

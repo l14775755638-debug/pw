@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>原图贴行操作测试</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <style>
+      body {
+        margin: 0;
+        color: #202735;
+        background: #f7f4ec;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .test-shell {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .test-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .test-title h1 {
+        margin: 0;
+        font-size: 26px;
+        letter-spacing: 0;
+      }
+
+      .source-review-board {
+        overflow: hidden;
+        border: 1px solid #e3ded2;
+        border-radius: 8px;
+        background: #fffdfa;
+        box-shadow: 0 10px 28px rgba(32, 39, 53, 0.08);
+      }
+
+      .source-review-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #e3ded2;
+      }
+
+      .source-review-head strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 18px;
+      }
+
+      .source-review-head span {
+        color: #657087;
+        font-weight: 850;
+      }
+
+      .source-image-scroll {
+        overflow: auto;
+        max-height: 78vh;
+        padding: 16px;
+        background: #fffdfa;
+      }
+
+      .source-image-layer {
+        position: relative;
+        width: 994px;
+        min-width: 994px;
+      }
+
+      .source-image-layer img {
+        display: block;
+        width: 994px;
+        height: auto;
+        user-select: none;
+      }
+
+      .source-row-control {
+        position: absolute;
+        left: 892px;
+        display: grid;
+        grid-template-columns: 36px 36px;
+        gap: 4px;
+        align-items: center;
+        height: 32px;
+        padding: 0 4px;
+        border: 1px solid rgba(20, 108, 117, 0.26);
+        border-radius: 7px;
+        background: rgba(255, 253, 250, 0.94);
+        box-shadow: 0 4px 12px rgba(29, 35, 50, 0.12);
+      }
+
+      .source-row-control.skip {
+        border-color: rgba(155, 28, 18, 0.26);
+        background: rgba(255, 247, 244, 0.94);
+      }
+
+      .source-row-control button {
+        width: 36px;
+        height: 28px;
+        padding: 0;
+        color: #657087;
+        font-size: 18px;
+        font-weight: 1000;
+        line-height: 1;
+        border: 1px solid #d7e6e4;
+        border-radius: 6px;
+        background: #fff;
+        cursor: pointer;
+      }
+
+      .source-row-control button.active.upload {
+        color: #fff;
+        border-color: #14727a;
+        background: #14727a;
+      }
+
+      .source-row-control button.active.skip {
+        color: #9b1c12;
+        border-color: rgba(155, 28, 18, 0.3);
+        background: #fff1ee;
+      }
+
+      .test-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 14px 16px 16px;
+        border-top: 1px solid #e3ded2;
+      }
+
+      .test-footer small {
+        color: #657087;
+        font-weight: 850;
+      }
+
+      @media (max-width: 760px) {
+        .test-shell {
+          padding: 12px;
+        }
+
+        .source-review-head,
+        .test-footer {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="test-shell">
+      <div class="test-title">
+        <h1>原图贴行操作测试</h1>
+        <a class="small-button ghost" href="./index.html?admin=1">返回主页面</a>
+      </div>
+
+      <section class="source-review-board">
+        <div class="source-review-head">
+          <div>
+            <strong>按钮直接贴在原图每条票行末尾</strong>
+            <span id="testCounts">当前上传 0 条 / 下架 0 条。</span>
+            <small id="testSaveStatus">尚未保存本页操作。</small>
+          </div>
+          <div class="review-bulk-actions">
+            <button class="small-button ghost" type="button" data-all="true">一键全打勾</button>
+            <button class="small-button ghost danger" type="button" data-all="false">一键全打叉</button>
+            <button class="small-button ghost" type="button" data-invert>反选</button>
+          </div>
+        </div>
+
+        <div class="source-image-scroll">
+          <div class="source-image-layer" id="sourceLayer">
+            <img src="./assets/exo-source-row-action-test.png" alt="EXO 安可原始票源表" />
+          </div>
+        </div>
+
+        <div class="test-footer">
+          <small>这个测试页只叠按钮，不重画表格；正式接入时按钮位置来自每条票行的定位坐标。</small>
+          <div class="review-bulk-actions">
+            <button class="small-button ghost" type="button" id="showResult">查看选择结果</button>
+            <button class="small-button ghost" type="button" data-save-page-next>保存并下一页</button>
+            <button class="small-button" type="button" data-save-all>保存全部已选</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const rows = [
+        { label: "11月6日 / 内场普票 / are / 41x / 2700", y: 176, publish: true },
+        { label: "11月6日 / 内场普票 / are / 41x / 2700", y: 211, publish: true },
+        { label: "11月6日 / 内场普票 / are / 42x / 2700", y: 248, publish: true },
+        { label: "11月6日 / 内场普票 / are / 42x / 2700", y: 283, publish: true },
+        { label: "11月6日 / 内场普票 / are / 42x / 2700", y: 319, publish: true },
+        { label: "11月6日 / 内场普票 / are / 42x / 2700", y: 354, publish: true },
+        { label: "11月6日 / 内场普票 / are / 42x / 2700", y: 391, publish: true },
+        { label: "11月6日 / 内场普票 / are / 42x / 2700", y: 427, publish: true },
+        { label: "11月6日 / 内场普票 / are / 42x / 2700", y: 463, publish: true },
+        { label: "11月6日 / 内场普票 / are / 42x / 2700", y: 499, publish: true },
+        { label: "11月6日 / 看台 / 25 / 2 / 3300", y: 534, publish: true },
+        { label: "11月7日 / 内场普票 / are / 41x / 2700", y: 570, publish: true },
+        { label: "11月7日 / 内场普票 / are / 41x / 2700", y: 608, publish: true },
+        { label: "11月7日 / 内场普票 / are / 41x / 2700", y: 643, publish: true },
+        { label: "11月7日 / 内场普票 / are / 42x / 2700", y: 679, publish: true },
+        { label: "11月7日 / 内场普票 / are / 42x / 2700", y: 715, publish: true },
+        { label: "11月7日 / 内场普票 / are / 42x / 2700", y: 752, publish: true },
+        { label: "11月7日 / 内场普票 / are / 42x / 2700", y: 788, publish: true },
+        { label: "11月7日 / 内场普票 / are / 42x / 2700", y: 824, publish: true },
+        { label: "11月7日 / 内场普票 / are / 43x / 2700", y: 860, publish: true },
+        { label: "11月7日 / 内场普票 / are / 43x / 2700", y: 896, publish: true },
+        { label: "11月7日 / 看台 / 42 / 2 / 3300", y: 931, publish: true },
+        { label: "11月8日 / 内场普票 / are / 44x / 2800", y: 968, publish: true },
+        { label: "11月8日 / 内场普票 / are / 41x / 2800", y: 1004, publish: true },
+        { label: "11月8日 / 内场普票 / are / 41x / 2800", y: 1040, publish: true },
+        { label: "11月8日 / 内场普票 / are / 43x / 2800", y: 1076, publish: true },
+      ];
+
+      const layer = document.querySelector("#sourceLayer");
+      const counts = document.querySelector("#testCounts");
+      const saveStatus = document.querySelector("#testSaveStatus");
+
+      function updateCounts() {
+        const upload = rows.filter((row) => row.publish).length;
+        counts.textContent = `当前上传 ${upload} 条 / 下架 ${rows.length - upload} 条。`;
+      }
+
+      function renderControls() {
+        layer.querySelectorAll(".source-row-control").forEach((node) => node.remove());
+        rows.forEach((row, index) => {
+          const control = document.createElement("div");
+          control.className = `source-row-control ${row.publish ? "publish" : "skip"}`;
+          control.style.top = `${row.y - 16}px`;
+          control.dataset.index = String(index);
+          control.innerHTML = `
+            <button class="upload ${row.publish ? "active" : ""}" type="button" data-row="${index}" data-value="true" title="上传第 ${index + 1} 行">✓</button>
+            <button class="skip ${!row.publish ? "active" : ""}" type="button" data-row="${index}" data-value="false" title="下架第 ${index + 1} 行">×</button>
+          `;
+          layer.appendChild(control);
+        });
+        updateCounts();
+      }
+
+      function setRow(index, value) {
+        rows[index].publish = value;
+        renderControls();
+      }
+
+      document.addEventListener("click", (event) => {
+        const rowButton = event.target.closest("[data-row]");
+        if (rowButton) {
+          setRow(Number(rowButton.dataset.row), rowButton.dataset.value === "true");
+          return;
+        }
+        const allButton = event.target.closest("[data-all]");
+        if (allButton) {
+          const value = allButton.dataset.all === "true";
+          rows.forEach((row) => {
+            row.publish = value;
+          });
+          renderControls();
+          return;
+        }
+        if (event.target.closest("[data-invert]")) {
+          rows.forEach((row) => {
+            row.publish = !row.publish;
+          });
+          renderControls();
+          return;
+        }
+        if (event.target.closest("[data-save-page-next]")) {
+          window.localStorage?.setItem("quick-row-action-test-page-1", JSON.stringify(rows));
+          saveStatus.textContent = "已缓存本页勾叉；正式页面会直接进入下一页。";
+          alert("已缓存本页勾叉；正式页面会直接进入下一页。");
+          return;
+        }
+        if (event.target.closest("[data-save-all]")) {
+          window.localStorage?.setItem("quick-row-action-test-all", JSON.stringify(rows));
+          saveStatus.textContent = "已保存全部已选操作。";
+          alert("已保存全部已选操作。");
+          return;
+        }
+        if (event.target.id === "showResult") {
+          alert(rows.map((row, index) => `${index + 1}. ${row.publish ? "上传" : "下架"} - ${row.label}`).join("\n"));
+        }
+      });
+
+      renderControls();
+    </script>
+  </body>
+</html>

@@ -1,8 +1,15 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 67;
-const PUBLISH_DECISION_LOGIC_VERSION = 2;
-const MAX_REVIEW_ROWS_RENDERED = 120;
+const ROW_COLOR_LOGIC_VERSION = 78;
+const PUBLISH_DECISION_LOGIC_VERSION = 5;
+const ROW_ACTION_GEOMETRY_VERSION = 9;
+const COLUMN_NORMALIZATION_VERSION = 4;
+const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
+const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
+const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 30;
+const MAX_REVIEW_ROWS_RENDERED = 40;
+const MAX_UPLOAD_RECORDS_RENDERED = 36;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
+const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
 const DATE_COLUMN_NAMES = ["日期", "演出日期", "门票时间", "票期", "场次日期", "date", "day", "일자"];
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
@@ -137,6 +144,20 @@ function createLaiziTemplateZones(targetSize = LAIZI_SEATMAP_SIZE) {
 
 function createItzyVenetianTemplateZones(targetSize = ITZY_VENETIAN_SEATMAP_SIZE) {
   return createTemplateZones(ITZY_VENETIAN_TEMPLATE_ZONES, ITZY_VENETIAN_SEATMAP_SIZE, targetSize);
+}
+
+const WEEKND_GOYANG_SEATMAP_SIZE = { width: 1193, height: 1590 };
+const WEEKND_GOYANG_TEMPLATE_ZONES = [{"id":"e12-seat-c-1","label":"E12 · Seat C","aliases":["E12","E12 · Seat C","e12-seat-c-1","Seat C","C"],"tier":"C","points":[[123,229],[145,233],[149,221],[173,221],[176,224],[176,232],[178,232],[178,225],[181,222],[190,221],[195,227],[193,233],[195,243],[200,243],[207,223],[207,215],[128,215],[124,220]]},{"id":"w3-seat-c-2","label":"W3 · Seat C","aliases":["W3","W3 · Seat C","w3-seat-c-2","Seat C","C"],"tier":"C","points":[[1013,216],[1021,247],[1052,242],[1052,240],[1037,239],[1036,219],[1076,219],[1079,237],[1098,233],[1096,221],[1090,214]]},{"id":"standing-b-early-entry-3","label":"Standing B · Early Entry","aliases":["Standing B","Standing B · Early Entry","standing-b-early-entry-3","Early Entry","EE","StandingB"],"tier":"EE","points":[[667,246],[672,250],[849,249],[841,216],[831,210],[705,211]]},{"id":"standing-a-early-entry-4","label":"Standing A · Early Entry","aliases":["Standing A","Standing A · Early Entry","standing-a-early-entry-4","Early Entry","EE","StandingA"],"tier":"EE","points":[[362,246],[365,250],[543,249],[511,213],[501,211],[375,211],[368,217]]},{"id":"e6-seat-b-5","label":"E6 · Seat B","aliases":["E6","E6 · Seat B","e6-seat-b-5","Seat B","B"],"tier":"B","points":[[219,214],[216,223],[223,224],[216,225],[215,228],[221,231],[216,235],[222,239],[210,240],[209,247],[230,251],[233,240],[227,239],[226,231],[233,223],[240,220],[240,215]]},{"id":"w3-seat-b-6","label":"W3 · Seat B","aliases":["W3","W3 · Seat B","w3-seat-b-6","Seat B","B"],"tier":"B","points":[[975,215],[974,220],[981,247],[984,246],[985,251],[988,251],[990,247],[994,247],[996,251],[1007,247],[1008,252],[1011,253],[1004,218]]},{"id":"e6-seat-s-7","label":"E6 · Seat S","aliases":["E6","E6 · Seat S","e6-seat-s-7","Seat S","S"],"tier":"S","points":[[258,215],[248,237],[245,255],[284,264],[301,216]]},{"id":"w1-seat-s-8","label":"W1 · Seat S","aliases":["W1","W1 · Seat S","w1-seat-s-8","Seat S","S"],"tier":"S","points":[[918,216],[934,266],[937,266],[941,260],[959,261],[973,258],[958,215]]},{"id":"e5-seat-s-9","label":"E5 · Seat S","aliases":["E5","E5 · Seat S","e5-seat-s-9","Seat S","S"],"tier":"S","points":[[227,260],[212,256],[206,257],[201,296],[204,300],[216,294],[225,293],[229,267]]},{"id":"w1-seat-s-10","label":"W1 · Seat S","aliases":["W1","W1 · Seat S","w1-seat-s-10","Seat S","S"],"tier":"S","points":[[1007,262],[1000,265],[990,264],[988,267],[994,298],[1009,298],[1018,295],[1015,269]]},{"id":"e5-seat-p-11","label":"E5 · Seat P","aliases":["E5","E5 · Seat P","e5-seat-p-11","Seat P","P"],"tier":"P","points":[[251,265],[245,308],[271,307],[280,318],[286,272]]},{"id":"w1-seat-p-12","label":"W1 · Seat P","aliases":["W1","W1 · Seat P","w1-seat-p-12","Seat P","P"],"tier":"P","points":[[968,263],[962,265],[960,276],[957,278],[939,278],[939,269],[935,268],[940,338],[983,336],[979,276],[975,278],[964,276],[968,272]]},{"id":"e11-seat-a-13","label":"E11 · Seat A","aliases":["E11","E11 · Seat A","e11-seat-a-13","Seat A","A"],"tier":"A","points":[[128,239],[126,295],[120,306],[122,318],[129,318],[127,307],[133,303],[139,319],[124,321],[125,375],[184,377],[195,252],[159,242]]},{"id":"w4-seat-a-14","label":"W4 · Seat A","aliases":["W4","W4 · Seat A","w4-seat-a-14","Seat A","A"],"tier":"A","points":[[1079,246],[1024,256],[1020,261],[1024,270],[1029,376],[1032,378],[1083,377],[1082,321],[1069,319],[1064,322],[1059,306],[1067,309],[1073,304],[1080,309],[1083,304],[1080,300]]},{"id":"w4-seat-c-15","label":"W4 · Seat C","aliases":["W4","W4 · Seat C","w4-seat-c-15","Seat C","C"],"tier":"C","points":[[1082,244],[1081,300],[1085,303],[1097,302],[1101,313],[1097,324],[1083,320],[1084,377],[1136,377],[1130,321],[1113,267],[1101,243]]},{"id":"e11-seat-c-16","label":"E11 · Seat C","aliases":["E11","E11 · Seat C","e11-seat-c-16","Seat C","C"],"tier":"C","points":[[124,237],[116,239],[96,303],[81,370],[85,376],[124,374],[124,324],[108,321],[108,303],[124,300],[127,249]]},{"id":"e5-seat-p-17","label":"E5 · Seat P","aliases":["E5","E5 · Seat P","e5-seat-p-17","Seat P","P"],"tier":"P","points":[[246,310],[243,332],[244,374],[279,375],[280,320],[274,326],[264,328],[249,326],[248,310]]},{"id":"e5-seat-s-18","label":"E5 · Seat S","aliases":["E5","E5 · Seat S","e5-seat-s-18","Seat S","S"],"tier":"S","points":[[207,314],[199,321],[198,374],[220,375],[222,373],[222,337],[211,334],[211,321]]},{"id":"t1-seat-p-19","label":"T1 · Seat P","aliases":["T1","T1 · Seat P","t1-seat-p-19","Seat P","P"],"tier":"P","points":[[940,346],[939,425],[983,425],[983,347]]},{"id":"e4-seat-s-20","label":"E4 · Seat S","aliases":["E4","E4 · Seat S","e4-seat-s-20","Seat S","S"],"tier":"S","points":[[198,385],[198,428],[207,435],[216,435],[222,427],[222,388],[219,384]]},{"id":"w5-seat-c-21","label":"W5 · Seat C","aliases":["W5","W5 · Seat C","w5-seat-c-21","Seat C","C"],"tier":"C","points":[[1085,386],[1085,431],[1101,432],[1104,449],[1098,454],[1085,455],[1086,507],[1115,507],[1120,502],[1120,428],[1124,424],[1138,423],[1138,396],[1129,388]]},{"id":"e4-seat-p-22","label":"E4 · Seat P","aliases":["E4","E4 · Seat P","e4-seat-p-22","Seat P","P"],"tier":"P","points":[[245,384],[244,505],[279,506],[280,448],[273,451],[261,440],[255,445],[260,443],[263,451],[249,451],[247,432],[261,431],[263,436],[267,433],[271,437],[275,431],[280,442],[280,386]]},{"id":"e10-seat-a-23","label":"E10 · Seat A","aliases":["E10","E10 · Seat A","e10-seat-a-23","Seat A","A"],"tier":"A","points":[[124,385],[125,430],[121,435],[126,436],[123,437],[123,447],[128,447],[130,431],[134,435],[134,445],[139,448],[124,451],[126,506],[185,506],[186,386]]},{"id":"w5-seat-a-24","label":"W5 · Seat A","aliases":["W5","W5 · Seat A","w5-seat-a-24","Seat A","A"],"tier":"A","points":[[1030,385],[1030,504],[1084,507],[1085,450],[1080,453],[1075,448],[1066,451],[1062,438],[1064,435],[1085,435],[1084,386]]},{"id":"e10-seat-c-25","label":"E10 · Seat C","aliases":["E10","E10 · Seat C","e10-seat-c-25","Seat C","C"],"tier":"C","points":[[82,385],[77,394],[72,437],[69,505],[125,507],[124,454],[109,453],[106,444],[108,431],[124,430],[123,384]]},{"id":"w0-seat-p-26","label":"W0 · Seat P","aliases":["W0","W0 · Seat P","w0-seat-p-26","Seat P","P"],"tier":"P","points":[[940,434],[940,496],[944,495],[947,500],[950,496],[952,498],[958,496],[959,503],[965,496],[970,499],[976,495],[983,499],[983,435]]},{"id":"e4-seat-s-27","label":"E4 · Seat S","aliases":["E4","E4 · Seat S","e4-seat-s-27","Seat S","S"],"tier":"S","points":[[206,444],[208,449],[202,451],[198,458],[199,504],[203,506],[220,505],[222,456],[215,448]]},{"id":"e3-seat-s-28","label":"E3 · Seat S","aliases":["E3","E3 · Seat S","e3-seat-s-28","Seat S","S"],"tier":"S","points":[[200,517],[199,558],[208,562],[206,563],[208,574],[211,574],[213,561],[222,556],[221,518]]},{"id":"w0-seat-p-29","label":"W0 · Seat P","aliases":["W0","W0 · Seat P","w0-seat-p-29","Seat P","P"],"tier":"P","points":[[968,502],[966,502],[963,516],[956,513],[952,515],[941,513],[941,590],[983,589],[983,514],[972,515],[968,511]]},{"id":"e9-seat-c-30","label":"E9 · Seat C","aliases":["E9","E9 · Seat C","e9-seat-c-30","Seat C","C"],"tier":"C","points":[[69,516],[70,582],[77,633],[80,637],[125,637],[126,585],[125,582],[115,580],[115,561],[125,557],[125,515]]},{"id":"e9-seat-a-31","label":"E9 · Seat A","aliases":["E9","E9 · Seat A","e9-seat-a-31","Seat A","A"],"tier":"A","points":[[126,516],[126,557],[123,562],[130,569],[125,571],[124,579],[127,585],[127,637],[185,637],[186,517]]},{"id":"w6-seat-a-32","label":"W6 · Seat A","aliases":["W6","W6 · Seat A","w6-seat-a-32","Seat A","A"],"tier":"A","points":[[1032,515],[1031,637],[1085,638],[1085,515]]},{"id":"e3-seat-p-33","label":"E3 · Seat P","aliases":["E3","E3 · Seat P","e3-seat-p-33","Seat P","P"],"tier":"P","points":[[245,516],[244,637],[279,638],[280,576],[267,578],[267,575],[271,575],[267,569],[269,563],[261,564],[266,560],[277,559],[280,569],[280,518]]},{"id":"w6-seat-c-34","label":"W6 · Seat C","aliases":["W6","W6 · Seat C","w6-seat-c-34","Seat C","C"],"tier":"C","points":[[1087,515],[1087,638],[1138,638],[1139,607],[1121,601],[1119,517]]},{"id":"standing-b-35","label":"Standing B","aliases":["Standing B","standing-b-35","Standing","STANDING","StandingB"],"tier":"STANDING","points":[[852,255],[659,255],[637,276],[638,384],[658,403],[755,404],[754,458],[658,458],[635,482],[649,701],[614,725],[614,771],[632,773],[632,817],[614,824],[615,971],[751,926],[812,868],[855,790],[866,336]]},{"id":"standing-a-36","label":"Standing A","aliases":["Standing A","standing-a-36","Standing","STANDING","StandingA"],"tier":"STANDING","points":[[360,255],[359,780],[399,856],[465,925],[601,971],[602,820],[582,818],[582,773],[602,771],[602,725],[561,706],[574,482],[551,458],[453,456],[456,404],[552,404],[574,382],[574,277],[551,255]]},{"id":"e3-seat-s-37","label":"E3 · Seat S","aliases":["E3","E3 · Seat S","e3-seat-s-37","Seat S","S"],"tier":"S","points":[[208,578],[198,583],[198,635],[218,637],[223,634],[222,582]]},{"id":"t2-seat-p-38","label":"T2 · Seat P","aliases":["T2","T2 · Seat P","t2-seat-p-38","Seat P","P"],"tier":"P","points":[[941,599],[941,679],[981,679],[982,600]]},{"id":"e2-seat-p-39","label":"E2 · Seat P","aliases":["E2","E2 · Seat P","e2-seat-p-39","Seat P","P"],"tier":"P","points":[[244,646],[246,688],[250,684],[262,684],[264,688],[272,684],[279,687],[279,646]]},{"id":"e2-seat-s-40","label":"E2 · Seat S","aliases":["E2","E2 · Seat S","e2-seat-s-40","Seat S","S"],"tier":"S","points":[[199,646],[198,686],[209,692],[222,689],[222,647]]},{"id":"e8-seat-d-41","label":"E8 · Seat D","aliases":["E8","E8 · Seat D","e8-seat-d-41","Seat D","D"],"tier":"D","points":[[80,645],[80,658],[91,703],[109,758],[112,759],[92,647]]},{"id":"w7-seat-d-42","label":"W7 · Seat D","aliases":["W7","W7 · Seat D","w7-seat-d-42","Seat D","D"],"tier":"D","points":[[1136,648],[1124,648],[1121,652],[1116,695],[1103,759],[1110,748],[1123,711],[1134,670]]},{"id":"w7-seat-c-43","label":"W7 · Seat C","aliases":["W7","W7 · Seat C","w7-seat-c-43","Seat C","C"],"tier":"C","points":[[1118,648],[1088,648],[1088,697],[1103,699],[1105,707],[1096,721],[1088,713],[1079,783],[1094,783]]},{"id":"e8-seat-c-44","label":"E8 · Seat C","aliases":["E8","E8 · Seat C","e8-seat-c-44","Seat C","C"],"tier":"C","points":[[97,645],[120,784],[137,783],[140,781],[135,718],[125,716],[122,710],[123,696],[131,694],[128,648],[126,644]]},{"id":"e8-seat-a-45","label":"E8 · Seat A","aliases":["E8","E8 · Seat A","e8-seat-a-45","Seat A","A"],"tier":"A","points":[[129,645],[131,697],[136,698],[133,702],[140,703],[144,697],[154,699],[152,712],[133,714],[138,733],[141,781],[193,771],[185,646]]},{"id":"w7-seat-a-46","label":"W7 · Seat A","aliases":["W7","W7 · Seat A","w7-seat-a-46","Seat A","A"],"tier":"A","points":[[1033,648],[1023,768],[1078,782],[1086,716],[1067,718],[1063,702],[1077,701],[1083,708],[1083,702],[1091,701],[1087,697],[1087,648]]},{"id":"e2-seat-p-47","label":"E2 · Seat P","aliases":["E2","E2 · Seat P","e2-seat-p-47","Seat P","P"],"tier":"P","points":[[280,701],[277,704],[247,705],[255,758],[285,752],[281,711],[278,704]]},{"id":"w2-seat-p-48","label":"W2 · Seat P","aliases":["W2","W2 · Seat P","w2-seat-p-48","Seat P","P"],"tier":"P","points":[[940,687],[939,720],[930,771],[932,776],[939,771],[940,776],[944,774],[944,778],[949,778],[948,771],[952,775],[963,772],[968,777],[964,778],[962,786],[969,787],[981,729],[983,688]]},{"id":"e2-seat-s-49","label":"E2 · Seat S","aliases":["E2","E2 · Seat S","e2-seat-s-49","Seat S","S"],"tier":"S","points":[[208,708],[200,711],[205,765],[212,767],[229,763],[231,758],[224,712]]},{"id":"w2-seat-s-50","label":"W2 · Seat S","aliases":["W2","W2 · Seat S","w2-seat-s-50","Seat S","S"],"tier":"S","points":[[1019,729],[992,728],[983,776],[968,822],[970,826],[986,827],[996,823],[1015,755]]},{"id":"e1-seat-s-51","label":"E1 · Seat S","aliases":["E1","E1 · Seat S","e1-seat-s-51","Seat S","S"],"tier":"S","points":[[234,772],[210,778],[223,824],[232,819],[244,820],[249,817]]},{"id":"e1-seat-p-52","label":"E1 · Seat P","aliases":["E1","E1 · Seat P","e1-seat-p-52","Seat P","P"],"tier":"P","points":[[249,768],[245,773],[256,809],[278,858],[293,879],[325,860],[327,855],[300,807],[287,761]]},{"id":"w2-seat-p-53","label":"W2 · Seat P","aliases":["W2","W2 · Seat P","w2-seat-p-53","Seat P","P"],"tier":"P","points":[[956,777],[952,777],[949,789],[945,792],[940,785],[935,791],[930,791],[929,784],[926,784],[912,820],[896,847],[903,887],[914,895],[919,893],[956,831],[954,826],[957,825],[968,789],[961,792],[953,790],[958,781]]},{"id":"w8-seat-c-54","label":"W8 · Seat C","aliases":["W8","W8 · Seat C","w8-seat-c-54","Seat C","C"],"tier":"C","points":[[1088,794],[1078,792],[1060,842],[1058,856],[1052,863],[1036,902],[1043,894],[1066,852],[1087,805]]},{"id":"e7-seat-c-55","label":"E7 · Seat C","aliases":["E7","E7 · Seat C","e7-seat-c-55","Seat C","C"],"tier":"C","points":[[125,794],[127,804],[153,855],[181,902],[195,920],[144,790]]},{"id":"e7-seat-a-56","label":"E7 · Seat A","aliases":["E7","E7 · Seat A","e7-seat-a-56","Seat A","A"],"tier":"A","points":[[146,789],[202,932],[250,905],[219,843],[199,780]]},{"id":"w8-seat-a-57","label":"W8 · Seat A","aliases":["W8","W8 · Seat A","w8-seat-a-57","Seat A","A"],"tier":"A","points":[[1076,791],[1020,779],[1003,832],[969,907],[1014,934],[1019,931],[1053,859],[1044,859],[1042,854],[1036,859],[1019,859],[1015,846],[1052,843],[1057,849]]},{"id":"e1-seat-s-58","label":"E1 · Seat S","aliases":["E1","E1 · Seat S","e1-seat-s-58","Seat S","S"],"tier":"S","points":[[230,841],[242,868],[260,897],[282,885],[258,838],[233,838]]},{"id":"w2-seat-s-59","label":"W2 · Seat S","aliases":["W2","W2 · Seat S","w2-seat-s-59","Seat S","S"],"tier":"S","points":[[982,842],[974,845],[964,844],[956,849],[940,880],[915,917],[915,923],[931,936],[935,937],[967,889],[986,850]]},{"id":"n5-seat-r-60","label":"N5 · Seat R","aliases":["N5","N5 · Seat R","n5-seat-r-60","Seat R","R"],"tier":"R","points":[[301,887],[299,892],[333,936],[360,961],[375,970],[397,939],[364,907],[360,908],[362,919],[359,922],[348,921],[349,917],[355,917],[348,913],[348,904],[359,902],[334,869]]},{"id":"n5-seat-s-61","label":"N5 · Seat S","aliases":["N5","N5 · Seat S","n5-seat-s-61","Seat S","S"],"tier":"S","points":[[285,896],[269,906],[268,911],[284,935],[298,949],[302,938],[313,939],[317,937],[317,934],[290,897]]},{"id":"n1-seat-r-62","label":"N1 · Seat R","aliases":["N1","N1 · Seat R","n1-seat-r-62","Seat R","R"],"tier":"R","points":[[879,928],[872,926],[835,927],[819,945],[845,973],[863,959],[883,938],[884,934]]},{"id":"n1-seat-s-63","label":"N1 · Seat S","aliases":["N1","N1 · Seat S","n1-seat-s-63","Seat S","S"],"tier":"S","points":[[907,929],[886,954],[895,958],[903,955],[906,958],[906,966],[911,967],[925,951],[928,943],[914,931]]},{"id":"n5-seat-s-64","label":"N5 · Seat S","aliases":["N5","N5 · Seat S","n5-seat-s-64","Seat S","S"],"tier":"S","points":[[305,957],[311,967],[348,1001],[351,1001],[366,982],[336,954],[320,958],[319,956]]},{"id":"n11-seat-b-65","label":"N11 · Seat B","aliases":["N11","N11 · Seat B","n11-seat-b-65","Seat B","B"],"tier":"B","points":[[212,940],[214,951],[248,997],[277,1027],[302,1048],[311,1051],[341,1014],[341,1009],[299,970],[259,916],[254,914]]},{"id":"n1-seat-s-66","label":"N1 · Seat S","aliases":["N1","N1 · Seat S","n1-seat-s-66","Seat S","S"],"tier":"S","points":[[900,976],[897,973],[878,972],[872,966],[853,982],[853,986],[868,1003],[871,1003],[895,984]]},{"id":"n6-seat-b-67","label":"N6 · Seat B","aliases":["N6","N6 · Seat B","n6-seat-b-67","Seat B","B"],"tier":"B","points":[[967,915],[963,916],[923,969],[877,1011],[912,1055],[961,1010],[1010,945],[1008,940]]},{"id":"n4-seat-r-68","label":"N4 · Seat R","aliases":["N4","N4 · Seat R","n4-seat-r-68","Seat R","R"],"tier":"R","points":[[405,950],[383,980],[426,1011],[482,1037],[496,998],[454,980],[411,951]]},{"id":"n2-seat-r-69","label":"N2 · Seat R","aliases":["N2","N2 · Seat R","n2-seat-r-69","Seat R","R"],"tier":"R","points":[[835,981],[815,957],[807,953],[773,976],[726,997],[737,1034],[754,1030],[797,1010],[835,985]]},{"id":"n4-seat-s-70","label":"N4 · Seat S","aliases":["N4","N4 · Seat S","n4-seat-s-70","Seat S","S"],"tier":"S","points":[[358,1008],[364,1016],[397,1038],[401,1037],[404,1024],[422,1025],[420,1020],[377,990],[373,990]]},{"id":"n2-seat-s-71","label":"N2 · Seat S","aliases":["N2","N2 · Seat S","n2-seat-s-71","Seat S","S"],"tier":"S","points":[[861,1012],[845,993],[841,993],[796,1022],[796,1026],[815,1024],[820,1028],[816,1038],[822,1040],[857,1018]]},{"id":"n3-seat-r-72","label":"N3 · Seat R","aliases":["N3","N3 · Seat R","n3-seat-r-72","Seat R","R"],"tier":"R","points":[[728,1036],[715,1001],[667,1013],[613,1018],[547,1013],[506,1002],[492,1040],[566,1057],[629,1059],[694,1050],[726,1041]]},{"id":"n2-seat-s-73","label":"N2 · Seat S","aliases":["N2","N2 · Seat S","n2-seat-s-73","Seat S","S"],"tier":"S","points":[[809,1044],[788,1042],[785,1030],[779,1030],[744,1045],[743,1049],[749,1069],[753,1071],[807,1049]]},{"id":"n4-seat-s-74","label":"N4 · Seat S","aliases":["N4","N4 · Seat S","n4-seat-s-74","Seat S","S"],"tier":"S","points":[[410,1043],[411,1046],[432,1057],[465,1070],[471,1070],[478,1052],[478,1047],[439,1030],[435,1031],[435,1037],[431,1042],[420,1040]]},{"id":"n3-seat-s-75","label":"N3 · Seat S","aliases":["N3","N3 · Seat S","n3-seat-s-75","Seat S","S"],"tier":"S","points":[[741,1070],[732,1049],[630,1069],[554,1065],[488,1051],[479,1075],[547,1093],[622,1099],[693,1090],[738,1077]]},{"id":"n10-seat-b-76","label":"N10 · Seat B","aliases":["N10","N10 · Seat B","n10-seat-b-76","Seat B","B"],"tier":"B","points":[[349,1020],[320,1055],[318,1062],[380,1106],[447,1135],[465,1083],[400,1052]]},{"id":"n7-seat-b-77","label":"N7 · Seat B","aliases":["N7","N7 · Seat B","n7-seat-b-77","Seat B","B"],"tier":"B","points":[[905,1063],[874,1026],[866,1022],[822,1053],[755,1082],[773,1132],[778,1134],[855,1100],[893,1075]]},{"id":"n9-seat-b-78","label":"N9 · Seat B","aliases":["N9","N9 · Seat B","n9-seat-b-78","Seat B","B"],"tier":"B","points":[[457,1134],[458,1139],[525,1158],[600,1167],[610,1165],[609,1107],[544,1103],[477,1086]]},{"id":"n8-seat-b-79","label":"N8 · Seat B","aliases":["N8","N8 · Seat B","n8-seat-b-79","Seat B","B"],"tier":"B","points":[[745,1088],[678,1104],[621,1107],[620,1165],[692,1160],[762,1140]]}];
+
+function createWeekndGoyangTemplateZones(targetSize = WEEKND_GOYANG_SEATMAP_SIZE) {
+  return createTemplateZones(WEEKND_GOYANG_TEMPLATE_ZONES, WEEKND_GOYANG_SEATMAP_SIZE, targetSize);
+}
+
+const EXO_ENCORE_SEATMAP_SIZE = { width: 980, height: 854 };
+const EXO_ENCORE_TEMPLATE_ZONES = [{"id":"we-general","label":"we · General Seats","aliases":["we","we · General Seats","we-general","General Seats","GENERAL","we区","General"],"tier":"GENERAL","points":[[263,230],[416,231],[433,202],[271,200]]},{"id":"we-vip","label":"we · VIP Seats","aliases":["we","we · VIP Seats","we-vip","VIP Seats","VIP","we区"],"tier":"VIP","points":[[273,193],[431,198],[443,178],[430,168],[286,168]]},{"id":"are-general","label":"are · General Seats","aliases":["are","are · General Seats","are-general","General Seats","GENERAL","are区","General"],"tier":"GENERAL","points":[[709,229],[699,199],[538,203],[555,231]]},{"id":"are-vip","label":"are · VIP Seats","aliases":["are","are · VIP Seats","are-vip","VIP Seats","VIP","are区"],"tier":"VIP","points":[[527,181],[539,198],[697,195],[687,168],[542,168]]},{"id":"one-general","label":"one · General Seats","aliases":["one","one · General Seats","one-general","General Seats","GENERAL","one区","General"],"tier":"GENERAL","points":[[451,413],[449,347],[313,351],[362,414]]},{"id":"one-vip","label":"one · VIP Seats","aliases":["one","one · VIP Seats","one-vip","VIP Seats","VIP","one区"],"tier":"VIP","points":[[297,305],[313,346],[447,343],[417,291],[310,291]]},{"id":"exo-general","label":"EXO · General Seats","aliases":["EXO","EXO · General Seats","exo-general","General Seats","GENERAL","EXO区","General"],"tier":"GENERAL","points":[[520,412],[610,414],[659,350],[574,356],[570,349],[522,347]]},{"id":"exo-vip","label":"EXO · VIP Seats","aliases":["EXO","EXO · VIP Seats","exo-vip","VIP Seats","VIP","EXO区"],"tier":"VIP","points":[[524,342],[655,346],[675,305],[662,291],[560,291]]},{"id":"1-general","label":"1","aliases":["1","1-general","General Seats","GENERAL","1区","General"],"tier":"GENERAL","points":[[793,130],[719,164],[735,214],[815,196]]},{"id":"2-general","label":"2","aliases":["2","2-general","General Seats","GENERAL","2区","General"],"tier":"GENERAL","points":[[819,211],[740,222],[739,273],[822,280]]},{"id":"3-general","label":"3","aliases":["3","3-general","General Seats","GENERAL","3区","General"],"tier":"GENERAL","points":[[740,289],[731,335],[735,341],[797,361],[813,358],[823,313],[821,292]]},{"id":"4-general","label":"4","aliases":["4","4-general","General Seats","GENERAL","4区","General"],"tier":"GENERAL","points":[[727,350],[709,392],[783,431],[806,374]]},{"id":"5-vip","label":"5","aliases":["5","5-vip","VIP Seats","VIP","5区"],"tier":"VIP","points":[[672,445],[640,474],[681,535],[690,538],[730,503],[730,495]]},{"id":"6-vip","label":"6","aliases":["6","6-vip","VIP Seats","VIP","6区"],"tier":"VIP","points":[[631,482],[587,503],[612,573],[619,578],[674,548]]},{"id":"7-vip","label":"7","aliases":["7","7-vip","VIP Seats","VIP","7区"],"tier":"VIP","points":[[574,508],[525,521],[538,600],[602,584]]},{"id":"8-vip","label":"8","aliases":["8","8-vip","VIP Seats","VIP","8区"],"tier":"VIP","points":[[463,522],[452,599],[482,610],[450,617],[487,631],[520,623],[521,613],[492,610],[522,599],[513,524]]},{"id":"9-vip","label":"9","aliases":["9","9-vip","VIP Seats","VIP","9区"],"tier":"VIP","points":[[402,510],[374,577],[401,598],[374,595],[369,603],[398,618],[433,620],[434,610],[409,599],[441,598],[450,522]]},{"id":"10-vip","label":"10","aliases":["10","10-vip","VIP Seats","VIP","10区"],"tier":"VIP","points":[[345,482],[303,540],[303,549],[360,578],[389,503]]},{"id":"11-vip","label":"11","aliases":["11","11-vip","VIP Seats","VIP","11区"],"tier":"VIP","points":[[302,441],[241,489],[246,504],[286,538],[295,534],[335,477]]},{"id":"12-general","label":"12","aliases":["12","12-general","General Seats","GENERAL","12区","General"],"tier":"GENERAL","points":[[249,352],[170,373],[175,398],[194,433],[265,393]]},{"id":"13-general","label":"13","aliases":["13","13-general","General Seats","GENERAL","13区","General"],"tier":"GENERAL","points":[[234,288],[153,294],[166,362],[243,338]]},{"id":"14-general","label":"14","aliases":["14","14-general","General Seats","GENERAL","14区","General"],"tier":"GENERAL","points":[[156,211],[154,281],[235,275],[239,229],[234,223]]},{"id":"15-general","label":"15","aliases":["15","15-general","General Seats","GENERAL","15区","General"],"tier":"GENERAL","points":[[182,130],[160,196],[240,214],[256,165]]},{"id":"24-general","label":"24","aliases":["24","24-general","General Seats","GENERAL","24区","General"],"tier":"GENERAL","points":[[926,96],[830,134],[846,192],[948,172]]},{"id":"25-general","label":"25","aliases":["25","25-general","General Seats","GENERAL","25区","General"],"tier":"GENERAL","points":[[951,185],[850,204],[855,263],[957,263]]},{"id":"26-general","label":"26","aliases":["26","26-general","General Seats","GENERAL","26区","General"],"tier":"GENERAL","points":[[854,278],[850,337],[952,353],[961,290],[956,275]]},{"id":"27-general","label":"27","aliases":["27","27-general","General Seats","GENERAL","27区","General"],"tier":"GENERAL","points":[[847,348],[830,406],[926,444],[948,367]]},{"id":"28-general","label":"28","aliases":["28","28-general","General Seats","GENERAL","28区","General"],"tier":"GENERAL","points":[[824,417],[798,470],[883,526],[919,456]]},{"id":"29-general","label":"29","aliases":["29","29-general","General Seats","GENERAL","29区","General"],"tier":"GENERAL","points":[[789,480],[755,528],[828,597],[875,536]]},{"id":"30-general","label":"30","aliases":["30","30-general","General Seats","GENERAL","30区","General"],"tier":"GENERAL","points":[[742,533],[699,575],[752,653],[761,655],[818,604]]},{"id":"31-general","label":"31","aliases":["31","31-general","General Seats","GENERAL","31区","General"],"tier":"GENERAL","points":[[689,578],[635,611],[677,701],[745,665]]},{"id":"32-general","label":"32","aliases":["32","32-general","General Seats","GENERAL","32区","General"],"tier":"GENERAL","points":[[624,611],[565,632],[586,724],[617,724],[664,705]]},{"id":"33-general","label":"33","aliases":["33","33-general","General Seats","GENERAL","33区","General"],"tier":"GENERAL","points":[[553,630],[496,637],[495,724],[575,723]]},{"id":"34-general","label":"34","aliases":["34","34-general","General Seats","GENERAL","34区","General"],"tier":"GENERAL","points":[[428,630],[405,723],[484,724],[485,639]]},{"id":"35-general","label":"35","aliases":["35","35-general","General Seats","GENERAL","35区","General"],"tier":"GENERAL","points":[[356,612],[317,709],[360,724],[395,724],[413,630]]},{"id":"36-general","label":"36","aliases":["36","36-general","General Seats","GENERAL","36区","General"],"tier":"GENERAL","points":[[293,553],[288,563],[312,586],[288,581],[234,664],[304,703],[343,613],[317,591],[354,598],[357,588]]},{"id":"37-general","label":"37","aliases":["37","37-general","General Seats","GENERAL","37区","General"],"tier":"GENERAL","points":[[236,535],[162,605],[219,657],[280,576]]},{"id":"38-general","label":"38","aliases":["38","38-general","General Seats","GENERAL","38区","General"],"tier":"GENERAL","points":[[188,481],[104,535],[151,598],[224,527]]},{"id":"39-general","label":"39","aliases":["39","39-general","General Seats","GENERAL","39区","General"],"tier":"GENERAL","points":[[154,418],[58,456],[93,526],[180,472]]},{"id":"40-general","label":"40","aliases":["40","40-general","General Seats","GENERAL","40区","General"],"tier":"GENERAL","points":[[131,349],[29,369],[52,445],[147,406]]},{"id":"41-general","label":"41","aliases":["41","41-general","General Seats","GENERAL","41区","General"],"tier":"GENERAL","points":[[17,279],[26,356],[127,337],[123,278]]},{"id":"42-general","label":"42","aliases":["42","42-general","General Seats","GENERAL","42区","General"],"tier":"GENERAL","points":[[26,186],[20,263],[124,262],[128,203]]},{"id":"43-general","label":"43","aliases":["43","43-general","General Seats","GENERAL","43区","General"],"tier":"GENERAL","points":[[52,95],[29,171],[129,192],[146,132]]}];
+
+function createExoEncoreTemplateZones(targetSize = EXO_ENCORE_SEATMAP_SIZE) {
+  return createTemplateZones(EXO_ENCORE_TEMPLATE_ZONES, EXO_ENCORE_SEATMAP_SIZE, targetSize);
 }
 
 const events = [
@@ -332,6 +353,42 @@ const events = [
     tables: [],
   },
   {
+    id: "weeknd-goyang",
+    name: "盆栽高阳",
+    artist: "The Weeknd",
+    city: "高阳",
+    location: "韩国高阳 · 待填写场馆",
+    dates: "待定",
+    dateOptions: [{ id: "weeknd-goyang-tbd", label: "待定", aliases: ["待定"] }],
+    venue: "待填写场馆",
+    venueLocal: "",
+    seatmapTitle: "盆栽高阳官方座位图",
+    seatmapImage: "assets/weeknd-goyang-seatmap.jpg",
+    seatmapFileName: "weeknd-goyang-seatmap.jpg",
+    seatmapSize: { width: 1193, height: 1590 },
+    seatmapTemplateId: "builtin-weeknd-goyang",
+    zones: createWeekndGoyangTemplateZones(),
+    tables: [],
+  },
+  {
+    id: "exo-encore",
+    name: "EXO 安可",
+    artist: "EXO",
+    city: "待填写城市",
+    location: "待填写城市 · 待填写场馆",
+    dates: "待定",
+    dateOptions: [{ id: "exo-encore-tbd", label: "待定", aliases: ["待定"] }],
+    venue: "待填写场馆",
+    venueLocal: "",
+    seatmapTitle: "EXO 安可官方座位图",
+    seatmapImage: "assets/exo-encore-seatmap.jpg",
+    seatmapFileName: "exo-encore-seatmap.jpg",
+    seatmapSize: { width: 980, height: 854 },
+    seatmapTemplateId: "builtin-exo-encore",
+    zones: createExoEncoreTemplateZones(),
+    tables: [],
+  },
+  {
     id: "bigbang-goyang",
     name: "BigBang 高阳",
     location: "韩国高阳 · KINTEX",
@@ -499,6 +556,7 @@ const uploadTableTitle = document.querySelector("#uploadTableTitle");
 const pdfDetectionStatus = document.querySelector("#pdfDetectionStatus");
 const uploadTableText = document.querySelector("#uploadTableText");
 const uploadStatus = document.querySelector("#uploadStatus");
+const localSaveStatus = document.querySelector("#localSaveStatus");
 const failedOcrPanel = document.querySelector("#failedOcrPanel");
 const failedOcrSummary = document.querySelector("#failedOcrSummary");
 const failedOcrList = document.querySelector("#failedOcrList");
@@ -514,6 +572,10 @@ const confirmFieldMappingButton = document.querySelector("#confirmFieldMappingBu
 const cancelFieldMappingButton = document.querySelector("#cancelFieldMappingButton");
 const uploadRecords = document.querySelector("#uploadRecords");
 const publishUploadButton = document.querySelector("#publishUploadButton");
+const quickManualUploadButton = document.querySelector("#quickManualUploadButton");
+const saveOcrTextButton = document.querySelector("#saveOcrTextButton");
+const clearGeneratedPendingButton = document.querySelector("#clearGeneratedPendingButton");
+const clearOcrTextButton = document.querySelector("#clearOcrTextButton");
 const reviewTitle = document.querySelector("#reviewTitle");
 const reviewLayout = document.querySelector("#reviewLayout");
 const confirmReviewButton = document.querySelector("#confirmReviewButton");
@@ -526,6 +588,9 @@ const pendingTables = [];
 let selectedPendingTableId = null;
 const STORAGE_KEY = "ticket-admin-state-v1";
 const OPERATION_ARCHIVE_KEY = "ticket-admin-operation-archives-v1";
+const APP_STATE_BACKUP_DB = "ticket-admin-state-backup-v1";
+const APP_STATE_BACKUP_STORE = "state";
+const APP_STATE_BACKUP_KEY = "latest";
 const MAX_OPERATION_ARCHIVES = 12;
 const MAX_OPERATION_ARCHIVE_PENDING_TABLES = 80;
 const MAX_OPERATION_ARCHIVE_STORAGE_CHARS = 6 * 1024 * 1024;
@@ -545,7 +610,11 @@ let scannedRegions = [];
 let aiStatus = null;
 let activeTicketOcrJobId = null;
 let activeTicketOcrPollTimer = null;
+let activeTicketOcrPollInFlight = false;
 let lastTicketOcrJobSnapshot = null;
+let autoPendingGenerationJobId = null;
+let uploadPendingGenerationBusy = false;
+let quickManualGenerationBusy = false;
 let seatmapTemplates = [];
 let externalSeatmapTemplates = [];
 let templateLibraryOpen = false;
@@ -690,6 +759,8 @@ function mapRecognizedRowToColumns(row, sourceColumns, targetColumns) {
   if (!Array.isArray(sourceColumns) || !sourceColumns.length) {
     return adaptRowsToColumns([row], targetColumns)[0] || mapped;
   }
+  const compactMapped = alignCompactTicketRowToColumns(row, targetColumns);
+  if (compactMapped) return compactMapped;
 
   const usedIndexes = new Set();
   sourceColumns.forEach((column, columnIndex) => {
@@ -712,6 +783,136 @@ function mapRecognizedRowToColumns(row, sourceColumns, targetColumns) {
       mapped.push(text);
     }
   });
+  return mapped;
+}
+
+function findFirstColumnIndexByField(columns = [], field = "") {
+  return columns.findIndex((column) => getDefaultFieldForHeader(column) === field);
+}
+
+function findFirstColumnIndexByPredicate(columns = [], predicate) {
+  return columns.findIndex((column) => predicate(column));
+}
+
+function putMappedCell(mapped, index, value, field = "") {
+  if (index < 0 || !String(value || "").trim()) return false;
+  const current = String(mapped[index] || "").trim();
+  const incoming = String(value || "").trim();
+  mapped[index] = field ? mergeCanonicalCellValue(field, current, incoming) : current || incoming;
+  return true;
+}
+
+function alignCompactTicketRowToColumns(row, columns) {
+  if (!Array.isArray(row) || !Array.isArray(columns) || row.length >= columns.length || row.length < 3) return null;
+  const values = row.map((cell) => String(cell || "").trim()).filter(Boolean);
+  if (values.length < 3) return null;
+  const lastValue = values[values.length - 1];
+  if (!hasPriceOrSoldValue(lastValue)) return null;
+  const priceIndex = findPreferredSalePriceColumnIndexes(columns)[0] ?? findFirstColumnIndexByField(columns, "售价");
+  if (priceIndex < 0) return null;
+
+  const mapped = Array.from({ length: columns.length }, () => "");
+  putMappedCell(mapped, priceIndex, lastValue, "售价");
+
+  const serialIndex = findFirstColumnIndexByField(columns, "序号");
+  const dateIndex = findFirstColumnIndexByField(columns, "日期");
+  const zoneIndex = findFirstColumnIndexByField(columns, "区域");
+  const faceIndex = findFirstColumnIndexByField(columns, "票面");
+  const rowIndex = findFirstColumnIndexByField(columns, "排");
+  const seatIndex = findFirstColumnIndexByField(columns, "座位号");
+  const quantityIndex = findQuantityColumnIndex(columns);
+  const remarkIndex = findFirstColumnIndexByPredicate(columns, isRemarkColumnName);
+  const deliveryIndex = findFirstColumnIndexByPredicate(columns, isDeliveryColumnName);
+
+  const rest = values.slice(0, -1);
+  let cursor = 0;
+  const nextAfterSerial = rest[cursor + 1] || "";
+  const serialIsFollowedByDate = isLikelyDateValue(nextAfterSerial) || isLikelyDateColumnValue(nextAfterSerial);
+  if (serialIndex >= 0 && rest.length - cursor >= 2 && isLikelySerialValue(rest[cursor]) && (serialIsFollowedByDate || rest.length - cursor >= 4)) {
+    putMappedCell(mapped, serialIndex, rest[cursor], "序号");
+    cursor += 1;
+  }
+  if (dateIndex >= 0 && rest[cursor] && (isLikelyDateValue(rest[cursor]) || isLikelyDateColumnValue(rest[cursor]))) {
+    putMappedCell(mapped, dateIndex, rest[cursor], "日期");
+    cursor += 1;
+  }
+
+  const remaining = rest.slice(cursor);
+  if (remaining.length === 1) {
+    const onlyValue = remaining[0];
+    if (faceIndex >= 0 && isLikelyFaceValue(onlyValue)) {
+      putMappedCell(mapped, faceIndex, onlyValue, "票面");
+      return mapped;
+    }
+    const onlyComposite = parseCompositeSeatInfo(onlyValue);
+    if (onlyComposite && zoneIndex >= 0) {
+      putMappedCell(mapped, zoneIndex, onlyValue, "区域");
+      return mapped;
+    }
+    if (remarkIndex >= 0 && (isStandaloneLogisticsValue(onlyValue) || isLikelyRemarkValue(onlyValue))) {
+      putMappedCell(mapped, remarkIndex, onlyValue, getDefaultFieldForHeader(columns[remarkIndex]));
+      return mapped;
+    }
+  }
+  if (remaining.length === 2 && faceIndex >= 0) {
+    const faceValueIndex = remaining.findIndex((value) => isLikelyFaceValue(value));
+    const locationValueIndex = remaining.findIndex((value, index) => index !== faceValueIndex && Boolean(parseCompositeSeatInfo(value)));
+    if (faceValueIndex >= 0 && locationValueIndex >= 0) {
+      putMappedCell(mapped, faceIndex, remaining[faceValueIndex], "票面");
+      if (zoneIndex >= 0) putMappedCell(mapped, zoneIndex, remaining[locationValueIndex], "区域");
+      return mapped;
+    }
+  }
+  if (remaining.length < 2) return null;
+  const structuralCount = remaining.filter((value) => {
+    return (
+      parseCompositeSeatInfo(value) ||
+      extractZoneTokenFromText(value) ||
+      isLikelyZoneCode(value) ||
+      extractSeatRowFromText(value, { allowBareRange: true }) ||
+      isLikelySeatRowValue(value) ||
+      extractSeatNumberFromText(value, { allowBareRange: true }) ||
+      isLikelySeatNumberValue(value) ||
+      isStandaloneLogisticsValue(value) ||
+      isLikelyRemarkValue(value)
+    );
+  }).length;
+  if (structuralCount < Math.min(2, remaining.length)) return null;
+
+  const used = new Set();
+  remaining.forEach((value, index) => {
+    if (!value) return;
+    if (!used.has("delivery") && deliveryIndex >= 0 && isStandaloneLogisticsValue(value)) {
+      putMappedCell(mapped, deliveryIndex, value, getDefaultFieldForHeader(columns[deliveryIndex]));
+      used.add("delivery");
+      return;
+    }
+    if (!used.has("zone") && zoneIndex >= 0 && (extractZoneTokenFromText(value) || isLikelyZoneCode(value) || index === 0)) {
+      putMappedCell(mapped, zoneIndex, value, "区域");
+      used.add("zone");
+      return;
+    }
+    if (!used.has("row") && rowIndex >= 0) {
+      putMappedCell(mapped, rowIndex, value, "排");
+      used.add("row");
+      return;
+    }
+    if (!used.has("seat") && seatIndex >= 0) {
+      putMappedCell(mapped, seatIndex, value, "座位号");
+      used.add("seat");
+      return;
+    }
+    if (!used.has("quantity") && quantityIndex >= 0 && isLikelySeatCountValue(value)) {
+      putMappedCell(mapped, quantityIndex, value, "数量");
+      used.add("quantity");
+      return;
+    }
+    if (remarkIndex >= 0) putMappedCell(mapped, remarkIndex, value, getDefaultFieldForHeader(columns[remarkIndex]));
+  });
+
+  if (!mapped[zoneIndex] && zoneIndex >= 0 && remaining.length >= 3) putMappedCell(mapped, zoneIndex, remaining[0], "区域");
+  if (!mapped[rowIndex] && rowIndex >= 0 && remaining.length >= 2) putMappedCell(mapped, rowIndex, remaining[1], "排");
+  if (!mapped[seatIndex] && seatIndex >= 0 && remaining.length >= 3) putMappedCell(mapped, seatIndex, remaining[2], "座位号");
   return mapped;
 }
 
@@ -1231,6 +1432,8 @@ function areRecognizedColumnsCompatible(left = [], right = []) {
 function adaptRowsToColumns(rows, columns) {
   return rows.map((row) => {
     if (row.length === columns.length) return row.slice();
+    const compactMapped = alignCompactTicketRowToColumns(row, columns);
+    if (compactMapped) return compactMapped;
     if (row.length === 2 && columns.length > 2) {
       const next = Array.from({ length: columns.length }, () => "");
       const positionIndex = findColumnIndex(columns, ["位置", "区域", "区", "排", "座位"]);
@@ -1564,6 +1767,9 @@ function getLockedFieldForHeader(header = "", values = [], options = {}) {
   }
   if (isQuantityColumnName(text) && saleRatio < 0.35 && businessRemarkRatio < 0.35) return "数量";
   if (hasHeaderHint(text, ["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"])) return "日期";
+  if (hasHeaderHint(text, ["票面", "票价", "价位", "面值", "席位", "席别", "席別", "座席", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"])) {
+    return "票面";
+  }
   if (hasHeaderHint(text, ["票面号段", "门票号段", "座位号段", "座位号", "座号", "号数", "大小号", "号段", "号码", "seat", "번호", "좌석번호"])) {
     return "座位号";
   }
@@ -1591,7 +1797,7 @@ function getSmartFieldMapping(headers = [], rows = [], template = null) {
       序号: (hasHeaderHint(header, ["序号", "编号", "no", "num", "number", "id"]) ? 80 : 0) + valueRatio(values, (value) => /^\d+$/.test(value)) * 10,
       日期: (hasHeaderHint(header, ["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"]) ? 90 : 0) + valueRatio(values, isLikelyDateValue) * 80,
       票面:
-        (hasHeaderHint(header, ["票面", "票价", "价位", "面值", "席位", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"]) ? 85 : 0) +
+        (hasHeaderHint(header, ["票面", "票价", "价位", "面值", "席位", "席别", "席別", "座席", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"]) ? 85 : 0) +
         valueRatio(values, (value) => {
           const number = extractNumber(value);
           return number !== null && number >= 100 && number < 1000;
@@ -1686,8 +1892,8 @@ function getDefaultFieldForHeader(header = "") {
   if (["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"].some((name) => text.includes(normalize(name)))) return "日期";
   if (/票面(排数|位置)|门票(排数|位置)|座位(排数|位置)/.test(text)) return "排";
   if (/票面号段|门票号段|座位号段|号段|号码/.test(text)) return "座位号";
-  if (["区域", "区", "位置", "block", "section", "구역", "구"].some((name) => text.includes(normalize(name)))) return "区域";
-  if (["票面", "票价", "价位", "面值", "席位", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"].some((name) => text.includes(normalize(name)))) return "票面";
+  if (["区域", "区", "位置", "block", "section", "구역", "구", "위치"].some((name) => text.includes(normalize(name)))) return "区域";
+  if (["票面", "票价", "价位", "面值", "席位", "席别", "席別", "座席", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"].some((name) => text.includes(normalize(name)))) return "票面";
   if (["排数", "排", "行数", "行", "row", "열"].some((name) => text.includes(normalize(name)))) return "排";
   if (["座位号", "座位", "座号", "号数", "大小号", "号", "seat", "번호", "좌석번호"].some((name) => text.includes(normalize(name)))) return "座位号";
   if (["数量", "张数", "连坐", "count", "qty", "매수", "수량", "장수", "연석"].some((name) => text.includes(normalize(name)))) return "数量";
@@ -1922,12 +2128,83 @@ function stopTicketOcrPolling() {
     activeTicketOcrPollTimer = null;
   }
   activeTicketOcrJobId = null;
+  activeTicketOcrPollInFlight = false;
+}
+
+function getRecoverableOcrTextFromState(state) {
+  const draftText = String(state?.uploadDraft?.tableText || "");
+  if (draftText.trim()) return draftText;
+  const snapshot = state?.ocrJobState?.lastTicketOcrJobSnapshot || null;
+  const savedText = String(snapshot?.savedOcrText || "");
+  if (savedText.trim()) return savedText;
+  const finalText = String(snapshot?.text || "");
+  if (finalText.trim()) return finalText;
+  const partialText = String(snapshot?.partialText || "");
+  return partialText.trim() ? partialText : "";
+}
+
+function rememberCurrentOcrText(extra = {}) {
+  const text = String(uploadTableText.value || "");
+  if (!text.trim()) return false;
+  const previous = lastTicketOcrJobSnapshot || {};
+  lastTicketOcrJobSnapshot = {
+    ...previous,
+    ...extra,
+    savedOcrText: text,
+    partialText: text,
+    text: extra.final === true ? text : String(previous.text || ""),
+    omittedLargeText: false,
+    savedOcrTextAt: Date.now(),
+  };
+  return true;
+}
+
+function persistCurrentOcrTextNow(extra = {}) {
+  rememberCurrentOcrText(extra);
+  return saveAppState();
+}
+
+function setRecognizedOcrText(text, { final = false, snapshot = null } = {}) {
+  const nextText = String(text || "");
+  if (!nextText.trim()) return false;
+  const currentText = String(uploadTableText.value || "");
+  if (final || nextText.length >= currentText.length) uploadTableText.value = nextText;
+  rememberCurrentOcrText({ ...(snapshot || {}), final });
+  saveAppState();
+  return true;
+}
+
+async function autoGeneratePendingTablesFromOcr(result, jobId) {
+  const effectiveJobId = result?.id || jobId || "";
+  if (!effectiveJobId || autoPendingGenerationJobId === effectiveJobId) return;
+  if (!uploadedSource || fieldMappingDraft || uploadPendingGenerationBusy) return;
+  const recognizedText = result?.text || result?.partialText || uploadTableText.value || "";
+  if (!recognizedText.trim()) return;
+  const parsedTables = splitRecognizedTables(recognizedText);
+  if (!parsedTables.length) return;
+  autoPendingGenerationJobId = effectiveJobId;
+  pdfDetectionStatus.textContent = "PDF 表格已识别，正在自动生成待确认表并进行本地行底色校对...";
+  setUploadStatus("OCR 已完成，正在自动生成待确认表...", "loading");
+  try {
+    await publishUpload();
+  } catch (error) {
+    autoPendingGenerationJobId = null;
+    pdfDetectionStatus.textContent = error.message || "自动生成待确认表失败，请手动点击生成待确认表。";
+    setUploadStatus("自动生成待确认表失败，请手动点击生成待确认表。", "error");
+    showToast("自动生成待确认表失败。", "error");
+  }
 }
 
 function buildFailedOcrReport(result = lastTicketOcrJobSnapshot) {
   if (!result) return "";
   const errors = result.errors || [];
   const failedPages = result.failedPages || errors.map((item) => item.page);
+  const aiColorErrors = result.aiColorErrors || [];
+  const describeFailureStage = (stage) => {
+    if (stage === "render") return "PDF渲染失败";
+    if (stage === "ocr") return "OCR识别失败";
+    return "识别失败";
+  };
   return [
     `文件：${result.fileName || uploadedSource?.name || "未知文件"}`,
     `任务：${result.id || activeTicketOcrJobId || "未知任务"}`,
@@ -1938,7 +2215,10 @@ function buildFailedOcrReport(result = lastTicketOcrJobSnapshot) {
     failedPages.length ? `失败页码：${failedPages.join("、")}` : "失败页码：无",
     "",
     "失败原因：",
-    ...(errors.length ? errors.map((item) => `PDF 第 ${item.page} 页：${item.message || "识别接口未返回可用表格内容"}`) : ["无"]),
+    ...(errors.length ? errors.map((item) => `PDF 第 ${item.page} 页 · ${describeFailureStage(item.stage)}：${item.message || "识别接口未返回可用表格内容"}`) : ["无"]),
+    "",
+    "AI 底色复核失败：",
+    ...(aiColorErrors.length ? aiColorErrors.map((item) => `PDF 第 ${item.page} 页：${item.message || "AI 视觉复核失败"}`) : ["无"]),
     "",
     "已识别内容：",
     result.partialText || result.text || uploadTableText.value || "暂无",
@@ -1950,6 +2230,7 @@ function renderFailedOcrPanel(result = null) {
   const snapshot = result || lastTicketOcrJobSnapshot;
   const errors = snapshot?.errors || [];
   const failedPages = snapshot?.failedPages || errors.map((item) => item.page);
+  const aiColorErrors = snapshot?.aiColorErrors || [];
   const hasFailed = failedPages.length > 0;
   failedOcrPanel.classList.toggle("hidden", !snapshot || !hasFailed);
   if (!snapshot || !hasFailed) {
@@ -1960,11 +2241,14 @@ function renderFailedOcrPanel(result = null) {
   }
 
   failedOcrSummary.textContent = `${snapshot.fileName || "当前 PDF"} · ${failedPages.length} 页失败`;
-  failedOcrList.innerHTML = errors
+  failedOcrList.innerHTML = [
+    ...errors.map((item) => ({ ...item, kind: item.stage === "render" ? "PDF 渲染" : "OCR" })),
+    ...aiColorErrors.map((item) => ({ ...item, kind: "AI 底色复核" })),
+  ]
     .map(
       (item) => `
         <div class="failed-ocr-item">
-          <strong>PDF 第 ${item.page} 页</strong>
+          <strong>${escapeHtml(item.kind)} · PDF 第 ${item.page} 页</strong>
           <span>${escapeHtml(item.message || "识别接口未返回可用表格内容")}</span>
         </div>
       `,
@@ -1975,61 +2259,93 @@ function renderFailedOcrPanel(result = null) {
 }
 
 async function pollTicketOcrJob(jobId) {
-  const response = await fetch(`/api/tables/recognize/job?id=${encodeURIComponent(jobId)}`);
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.message || result.error || "批量识别任务查询失败。");
-  renderFailedOcrPanel(result);
-  const total = result.pagesQueued || result.totalPages || 0;
-  const processed = result.pagesProcessed || 0;
-  const success = result.pagesSucceeded || 0;
-  const failed = result.pagesFailed || 0;
-  const progressText = total ? `${processed}/${total}` : `${processed}`;
-  const partialText = result.partialText || result.text || "";
-  if (partialText && partialText.length >= uploadTableText.value.length) {
-    uploadTableText.value = partialText;
-  }
-  pdfDetectionStatus.textContent = result.message || `正在批量识别 ${progressText} 页。`;
-  const failedDetail = failed && result.failedPages?.length ? `，失败页：${result.failedPages.slice(0, 24).join("、")}${result.failedPages.length > 24 ? "..." : ""}` : "";
-  setUploadStatus(`批量识别进度：${progressText} 页，已读到 ${success} 页内容${failed ? `，失败 ${failed} 页` : ""}${failedDetail}。`, "loading");
+  if (activeTicketOcrPollInFlight) return;
+  activeTicketOcrPollInFlight = true;
+  try {
+    const response = await fetch(`/api/tables/recognize/job?id=${encodeURIComponent(jobId)}`);
+    const result = await response.json();
+    if (!response.ok) {
+      const error = new Error(result.message || result.error || "批量识别任务查询失败。");
+      if (response.status === 404 && handleInterruptedTicketOcrJob(error)) return;
+      throw error;
+    }
+    renderFailedOcrPanel(result);
+    const total = result.pagesQueued || result.totalPages || 0;
+    const processed = result.pagesProcessed || 0;
+    const success = result.pagesSucceeded || 0;
+    const failed = result.pagesFailed || 0;
+    const progressText = total ? `${processed}/${total}` : `${processed}`;
+    const aiQueued = Number(result.aiColorPagesQueued || 0);
+    const aiProcessed = Number(result.aiColorPagesProcessed || 0);
+    const aiFailed = Number(result.aiColorPagesFailed || 0);
+    const aiProgressText = aiQueued ? `，AI 复核 ${aiProcessed}/${aiQueued} 页${aiFailed ? `，AI 失败 ${aiFailed} 页` : ""}` : "";
+    const ppQueued = Number(result.ppStructurePagesQueued || 0);
+    const ppProcessed = Number(result.ppStructurePagesProcessed || 0);
+    const ppFailed = Number(result.ppStructurePagesFailed || 0);
+    const ppProgressText = ppQueued ? `，结构复核 ${ppProcessed}/${ppQueued} 页${ppFailed ? `，结构失败 ${ppFailed} 页` : ""}` : "";
+    const partialText = result.partialText || result.text || "";
+    if (partialText) setRecognizedOcrText(partialText, { snapshot: result });
+    pdfDetectionStatus.textContent = result.message || `正在批量识别 ${progressText} 页。`;
+    const failedDetail = failed && result.failedPages?.length ? `，失败页：${result.failedPages.slice(0, 24).join("、")}${result.failedPages.length > 24 ? "..." : ""}` : "";
+    setUploadStatus(`批量识别进度：${progressText} 页，已读到 ${success} 页内容${aiProgressText}${ppProgressText}${failed ? `，失败 ${failed} 页` : ""}${failedDetail}。`, "loading");
+    scheduleAppStateSave(0);
 
-  if (result.status === "done") {
-    stopTicketOcrPolling();
-    activeTicketOcrJobId = result.id || jobId;
-    uploadTableText.value = result.text || result.partialText || "";
-    pdfDetectionStatus.textContent = `${result.message} 已自动填入下方表格内容；请检查后生成待确认表。`;
-    setUploadStatus(
-      failed
-        ? `批量 PDF 已完成，成功 ${success} 页，失败 ${failed} 页。可先生成待确认表，再单独补扫失败页。`
-        : "批量 PDF 表格已识别，请检查内容后生成待确认表。",
-      failed ? "idle" : "success",
-    );
-    showToast("批量识别完成。", "success");
-    saveAndArchiveAppStep(`PDF OCR 完成：${result.fileName || uploadedSource?.name || "票源 PDF"}`, "PDF OCR");
-    return;
-  }
-
-  if (result.status === "error") {
-    stopTicketOcrPolling();
-    activeTicketOcrJobId = result.id || jobId;
-    if (partialText) {
-      uploadTableText.value = partialText;
-      pdfDetectionStatus.textContent = `${result.message || "批量识别中断"} 已保留已识别页面内容，可先生成待确认表。`;
-      setUploadStatus(`批量识别中断，但已保留 ${success} 页内容。失败 ${failed} 页可稍后补扫。`, "error");
-      showToast("已保留部分识别结果。", "error");
-      saveAndArchiveAppStep(`PDF OCR 部分完成：${result.fileName || uploadedSource?.name || "票源 PDF"}`, "PDF OCR");
+    if (result.status === "done") {
+      stopTicketOcrPolling();
+      activeTicketOcrJobId = result.id || jobId;
+      setRecognizedOcrText(result.text || result.partialText || "", { final: true, snapshot: result });
+      pdfDetectionStatus.textContent = `${result.message} 已自动填入下方表格内容，正在自动生成待确认表。`;
+      setUploadStatus(
+        failed
+          ? `批量 PDF 已完成，成功 ${success} 页，失败 ${failed} 页。正在先生成成功页的待确认表，失败页可稍后补扫。`
+          : "批量 PDF 表格已识别，正在自动生成待确认表。",
+        "loading",
+      );
+      showToast("批量识别完成，正在生成待确认表。", "success");
+      saveAndArchiveAppStep(`PDF OCR 完成：${result.fileName || uploadedSource?.name || "票源 PDF"}`, "PDF OCR");
+      await autoGeneratePendingTablesFromOcr(result, jobId);
       return;
     }
-    throw new Error(result.message || "批量识别没有读到可用表格内容。");
-  }
 
-  activeTicketOcrPollTimer = setTimeout(() => {
-    pollTicketOcrJob(jobId).catch((error) => {
+    if (result.status === "error") {
       stopTicketOcrPolling();
-      pdfDetectionStatus.textContent = error.message || "批量识别失败，请重试。";
-      setUploadStatus("批量识别失败，请重试或手动粘贴 OCR 文本。", "error");
-      showToast("批量识别失败。", "error");
-    });
-  }, 1200);
+      activeTicketOcrJobId = result.id || jobId;
+      if (partialText) {
+        setRecognizedOcrText(partialText, { snapshot: result });
+        pdfDetectionStatus.textContent = `${result.message || "批量识别中断"} 已保留已识别页面内容，可先生成待确认表。`;
+        setUploadStatus(`批量识别中断，但已保留 ${success} 页内容。失败 ${failed} 页可稍后补扫。`, "error");
+        showToast("已保留部分识别结果。", "error");
+        saveAndArchiveAppStep(`PDF OCR 部分完成：${result.fileName || uploadedSource?.name || "票源 PDF"}`, "PDF OCR");
+        return;
+      }
+      throw new Error(result.message || "批量识别没有读到可用表格内容。");
+    }
+
+    activeTicketOcrPollTimer = setTimeout(() => {
+      activeTicketOcrPollTimer = null;
+      pollTicketOcrJob(jobId).catch((error) => {
+        if (handleInterruptedTicketOcrJob(error)) return;
+        stopTicketOcrPolling();
+        pdfDetectionStatus.textContent = error.message || "批量识别失败，请重试。";
+        setUploadStatus("批量识别失败，请重试或手动粘贴 OCR 文本。", "error");
+        showToast("批量识别失败。", "error");
+      });
+    }, 1200);
+  } finally {
+    activeTicketOcrPollInFlight = false;
+  }
+}
+
+function handleInterruptedTicketOcrJob(error) {
+  const recognizedText = String(uploadTableText.value || "").trim();
+  if (!recognizedText) return false;
+  stopTicketOcrPolling();
+  retryFailedOcrButton.disabled = true;
+  pdfDetectionStatus.textContent = `${error?.message || "批量识别任务已中断"}；已保留已读 OCR 文本，可直接点“快速人工生成”。`;
+  setUploadStatus("批量识别任务已中断，但已保留已读 OCR 文本；可直接快速人工生成。", "error");
+  showToast("已保留 OCR 文本，可快速人工生成。", "error");
+  persistCurrentOcrTextNow({ status: lastTicketOcrJobSnapshot?.status || "interrupted" });
+  return true;
 }
 
 async function refreshTicketOcrJobSnapshot(jobId) {
@@ -2039,6 +2355,39 @@ async function refreshTicketOcrJobSnapshot(jobId) {
   activeTicketOcrJobId = result.id || jobId;
   renderFailedOcrPanel(result);
   return result;
+}
+
+function resumeTicketOcrPollingIfNeeded() {
+  const jobId = activeTicketOcrJobId || lastTicketOcrJobSnapshot?.id || "";
+  const status = String(lastTicketOcrJobSnapshot?.status || "");
+  if (!jobId || activeTicketOcrPollTimer || activeTicketOcrPollInFlight || status === "done" || status === "error") return;
+  activeTicketOcrPollTimer = setTimeout(() => {
+    activeTicketOcrPollTimer = null;
+    pollTicketOcrJob(jobId).catch((error) => {
+      if (handleInterruptedTicketOcrJob(error)) return;
+      stopTicketOcrPolling();
+      pdfDetectionStatus.textContent = error.message || "批量识别失败，请重试。";
+      setUploadStatus("批量识别失败，请重试或手动粘贴 OCR 文本。", "error");
+      showToast("批量识别失败。", "error");
+    });
+  }, 250);
+}
+
+function resumeRestoredTicketOcrJobIfNeeded() {
+  const jobId = activeTicketOcrJobId || lastTicketOcrJobSnapshot?.id || "";
+  if (!jobId) return;
+  const status = String(lastTicketOcrJobSnapshot?.status || "");
+  if (status === "done") {
+    autoGeneratePendingTablesFromOcr(lastTicketOcrJobSnapshot, jobId).catch((error) => {
+      console.warn("Restored OCR auto-generation skipped.", error);
+      setUploadStatus("OCR 已恢复，但自动生成确认表失败；可以手动点击生成。", "error");
+    });
+    return;
+  }
+  if (status === "error") return;
+  pdfDetectionStatus.textContent = "已恢复上次 OCR 任务，正在继续查询进度...";
+  setUploadStatus("已恢复上次 OCR 任务，正在继续查询进度。", "loading");
+  resumeTicketOcrPollingIfNeeded();
 }
 
 async function recognizeTicketSource(file, detectedTables) {
@@ -2061,6 +2410,7 @@ async function recognizeTicketSource(file, detectedTables) {
   if (!response.ok) throw new Error(result.message || result.error || "PDF 批量识别任务创建失败。");
   activeTicketOcrJobId = result.id;
   renderFailedOcrPanel(result);
+  scheduleAppStateSave(0);
   pdfDetectionStatus.textContent = result.message || "批量识别任务已开始。";
   setUploadStatus("批量识别任务已开始，可以先等进度跑完。", "loading");
   showToast("批量识别已开始。", "success");
@@ -2209,7 +2559,7 @@ async function loadExternalSeatmapTemplates() {
     const result = await response.json();
     externalSeatmapTemplates = (Array.isArray(result.templates) ? result.templates : []).map(normalizeExternalSeatmapTemplate).filter(Boolean);
     if (!externalSeatmapTemplates.length) {
-      const fallbackFiles = ["bigbang-goyang.json", "bigbang-singapore.json", "itzy-venetian.json", "nct-dream-10th-fm.json"];
+      const fallbackFiles = ["bigbang-goyang.json", "bigbang-singapore.json", "itzy-venetian.json", "nct-dream-10th-fm.json", "weeknd-goyang.json", "exo-encore.json"];
       const fallbackTemplates = await Promise.all(
         fallbackFiles.map((fileName) =>
           fetch(`/seatmap-templates/${fileName}`)
@@ -2365,14 +2715,16 @@ async function saveCurrentSeatmapAsTemplate(auto = false) {
 
 function renderSeatmapTemplates() {
   if (!templateLibrarySummary || !seatmapTemplateList) return;
-  const templates = getAllSeatmapTemplates();
+  const templates = getAllSeatmapTemplates().sort((a, b) => {
+    const left = normalizeTemplateName(a.name || a.eventName || a.fileName || "");
+    const right = normalizeTemplateName(b.name || b.eventName || b.fileName || "");
+    return left.localeCompare(right, "en", { numeric: true, sensitivity: "base" });
+  });
   const userTemplateCount = seatmapTemplates.length;
   const fileTemplateCount = externalSeatmapTemplates.length;
-  const templateNames = templates.map((template) => template.name).slice(0, 3).join("、");
-  const extraTemplateCount = Math.max(0, templates.length - 3);
   templateLibrarySummary.textContent = templates.length
-    ? `已有 ${templates.length} 个模板：${templateNames}${extraTemplateCount ? ` 等 ${templates.length} 个` : ""}（模板文件 ${fileTemplateCount} 个，自建 ${userTemplateCount} 个）。`
-    : "保存座位图和精准热区后，下次同款演出可一键套用。";
+    ? `${templates.length} 个 · 文件 ${fileTemplateCount} · 自建 ${userTemplateCount}`
+    : "暂无模板";
   if (toggleTemplateLibraryButton) {
     toggleTemplateLibraryButton.textContent = templateLibraryOpen ? "收起模板大全" : `模板大全 ${templates.length} 个`;
   }
@@ -2386,7 +2738,7 @@ function renderSeatmapTemplates() {
         <div class="template-item ${template.id === currentEvent.seatmapTemplateId ? "active" : ""}">
           <span class="template-item-main">
             <b>${escapeHtml(template.name)}</b>
-            <small>${getTemplateSeatmapImage(template) ? "含座位图" : "仅热区"} · ${template.size.width}x${template.size.height} · ${template.zones.length} 个热区${sourceText}</small>
+            <small>${getTemplateSeatmapImage(template) ? "含图" : "仅热区"} · ${template.size.width}x${template.size.height} · ${template.zones.length} 热区${sourceText}</small>
           </span>
           <span class="template-item-actions">
             <button class="small-button ghost" type="button" data-apply-template="${template.id}">套用</button>
@@ -2472,7 +2824,7 @@ function findQuantityColumnIndex(columns = []) {
 function isFaceValueColumnName(column = "") {
   const text = normalize(column);
   if (/票面(位置|排数|排|号段|号码|座位|座号)|门票(位置|排数|排|号段|号码)|座位图|座席图|seat\s*map|seatmap/i.test(String(column || ""))) return false;
-  return ["票面", "票价", "价位", "面值", "席位", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"].some((name) =>
+  return ["票面", "票价", "价位", "面值", "席位", "席别", "席別", "座席", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"].some((name) =>
     text.includes(normalize(name)),
   );
 }
@@ -2485,6 +2837,17 @@ function getFirstFaceValue(table, row) {
   const indexes = findFaceValueColumnIndexes(table?.columns || []);
   const index = indexes.find((item) => String(row?.[item] || "").trim());
   return index >= 0 ? row[index] : "";
+}
+
+function getFirstFaceValueFromTicket(ticket) {
+  const current = getFirstFaceValue(ticket?.table, ticket?.row);
+  if (String(current || "").trim()) return current;
+  const originalColumns = ticket?.table?.originalColumns || [];
+  const originalRow = Array.isArray(ticket?.table?.originalRows) && ticket.table.originalRows[ticket.index] ? ticket.table.originalRows[ticket.index] : null;
+  if (!originalRow) return "";
+  const indexes = findFaceValueColumnIndexes(originalColumns);
+  const index = indexes.find((item) => String(originalRow[item] || "").trim());
+  return index >= 0 ? originalRow[index] : "";
 }
 
 function isGenericFaceValue(value) {
@@ -2535,7 +2898,7 @@ function isSeatLocationColumnName(column = "") {
   const text = normalize(column);
   if (!text) return false;
   if (isSeatmapImageColumnName(column) || /seatmap|map/.test(text)) return false;
-  return /(位置|席位|座位位置|座席位置|票面位置|门票位置|location|seatposition|구역|구|열|좌석)/i.test(String(column || "")) || /^位置$/.test(text);
+  return /(位置|席位|座位位置|座席位置|票面位置|门票位置|location|seatposition|구역|구|열|좌석|위치)/i.test(String(column || "")) || /^位置$/.test(text);
 }
 
 function isProtectedNonPriceColumnName(column = "") {
@@ -2768,6 +3131,133 @@ function mergeDuplicateColumnsByName(table, names = ["备注", "售价"]) {
   return changed;
 }
 
+function removeTicketColumnAt(table, columnIndex) {
+  if (!table || !Array.isArray(table.columns) || columnIndex < 0 || columnIndex >= table.columns.length) return false;
+  table.columns.splice(columnIndex, 1);
+  (table.rows || []).forEach((row) => {
+    if (Array.isArray(row)) row.splice(columnIndex, 1);
+  });
+  if (Array.isArray(table.originalColumns)) table.originalColumns.splice(columnIndex, 1);
+  if (Array.isArray(table.originalRows)) {
+    table.originalRows.forEach((row) => {
+      if (Array.isArray(row)) row.splice(columnIndex, 1);
+    });
+  }
+  return true;
+}
+
+function columnHasNoUsefulValues(table, columnIndex) {
+  return !(table?.rows || []).some((row) => String(row?.[columnIndex] || "").trim());
+}
+
+function repairTailSalePriceAndExplicitRowColumns(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows) || !table.rows.length) return false;
+  let changed = false;
+  const columns = table.columns;
+  const usableColumnIndexes = columns
+    .map((column, index) => ({ column, index }))
+    .filter(({ column }) => !isInternalColorColumn(column));
+  const priceLikeColumns = usableColumnIndexes
+    .map(({ column, index }) => ({
+      column,
+      index,
+      ratio: columnRatio(table, index, (value) => isLikelySalePriceValue(value, { minPrice: isSalePriceColumnName(column) ? 100 : 1000 })),
+      filled: getColumnFilledValues(table, index).length,
+    }))
+    .filter((item) => item.filled && item.ratio >= 0.7)
+    .sort((a, b) => b.index - a.index);
+  const bestTailPrice = priceLikeColumns[0] || null;
+  let priceIndex = findSalePriceColumnIndex(columns);
+  if (bestTailPrice && priceIndex !== bestTailPrice.index) {
+    const oldPriceIndex = priceIndex;
+    table.rows.forEach((row) => {
+      while (row.length < columns.length) row.push("");
+      const movedPrice = extractSalePriceText(row[bestTailPrice.index], { minPrice: 100 }) || String(row[bestTailPrice.index] || "").trim();
+      if (movedPrice) row[bestTailPrice.index] = movedPrice;
+      if (oldPriceIndex >= 0 && oldPriceIndex !== bestTailPrice.index && !String(row[bestTailPrice.index] || "").trim()) {
+        row[bestTailPrice.index] = row[oldPriceIndex] || "";
+      }
+      if (oldPriceIndex >= 0 && oldPriceIndex !== bestTailPrice.index) row[oldPriceIndex] = "";
+    });
+    columns[bestTailPrice.index] = "售价";
+    if (oldPriceIndex >= 0 && oldPriceIndex !== bestTailPrice.index) columns[oldPriceIndex] = isRemarkColumnName(columns[oldPriceIndex]) ? columns[oldPriceIndex] : "备注";
+    priceIndex = bestTailPrice.index;
+    changed = true;
+  }
+
+  const emptyPriceIndexes = findSalePriceColumnIndexes(columns).filter((index) => index !== priceIndex && columnHasNoUsefulValues(table, index));
+  emptyPriceIndexes
+    .sort((a, b) => b - a)
+    .forEach((index) => {
+      if (removeTicketColumnAt(table, index)) changed = true;
+    });
+
+  const explicitRowIndex = columns.findIndex((column, index) => {
+    const text = normalize(column);
+    if (!["排", "排数", "行", "行数", "row", "열"].includes(text)) return false;
+    return columnRatio(table, index, (value) => Boolean(String(value || "").trim())) >= 0.2;
+  });
+  const emptyExplicitRowIndex = findSeatRowColumnIndexes(columns).find((index) => {
+    const text = normalize(columns[index] || "");
+    return ["排", "排数", "行", "行数", "row", "열"].includes(text) && columnHasNoUsefulValues(table, index);
+  });
+  if (explicitRowIndex < 0 && emptyExplicitRowIndex >= 0) {
+    const misplacedRowIndex = findSeatNumberColumnIndexes(columns).find((index) => {
+      const values = getColumnFilledValues(table, index);
+      if (!values.length) return false;
+      const shortRowLike = valueRatio(values, (value) => {
+        const text = String(value || "").trim();
+        if (!text || isLikelySalePriceValue(text, { minPrice: 100 }) || isLikelyDateValue(text)) return false;
+        return /^(?:[A-Za-z]|[A-Za-z]排|[0-9]{1,3}x|[0-9]{1,3}X|[0-9]{1,3}排|[A-Za-z0-9]{1,4}排)$/.test(text);
+      });
+      return shortRowLike >= 0.55;
+    });
+    if (misplacedRowIndex >= 0) {
+      columns[misplacedRowIndex] = "排";
+      if (removeTicketColumnAt(table, emptyExplicitRowIndex)) changed = true;
+      changed = true;
+    }
+  }
+  const currentExplicitRowIndex = columns.findIndex((column, index) => {
+    const text = normalize(column);
+    return ["排", "排数", "行", "行数", "row", "열"].includes(text) && !columnHasNoUsefulValues(table, index);
+  });
+  if (currentExplicitRowIndex >= 0) {
+    const duplicateSeatIndexes = findSeatNumberColumnIndexes(columns).filter((index) => {
+      if (index === currentExplicitRowIndex) return false;
+      if (columnHasNoUsefulValues(table, index)) return true;
+      const rowValues = getColumnFilledValues(table, currentExplicitRowIndex);
+      const seatValues = getColumnFilledValues(table, index);
+      if (!rowValues.length || seatValues.length < Math.max(1, Math.floor(rowValues.length * 0.7))) return false;
+      const duplicateRatio = table.rows.filter((row) => {
+        const rowValue = normalize(String(row?.[currentExplicitRowIndex] || ""));
+        const seatValue = normalize(String(row?.[index] || ""));
+        return rowValue && seatValue && rowValue === seatValue;
+      }).length / Math.max(1, table.rows.length);
+      return duplicateRatio >= 0.7;
+    });
+    duplicateSeatIndexes
+      .sort((a, b) => b - a)
+      .forEach((index) => {
+        if (removeTicketColumnAt(table, index)) changed = true;
+      });
+  }
+  const emptyAppendedRowIndexes = findSeatRowColumnIndexes(columns).filter((index) => {
+    if (index === currentExplicitRowIndex) return false;
+    return columnHasNoUsefulValues(table, index) && /^(排|排数|行|行数|row|열)$/i.test(String(columns[index] || "").trim());
+  });
+  emptyAppendedRowIndexes
+    .sort((a, b) => b - a)
+    .forEach((index) => {
+      if (removeTicketColumnAt(table, index)) changed = true;
+    });
+  if (currentExplicitRowIndex >= 0 && columns[currentExplicitRowIndex] !== "排") {
+    columns[currentExplicitRowIndex] = "排";
+    changed = true;
+  }
+  return changed;
+}
+
 function repairDuplicateDateColumns(table) {
   const dateIndexes = findColumnIndexes(table.columns || [], DATE_COLUMN_NAMES);
   if (dateIndexes.length <= 1) return false;
@@ -2809,7 +3299,8 @@ function findLikelyDateColumnIndex(table) {
 
 function repairSemanticColumnRoles(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
-  let changed = repairDuplicateDateColumns(table);
+  let changed = repairTailSalePriceAndExplicitRowColumns(table);
+  changed = repairDuplicateDateColumns(table) || changed;
 
   const columns = table.columns;
   const ratios = columns.map((column, index) => ({
@@ -2904,13 +3395,14 @@ function repairSemanticColumnRoles(table) {
   rowIndexes.forEach((index) => {
     const item = ratios[index];
     if (!item) return;
+    const strongRowHeader = /^(排|排数|行|行数|row|열)$/i.test(String(item.column || "").trim()) || /票面排数|门票排数|座位排数/i.test(item.column);
     if (item.businessRemark >= 0.35) {
       changed = setSemanticColumnName(table, index, "备注") || changed;
       return;
     }
     if ((item.zone >= 0.45 || item.composite >= 0.35) && item.row < 0.35) {
       changed = setSemanticColumnName(table, index, "区域") || changed;
-    } else if (item.seat >= 0.45 && item.row < 0.35) {
+    } else if (!strongRowHeader && item.seat >= 0.45 && item.row < 0.35) {
       changed = setSemanticColumnName(table, index, "座位号") || changed;
     }
   });
@@ -2959,6 +3451,7 @@ function repairSemanticColumnRoles(table) {
     }
   });
 
+  if (repairTailSalePriceAndExplicitRowColumns(table)) changed = true;
   return changed;
 }
 
@@ -3318,9 +3811,11 @@ function extractZoneTokenFromText(value) {
 function normalizeSeatText(value) {
   return String(value || "")
     .normalize("NFKC")
+    .replace(/입장\s*번호/gi, "입장번호")
     .replace(/([A-Za-z0-9]+)\s*구역/g, "$1区")
     .replace(/([A-Za-z0-9]+)\s*구(?=$|\s|[A-Za-z0-9])/g, "$1区")
     .replace(/([A-Za-z0-9]+)\s*열/g, "$1排")
+    .replace(/([A-Za-z0-9]+)\s*번/g, "$1号")
     .replace(/([A-Za-z0-9]+)\s*호/g, "$1号")
     .replace(/[‐‑‒–—―～~]/g, "-")
     .replace(/\s+/g, " ")
@@ -3464,9 +3959,12 @@ function extractDateFromCompositeSeatText(value) {
 function extractCompositeSeatNote(text) {
   const source = String(text || "").trim();
   const notes = [
-    ...source.matchAll(/(?:有)?同排|同一排|连坐|連坐|视阻|視阻|遮挡|遮擋|靠过道|靠過道|过道|過道|可拆|不可拆|实际\s*(?:第)?\s*[A-Z]?\d{1,3}\s*(?:[-到至]\s*[A-Z]?\d{1,3})?\s*(?:排|row|열)/gi),
+    ...source.matchAll(/(?:有)?同排|同一排|连坐|連坐|연석|연번|视阻|視阻|遮挡|遮擋|靠过道|靠過道|过道|過道|可拆|不可拆|实际\s*(?:第)?\s*[A-Z]?\d{1,3}\s*(?:[-到至]\s*[A-Z]?\d{1,3})?\s*(?:排|row|열)/gi),
   ].map((match) => match[0].trim());
-  return uniqueCleanValues(notes).join(" ");
+  const floorMatch = source.match(/((?:Floor|floor)|\d{1,2})\s*층/i);
+  if (floorMatch) notes.push(`${floorMatch[1].toLowerCase() === "floor" ? "Floor" : Number(floorMatch[1])}层`);
+  if (/입장\s*번호/i.test(source)) notes.push("入场号");
+  return uniqueCleanValues(notes.map((note) => note.replace(/연석|연번/g, "连坐"))).join(" ");
 }
 
 function normalizeCompositeSeatValue(value) {
@@ -3548,6 +4046,73 @@ function parseHybridCompositeSeatInfo(value) {
   return { zone, row, seat };
 }
 
+function hasKoreanText(value = "") {
+  return /[\u3131-\u318e\uac00-\ud7a3]/.test(String(value || ""));
+}
+
+function normalizeKoreanSeatToken(value = "") {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/[ｘＸ]/g, "X")
+    .replace(/号|號|번|호/gi, "")
+    .toUpperCase()
+    .trim();
+}
+
+function normalizeKoreanRowToken(value = "") {
+  const raw = String(value || "")
+    .normalize("NFKC")
+    .trim()
+    .toUpperCase()
+    .replace(/\s*[-到至~—]\s*/g, "-");
+  return raw ? `${raw}排` : "";
+}
+
+function cleanKoreanZoneToken(value = "", sourceText = "") {
+  const raw = String(value || "").normalize("NFKC").trim();
+  if (!raw) return "";
+  if (/^(one|are|we|exo)$/i.test(raw)) return raw;
+  return normalizeExtractedZoneToken(raw, sourceText);
+}
+
+function parseKoreanCompositeSeatInfo(value) {
+  const source = String(value || "").normalize("NFKC").trim();
+  if (!source || !hasKoreanText(source)) return null;
+  const text = source
+    .replace(/입장\s*번호/gi, "입장번호")
+    .replace(/[‐‑‒–—―～~]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+  const compact = text.replace(/\s+/g, "");
+  const zoneTokenPattern = "(?:[A-Z]{1,4}|I{1,3})?\\d{1,4}[A-Z]?|[A-Z]{1,4}|one|are|we|exo";
+  const zoneMatch =
+    text.match(new RegExp(`(${zoneTokenPattern})\\s*(?:구역|구|区|區)(?=$|\\s|[^A-Za-z0-9])`, "i")) ||
+    compact.match(new RegExp(`(${zoneTokenPattern})(?:구역|구|区|區)`, "i"));
+  const rowMatch =
+    text.match(/([A-Z]?\d{1,3}|[A-Z])\s*(?:열|排)\b/i) ||
+    compact.match(/([A-Z]?\d{1,3}|[A-Z])(?:열|排)/i);
+  const entrySeatMatch =
+    text.match(/입장번호\s*((?:\d+\s*)?[Xx]|[Xx]|\d{1,4}\s*[-到至]\s*\d{1,4}|\d{1,4})\s*(?:번|호|号|號)?/i) ||
+    compact.match(/입장번호((?:\d+)?[Xx]|[Xx]|\d{1,4}[-到至]\d{1,4}|\d{1,4})(?:번|호|号|號)?/i);
+  const seatAfterRowMatch = rowMatch
+    ? text
+        .slice((rowMatch.index || 0) + rowMatch[0].length)
+        .match(/((?:\d+\s*)?[Xx]|[Xx]|\d{1,4}\s*[-到至]\s*\d{1,4}|\d{1,4})\s*(?:번|호|号|號)\b/i)
+    : null;
+  const explicitSeatMatch =
+    entrySeatMatch ||
+    seatAfterRowMatch ||
+    text.match(/((?:\d+\s*)?[Xx]|[Xx])\s*(?:번|호|号|號)\b/i) ||
+    compact.match(/((?:\d+)?[Xx]|[Xx])(?:번|호|号|號)/i);
+  const zone = cleanKoreanZoneToken(zoneMatch?.[1] || "", text);
+  const row = normalizeKoreanRowToken(rowMatch?.[1] || "");
+  const seat = normalizeKoreanSeatToken(explicitSeatMatch?.[1] || "");
+  const note = extractCompositeSeatNote(text);
+  if (!zone && !row && !seat) return null;
+  return { zone, row, seat, note };
+}
+
 function parseCompactCompositeSeatInfo(value) {
   const text = normalizeCompositeSeatValue(value);
   const match = text.match(
@@ -3599,6 +4164,7 @@ function parseCompositeSeatInfo(value) {
     .trim();
   const parsedLocation =
     parseEnglishSideRowPosition(withoutDate) ||
+    parseKoreanCompositeSeatInfo(withoutDate) ||
     parseHybridCompositeSeatInfo(withoutDate) ||
     parseLooseCompositeSeatInfo(withoutDate) ||
     parseEnglishCompositeSeatInfo(withoutDate) ||
@@ -3744,8 +4310,8 @@ function repairCompositeSeatInfo(table, row, indexes) {
 function repairCompositeSeatInfoFromCandidateColumns(table, row) {
   const columns = table.columns || [];
   const preferredIndexes = [
-    ...findColumnIndexes(columns, ["区域", "区", "位置", "block", "section", "구역", "구"]),
-    ...findColumnIndexes(columns, ["票面", "票价", "价位", "面值", "席位", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분"]),
+    ...findColumnIndexes(columns, ["区域", "区", "位置", "block", "section", "구역", "구", "위치"]),
+    ...findColumnIndexes(columns, ["票面", "票价", "价位", "面值", "席位", "席别", "席別", "座席", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분"]),
   ];
   const fallbackIndexes = row
     .map((value, index) => ({ value, index, column: columns[index] || "" }))
@@ -3984,8 +4550,37 @@ function findFallbackSalePriceFromAnyCell(table, row) {
   return candidates[0] || null;
 }
 
+function repairCompactShiftedTicketRow(table, row) {
+  if (!table || !Array.isArray(row) || hasTicketSalePrice({ table, row, index: -1 })) return false;
+  const columns = table.columns || [];
+  if (!columns.some(isSalePriceColumnName)) return false;
+  const candidates = row
+    .map((value, index) => ({ value: String(value || "").trim(), index, column: columns[index] || "" }))
+    .filter(({ value, column }) => value && !isInternalColorColumn(column) && !isLikelyRowColorValue(value))
+    .filter(({ value }) => !isSoldText(value, { strict: true }) && isLikelySalePriceValue(value, { minPrice: 1000 }))
+    .filter(({ column }) => !isSalePriceColumnName(column) && isProtectedNonPriceColumnName(column))
+    .sort((a, b) => b.index - a.index);
+  const candidate = candidates[0];
+  if (!candidate) return false;
+  const compactValues = row.slice(0, candidate.index + 1).map((cell) => String(cell || "").trim()).filter(Boolean);
+  const mapped = alignCompactTicketRowToColumns(compactValues, columns);
+  if (!mapped || !hasTicketSalePrice({ table, row: mapped, index: -1 })) return false;
+  const quantityIndex = findQuantityColumnIndex(columns);
+  const existingQuantity = quantityIndex >= 0 && isLikelySeatCountValue(row[quantityIndex]) ? String(row[quantityIndex] || "").trim() : "";
+  columns.forEach((column, index) => {
+    const field = getDefaultFieldForHeader(column);
+    if (!field || isInternalColorColumn(column)) return;
+    row[index] = mapped[index] || "";
+  });
+  if (existingQuantity && quantityIndex >= 0 && !String(row[quantityIndex] || "").trim()) row[quantityIndex] = existingQuantity;
+  return true;
+}
+
 function repairSalePriceAndQuantity(table, row) {
   let changed = false;
+  if (repairCompactShiftedTicketRow(table, row)) {
+    changed = true;
+  }
   if (repairShiftedSalePriceAndRemark(table, row)) {
     changed = true;
   }
@@ -4109,9 +4704,17 @@ function repairMergedContextValues(table) {
 
 function normalizePendingTableColumns(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return table;
+  const initialSignature = [
+    (table.columns || []).join("\u0001"),
+    (table.rows || []).map((row) => (Array.isArray(row) ? row.join("\u0001") : "")).join("\u0002"),
+  ].join("\u0003");
+  if (table._normalizedColumnsSignature === initialSignature && Number(table._columnNormalizationVersion || 0) === COLUMN_NORMALIZATION_VERSION) {
+    return table;
+  }
   extendColumnsForOverflowRows(table.columns, table.rows);
   ensureOriginalTableSnapshot(table);
   let changed = false;
+  if (repairTailSalePriceAndExplicitRowColumns(table)) changed = true;
   table.rows.forEach((row) => {
     while (row.length < table.columns.length) {
       row.push("");
@@ -4119,7 +4722,15 @@ function normalizePendingTableColumns(table) {
     }
   });
 
+  table.rows.forEach((row, rowIndex) => {
+    if (table.userEditedRows?.[rowIndex]) return;
+    if (repairCompactShiftedTicketRow(table, row)) changed = true;
+  });
+
   if (repairSemanticColumnRoles(table)) {
+    changed = true;
+  }
+  if (repairTailSalePriceAndExplicitRowColumns(table)) {
     changed = true;
   }
 
@@ -4212,6 +4823,11 @@ function normalizePendingTableColumns(table) {
     quantityIndex = findQuantityColumnIndex(table.columns);
     priceIndex = findSalePriceColumnIndex(table.columns);
   }
+  if (repairTailSalePriceAndExplicitRowColumns(table)) {
+    changed = true;
+    quantityIndex = findQuantityColumnIndex(table.columns);
+    priceIndex = findSalePriceColumnIndex(table.columns);
+  }
 
   if (repairMergedContextValues(table)) {
     changed = true;
@@ -4241,9 +4857,17 @@ function normalizePendingTableColumns(table) {
     if (repairMergedContextValues(table)) changed = true;
     if (repairMisplacedDateAndPriceValues(table)) changed = true;
   }
+  if (repairTailSalePriceAndExplicitRowColumns(table)) {
+    changed = true;
+  }
 
   table.autoRepairedColumns = Boolean(table.autoRepairedColumns || changed);
   table._columnRepairChanged = changed;
+  table._normalizedColumnsSignature = [
+    (table.columns || []).join("\u0001"),
+    (table.rows || []).map((row) => (Array.isArray(row) ? row.join("\u0001") : "")).join("\u0002"),
+  ].join("\u0003");
+  table._columnNormalizationVersion = COLUMN_NORMALIZATION_VERSION;
   return table;
 }
 
@@ -4345,6 +4969,9 @@ function isOpenCvCellNonWhiteTicketSignal(item) {
 function getStrictRowLocalOpenCvColorLabel(item) {
   if (!item || item.userCleared || item.source === "ai_row_color") return "";
   const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (item.source === "paddle_ppstructure" || item.source === "ticket_row_anchor") {
+    return item.rowTextVerified === true && item.rowGeometryVerified === true && Number(item.confidence || 0) >= 0.82 ? rawLabel : "";
+  }
   const { cellCount, coloredCellCount, whiteCellCount, coloredCellRatio, whiteCellRatio } = getOpenCvCellStats(item);
   const coloredRatio = Number(item.coloredRatio || 0);
   const whiteRatio = Number(item.whiteRatio || 0);
@@ -4464,6 +5091,12 @@ function hasOpenCvCurrentRedWhiteFallback(table) {
   return state.redCount >= 1 && state.whiteCount >= 1 && state.labels.every((label) => label === "红底" || isAvailableRowColorLabel(label));
 }
 
+function hasOpenCvMixedNonWhiteAutoSkipSignal(table) {
+  const state = getOpenCvEffectiveColorState(table);
+  if (!state.hasNonWhite || state.hasWhite) return false;
+  return false;
+}
+
 function hasOpenCvSparseMappedRedPageSignal(table, rowIndex) {
   if (!table?.rowColorSparseSourceRepair || !table.rowColorPartialSequenceAligned || table.rowColorReliable !== true) return false;
   const sourceIndex = Array.isArray(table.rowColorSourceIndexes) ? Number(table.rowColorSourceIndexes[rowIndex]) : -1;
@@ -4481,27 +5114,71 @@ function isPendingRowManuallyPublished(table, rowIndex) {
   return table?.manualPublishRows?.[rowIndex] === true && table?.publishRows?.[rowIndex] === true;
 }
 
+function isPendingRowManuallySkipped(table, rowIndex) {
+  return table?.manualSkipRows?.[rowIndex] === true && table?.publishRows?.[rowIndex] === false;
+}
+
+function isPendingRowDirectlyUserSkipped(table, rowIndex) {
+  return table?.manualSkipRows?.[rowIndex] === true && table?.publishRows?.[rowIndex] === false && table?.userEditedRows?.[rowIndex] === true;
+}
+
+function getAiRowColorItem(table, rowIndex) {
+  if (
+    table?.rowColorSource !== "ai_row_color" ||
+    Number(table.rowColorLogicVersion || 0) !== ROW_COLOR_LOGIC_VERSION ||
+    !Array.isArray(table.rowColorRows) ||
+    !table.rowColorRows[rowIndex] ||
+    table.rowColorRows[rowIndex].userCleared
+  ) {
+    return null;
+  }
+  return table.rowColorRows[rowIndex];
+}
+
+function isTrustedAiRowColorAction(item, action, threshold) {
+  if (!item || item.userCleared) return false;
+  if (String(item.action || "") !== action) return false;
+  const confidence = Number(item.confidence || 0);
+  return confidence >= threshold;
+}
+
+function isTrustedAiRowSkipDecision(table, rowIndex) {
+  if (isPendingRowManuallyPublished(table, rowIndex)) return false;
+  if (table?.rowColorAiAutoApplyAllowed !== true) return false;
+  const item = getAiRowColorItem(table, rowIndex);
+  if (!item || item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
+  if (item.pixelMismatch === true) return false;
+  return isTrustedAiRowColorAction(item, "skip", AI_ROW_COLOR_SKIP_CONFIDENCE);
+}
+
+function isTrustedAiRowPublishDecision(table, rowIndex) {
+  if (isPendingRowDirectlyUserSkipped(table, rowIndex)) return false;
+  if (table?.rowColorAiAutoApplyAllowed !== true) return false;
+  const item = getAiRowColorItem(table, rowIndex);
+  if (!item || item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
+  if (item.pixelMismatch === true) return false;
+  return isTrustedAiRowColorAction(item, "publish", AI_ROW_COLOR_PUBLISH_CONFIDENCE);
+}
+
 function shouldAutoSkipForRowColor(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
   if (isPendingRowManuallyPublished(table, rowIndex)) return false;
-  if ((table.rowColorSource === "opencv" || table.rowColorSource === "pdf_vector") && table.rowColorReliable !== true) return false;
+  if (table.rowColorSource === "ai_row_color") return isTrustedAiRowSkipDecision(table, rowIndex);
+  if (hasVerifiedWhiteAndNonWhiteRowColorHold(table) && hasVerifiedNonWhiteRowColorHold(table, rowIndex)) return true;
+  if (
+    (table.rowColorSource === "opencv" ||
+      table.rowColorSource === "pdf_vector" ||
+      table.rowColorSource === "paddle_ppstructure" ||
+      table.rowColorSource === "ticket_row_anchor") &&
+    table.rowColorReliable !== true
+  )
+    return false;
+  if (!hasActionableOpenCvColorSource(table)) return false;
+  if (isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex)) return true;
   const item = table.rowColorRows?.[rowIndex];
   const label = getStrictRowLocalOpenCvColorLabel(item);
   if (!label || isAvailableRowColorLabel(label)) return false;
-  if (hasOpenCvSoldTextColorAnchor(table)) {
-    const anchorState = getOpenCvSoldTextColorAnchorState(table);
-    return anchorState.labels.includes(label);
-  }
-  if (hasConfirmedOpenCvWhiteAndColoredConflict(table)) {
-    if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table)) return true;
-    if (hasOpenCvRawColorDifference(table) && isStrongOpenCvNonWhiteColorItem(item)) return true;
-  }
-  if (!isDefaultAutoSkipColorLabel(label)) return false;
-  if (table.rowColorReliable === true && hasOpenCvColorDecisionAlignment(table) && hasConfirmedOpenCvWhiteAndColoredConflict(table)) return true;
-  if (hasOpenCvRawColorDifference(table) && isStrongOpenCvNonWhiteColorItem(item)) return true;
-  if (label === "红底" && hasOpenCvSparseMappedRedPageSignal(table, rowIndex)) return true;
-  if (label === "红底" && hasOpenCvCurrentRedWhiteFallback(table)) return true;
-  return hasExactMixedRowColorAutoSkipSource(table) && isDefaultAutoSkipColorLabel(label);
+  return true;
 }
 
 function getRowColorColumnIndex(table) {
@@ -4520,11 +5197,19 @@ function ensureRowColorColumn(table) {
 }
 
 function isVisualRowColorSource(table) {
-  return table?.rowColorSource === "opencv" || table?.rowColorSource === "ai_row_color" || table?.rowColorSource === "pdf_vector";
+  return (
+    table?.rowColorSource === "opencv" ||
+    table?.rowColorSource === "ai_row_color" ||
+    table?.rowColorSource === "pdf_vector" ||
+    table?.rowColorSource === "paddle_ppstructure" ||
+    table?.rowColorSource === "ticket_row_anchor"
+  );
 }
 
 function getRowColorEngineName(table) {
   if (table?.rowColorSource === "pdf_vector") return "PDF 原始颜色";
+  if (table?.rowColorSource === "paddle_ppstructure") return "PP-Structure";
+  if (table?.rowColorSource === "ticket_row_anchor") return "文字锚点";
   return table?.rowColorSource === "ai_row_color" ? "AI" : "OpenCV";
 }
 
@@ -4538,7 +5223,10 @@ function hasTrustedRowColorSource(table) {
 
 function hasExactOpenCvRowAlignment(table) {
   return (
-    (table?.rowColorSource === "opencv" || table?.rowColorSource === "pdf_vector") &&
+    (table?.rowColorSource === "opencv" ||
+      table?.rowColorSource === "pdf_vector" ||
+      table?.rowColorSource === "paddle_ppstructure" ||
+      table?.rowColorSource === "ticket_row_anchor") &&
     Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
     Array.isArray(table.rows) &&
     Array.isArray(table.rowColorRows) &&
@@ -4550,7 +5238,13 @@ function hasExactOpenCvRowAlignment(table) {
 
 function hasExactVisualRowColorAlignment(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
-  if (table.rowColorSource === "opencv" || table.rowColorSource === "pdf_vector") return hasExactOpenCvRowAlignment(table);
+  if (
+    table.rowColorSource === "opencv" ||
+    table.rowColorSource === "pdf_vector" ||
+    table.rowColorSource === "paddle_ppstructure" ||
+    table.rowColorSource === "ticket_row_anchor"
+  )
+    return hasExactOpenCvRowAlignment(table);
   return (
     table.rowColorSource === "ai_row_color" &&
     Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
@@ -4610,6 +5304,10 @@ function getOpenCvItemDecisionColorLabel(item) {
   const cellMajorityWhite = isOpenCvCellMajorityWhite(item);
   const cellMajorityNonWhite = isOpenCvCellMajorityNonWhite(item);
   const confidence = Number(item?.confidence || 0);
+  if (item?.source === "ticket_row_anchor") {
+    if (item.rowTextVerified !== true || item.rowGeometryVerified !== true || confidence < 0.82 || item.strong !== true) return "";
+    return label;
+  }
   if (item?.source === "ai_row_color") {
     if (isAvailableRowColorLabel(label)) return confidence >= 0.55 ? "白底" : "";
     return confidence >= 0.72 ? label : "";
@@ -4701,6 +5399,10 @@ function getOpenCvItemConflictSignalLabel(item) {
 
 function getOpenCvItemConflictActionLabel(item) {
   if (!item || item.userCleared) return "";
+  if (item.source === "ticket_row_anchor") {
+    const label = getStrictRowLocalOpenCvColorLabel(item);
+    return label && !isAvailableRowColorLabel(label) && item.strong === true ? label : "";
+  }
   if (isOpenCvCellMajorityWhite(item)) return "白底";
   if (hasOpenCvWhitePriceSideCell(item)) return "白底";
   const rawLabel = getOpenCvItemRawColorLabel(item);
@@ -4784,6 +5486,13 @@ function getAutoOpenCvRowColorLabel(table, rowIndex) {
 
 function hasActionableOpenCvColorSource(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
+  if (
+    Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
+    typeof table.rowColorActionableConflict === "boolean"
+  ) {
+    return table.rowColorActionableConflict;
+  }
+  if (hasVerifiedWhiteAndNonWhiteRowColorHold(table)) return true;
   if (!hasOpenCvColorDecisionAlignment(table)) return false;
   return hasConfirmedOpenCvWhiteAndColoredConflict(table);
 }
@@ -4799,12 +5508,8 @@ function isStrictRowColorActionable(table, rowIndex) {
 }
 
 function getStrictWhiteOnlyOpenCvRowColorLabel(table, rowIndex) {
-  const autoLabel = getAutoOpenCvRowColorLabel(table, rowIndex);
-  if (autoLabel) return autoLabel;
-  if (!hasOpenCvRawColorDifference(table)) return "";
-  const rawLabel = getOpenCvRawRowColorLabel(table, rowIndex);
-  if (!rawLabel) return "";
-  return rawLabel;
+  if (!hasActionableOpenCvColorSource(table)) return "";
+  return getStrictRowLocalOpenCvColorLabel(table?.rowColorRows?.[rowIndex]);
 }
 
 function getOpenCvNonSoldColorLabels(table) {
@@ -4867,6 +5572,41 @@ function hasOpenCvRawWhiteAndColoredConflict(table) {
   return labels.some(isAvailableRowColorLabel) && labels.some((label) => label && !isAvailableRowColorLabel(label));
 }
 
+function hasExactMixedRawRowColorConflict(table) {
+  return (
+    hasOpenCvColorDecisionAlignment(table) &&
+    hasOpenCvRawColorDifference(table) &&
+    (table?.rowColorExactRowAligned === true || table?.rowColorReliable === true || table?.rowColorConfirmed === true)
+  );
+}
+
+function isRawNonWhiteColorStrongEnoughForMixedTable(item) {
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel) || item?.userCleared) return false;
+  if (item?.source === "ai_row_color") return false;
+  if (isOpenCvCellMajorityWhite(item) || hasOpenCvWhitePriceSideCell(item)) return false;
+  const confidence = Number(item?.confidence || 0);
+  const coloredRatio = Math.max(Number(item?.coloredRatio || 0), Number(item?.localPixelColoredRatio || 0));
+  const whiteRatio = Math.max(Number(item?.whiteRatio || 0), Number(item?.localPixelWhiteRatio || 0));
+  const coverageRatio = Number(item?.coverageRatio || 0);
+  const coloredCells = Number(item?.coloredCellCount || 0);
+  if (item?.source === "ticket_row_anchor" && (item.rowTextVerified !== true || item.rowGeometryVerified !== true)) return false;
+  return (
+    item?.strong === true ||
+    isOpenCvCellNonWhiteTicketSignal(item) ||
+    coloredCells >= 1 ||
+    (confidence >= 0.45 && coloredRatio >= 0.18 && coloredRatio >= whiteRatio + 0.05) ||
+    (confidence >= 0.6 && coverageRatio >= 0.2 && coloredRatio >= 0.14)
+  );
+}
+
+function isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex) {
+  if (!hasExactMixedRawRowColorConflict(table)) return false;
+  const ticket = { table, row: table?.rows?.[rowIndex], index: rowIndex };
+  if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return false;
+  return isRawNonWhiteColorStrongEnoughForMixedTable(table?.rowColorRows?.[rowIndex]);
+}
+
 function hasStrongOpenCvWhiteAndColoredConflict(table) {
   if (!hasOpenCvColorDecisionAlignment(table) || !Array.isArray(table.rows)) return false;
   let hasWhite = false;
@@ -4905,10 +5645,14 @@ function getOpenCvEffectiveColorState(table) {
       state.whiteCount += 1;
       state.labels.push("白底");
     }
-    if (localLabel && !isAvailableRowColorLabel(localLabel)) {
+    if ((localLabel && !isAvailableRowColorLabel(localLabel)) || hasVerifiedNonWhiteRowColorHold(table, index)) {
       state.hasNonWhite = true;
       state.nonWhiteCount += 1;
-      state.labels.push(localLabel);
+      state.labels.push(localLabel || getOpenCvItemRawColorLabel(item) || "非白底");
+    } else if (isMixedTableRawNonWhiteAutoSkipItem(table, index)) {
+      state.hasNonWhite = true;
+      state.nonWhiteCount += 1;
+      state.labels.push(getOpenCvItemRawColorLabel(item) || "非白底");
     }
   });
 
@@ -4928,7 +5672,7 @@ function getOpenCvColorReferenceMessage(table) {
     return `${engineName} 检测到白底有效票 ${state.whiteCount} 条、非白底有效票 ${state.nonWhiteCount} 条；同表混色时非白底行会自动设为不发布。`;
   }
   if (state.hasNonWhite && !state.hasWhite) {
-    return `${engineName} 仅检测到非白底有效票 ${state.nonWhiteCount} 条；未找到白底参照，先保留人工确认。`;
+    return `${engineName} 检测到非白底有效票 ${state.nonWhiteCount} 条；已验证的非白底行会自动设为不发布。`;
   }
   if (state.hasWhite) {
     return `${engineName} 仅检测到白底有效票 ${state.whiteCount} 条。`;
@@ -4937,11 +5681,11 @@ function getOpenCvColorReferenceMessage(table) {
 }
 
 function hasAnyOpenCvWhiteAndColoredConflict(table) {
-  return hasConfirmedOpenCvWhiteAndColoredConflict(table);
+  return hasActionableOpenCvColorSource(table);
 }
 
 function getWhiteVsColoredConflictLabel(table, rowIndex) {
-  if (!hasOpenCvRowColorPreview(table) || !hasConfirmedOpenCvWhiteAndColoredConflict(table)) return "";
+  if (!hasActionableOpenCvColorSource(table)) return "";
   const item = table.rowColorRows?.[rowIndex];
   if (item?.userCleared) return "";
   return getStrictRowLocalOpenCvColorLabel(item);
@@ -4958,16 +5702,19 @@ function getOpenCvColorDecisionText(table, rowIndex) {
   const item = table?.rowColorRows?.[rowIndex];
   const label = getOpenCvItemConflictActionLabel(item);
   const rawLabel = getOpenCvRawRowColorLabel(table, rowIndex);
+  const actionableConflict = hasActionableOpenCvColorSource(table);
   const conflictLabel = getWhiteVsColoredConflictLabel(table, rowIndex);
-  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && conflictLabel && !isAvailableRowColorLabel(conflictLabel)) return "非白底参考";
-  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && conflictLabel && isAvailableRowColorLabel(conflictLabel)) return "白底参考";
-  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && label && !isAvailableRowColorLabel(label)) return "非白底参考";
-  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && label && isAvailableRowColorLabel(label)) return "白底参考";
-  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && rawLabel && !isAvailableRowColorLabel(rawLabel)) return "非白底参考";
-  if (hasConfirmedOpenCvWhiteAndColoredConflict(table) && rawLabel && isAvailableRowColorLabel(rawLabel)) return "白底参考";
-  const colorState = getOpenCvEffectiveColorState(table);
-  if (colorState.hasNonWhite && !colorState.hasWhite) return "带色参考";
-  if (colorState.hasWhite && isAvailableRowColorLabel(label || rawLabel)) return "白底参考";
+  if (actionableConflict && conflictLabel && !isAvailableRowColorLabel(conflictLabel)) return "非白底参考";
+  if (actionableConflict && conflictLabel && isAvailableRowColorLabel(conflictLabel)) return "白底参考";
+  if (actionableConflict && label && !isAvailableRowColorLabel(label)) return "非白底参考";
+  if (actionableConflict && label && isAvailableRowColorLabel(label)) return "白底参考";
+  if (actionableConflict && rawLabel && !isAvailableRowColorLabel(rawLabel)) return "非白底参考";
+  if (actionableConflict && rawLabel && isAvailableRowColorLabel(rawLabel)) return "白底参考";
+  if (table?.rowColorReliable === true) {
+    const colorState = getOpenCvEffectiveColorState(table);
+    if (colorState.hasNonWhite && !colorState.hasWhite) return "带色参考";
+    if (colorState.hasWhite && isAvailableRowColorLabel(label || rawLabel)) return "白底参考";
+  }
   if (!label && !rawLabel) return "未识别";
   if (!getAutoOpenCvRowColorLabel(table, rowIndex)) return "不确定";
   return "颜色参考";
@@ -4976,11 +5723,50 @@ function getOpenCvColorDecisionText(table, rowIndex) {
 function applyAiRowColorActionDecision(table) {
   if (!table || table.rowColorSource !== "ai_row_color" || !Array.isArray(table.rowColorRows)) return 0;
   table.rowColorConfirmed = true;
-  table.rowColorAutoApplied = false;
   table.showOpenCvColorPreview = false;
-  table.rowColorAutoSkipCount = 0;
-  table.rowColorMessage = "AI 颜色结果已记录为建议，不直接控制上架或下架。";
-  return 0;
+  table.publishRows = table.publishRows || {};
+  const previousAutoRows = Array.isArray(table.aiRowColorAutoRows) ? table.aiRowColorAutoRows : [];
+  previousAutoRows.forEach((rowIndex) => {
+    const index = Number(rowIndex);
+    if (!Number.isInteger(index) || table.manualSkipRows?.[index] === true || table.manualPublishRows?.[index] === true) return;
+    const ticket = { table, row: table.rows?.[index], index };
+    if (table.publishRows[index] === false && isCustomerPublishableTicket(ticket)) delete table.publishRows[index];
+  });
+  const autoRows = [];
+  let skipCount = 0;
+  let publishCount = 0;
+  let uncertainCount = 0;
+  (table.rows || []).forEach((row, rowIndex) => {
+    const ticket = { table, row, index: rowIndex };
+    const item = getAiRowColorItem(table, rowIndex);
+    if (!item) {
+      uncertainCount += 1;
+      return;
+    }
+    if (isTrustedAiRowSkipDecision(table, rowIndex) && !isSoldTicket(ticket)) {
+      table.publishRows[rowIndex] = false;
+      autoRows.push(rowIndex);
+      skipCount += 1;
+      return;
+    }
+    if (isTrustedAiRowPublishDecision(table, rowIndex) && isCustomerPublishableTicket(ticket)) {
+      if (table.publishRows[rowIndex] === false) {
+        delete table.publishRows[rowIndex];
+        delete table.manualSkipRows?.[rowIndex];
+        autoRows.push(rowIndex);
+        publishCount += 1;
+      }
+      return;
+    }
+    if (String(item.action || "") === "uncertain" || Number(item.confidence || 0) < AI_ROW_COLOR_SKIP_CONFIDENCE) {
+      uncertainCount += 1;
+    }
+  });
+  table.aiRowColorAutoRows = autoRows;
+  table.rowColorAutoApplied = skipCount > 0 || publishCount > 0;
+  table.rowColorAutoSkipCount = skipCount;
+  table.rowColorMessage = `AI 视觉复核已按高置信结果处理：${skipCount} 条不发布、${publishCount} 条恢复可发布${uncertainCount ? `，${uncertainCount} 条不确定保留人工确认` : ""}。`;
+  return skipCount + publishCount;
 }
 
 function applyOpenCvWhiteVsColoredAutoDecision(table) {
@@ -5256,8 +6042,21 @@ function hasSourceIndexedOpenCvAlignment(table, analysis, aligned, availableRows
   const detectedRows = Number(analysis.detectedRows || availableCount);
   const sourceCoversExpectedRows = expectedRows > 0 && maxSourceIndex + 1 <= expectedRows && availableCount >= expectedRows;
   const backendReturnedFullRows = detectedRows >= maxSourceIndex + 1 && availableCount >= maxSourceIndex + 1;
-  const selectionLooksTableLike = /(^|_)exact$/i.test(String(analysis.selectionMode || ""));
+  const selectionMode = String(analysis.selectionMode || "");
+  const selectionLooksTableLike = /(^|_)exact$/i.test(selectionMode) && !/text_projection_split/i.test(selectionMode);
   return selectionLooksTableLike && (sourceCoversExpectedRows || backendReturnedFullRows);
+}
+
+function hasStableOpenCvActionableAlignment(table, analysis, aligned, availableRows) {
+  if (!table || !analysis || !aligned || !Array.isArray(table.rows)) return false;
+  const rowCount = table.rows.length;
+  if (!rowCount || aligned.rows?.length !== rowCount) return false;
+  const selectionMode = String(analysis.selectionMode || "");
+  const hasNumericSourceSequence = table.rowColorSourceIndexMode === "sequence" && getVisibleSourceSequenceNumbers(table).length === rowCount;
+  if (hasNumericSourceSequence) return true;
+  if (rowCount <= 5) return true;
+  if (selectionMode.startsWith("group_")) return false;
+  return true;
 }
 
 function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
@@ -5274,19 +6073,25 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorPartialSequenceAligned = false;
   table.rowColorPageLabels = [];
   table.rowColorExactRowAligned = false;
+  table.rowColorActionableConflict = false;
+  table.rowColorAiAutoApplyAllowed = false;
 
-  if (!analysis || !["opencv", "ai_row_color", "pdf_vector"].includes(analysis.source)) return 0;
+  if (!analysis || !["opencv", "ai_row_color", "pdf_vector", "paddle_ppstructure", "ticket_row_anchor"].includes(analysis.source)) return 0;
   table.rowColorSource = analysis.source;
   table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
   table.rowColorSelectionMode = analysis.selectionMode || "";
+  table.rowColorImageWidth = Number(analysis.imageWidth || 0);
+  table.rowColorImageHeight = Number(analysis.imageHeight || 0);
   table.rowColorContiguous = analysis.contiguous === true;
+  table.rowColorAiGeometryVerified = analysis.aiGeometryVerified === true || analysis.rowGeometryVerified === true;
+  table.rowColorAiAutoApplyAllowed = analysis.autoApplyAllowed === true;
   table.rowColorMaxGap = Number(analysis.maxRowGap || 0);
   table.rowColorLowConfidenceRows = Array.isArray(analysis.lowConfidenceRows) ? analysis.lowConfidenceRows : [];
   table.rowColorUnreliableReasons = Array.isArray(analysis.unreliableReasons) ? analysis.unreliableReasons : [];
   table.rowColorWarningReasons = Array.isArray(analysis.warningReasons) ? analysis.warningReasons : [];
   const availableRows = Array.isArray(analysis.rows) ? analysis.rows : [];
   const aligned =
-    analysis.source === "ai_row_color"
+    analysis.source === "ai_row_color" || analysis.source === "ticket_row_anchor"
       ? {
           rows: table.rows.map(
             (_, index) =>
@@ -5295,7 +6100,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
                 label: "",
                 rawLabel: "",
                 confidence: 0,
-                reason: "AI 未返回这一行，保留人工确认。",
+                reason: analysis.source === "ticket_row_anchor" ? "文字锚点未返回这一行，保留人工确认。" : "AI 未返回这一行，保留人工确认。",
               },
           ),
           startIndex: 0,
@@ -5307,13 +6112,15 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   if (unsafeSourceSequencePrefix && !table.rowColorWarningReasons.includes("source_sequence_prefix_not_verified")) {
     table.rowColorWarningReasons = [...table.rowColorWarningReasons, "source_sequence_prefix_not_verified"];
   }
-  table.rowColorExactBackendAligned = (analysis.exactRowAligned === true && !unsafeSourceSequencePrefix) || sourceIndexedAlignment;
+  const backendSelectionMode = String(analysis.selectionMode || "");
+  const backendExactAllowed = !/text_projection_split/i.test(backendSelectionMode);
+  table.rowColorExactBackendAligned = (analysis.exactRowAligned === true && !unsafeSourceSequencePrefix && backendExactAllowed) || sourceIndexedAlignment;
   table.rowColorAlignedStart = aligned.startIndex;
   table.rowColorPartialSequenceAligned = aligned.partialSequenceAligned === true;
   table.rowColorPageLabels = uniqueCleanValues(availableRows.map((row) => getOpenCvItemRawColorLabel(row)));
   table.rowColorExactRowAligned = Boolean(
-    analysis.source === "ai_row_color" ||
-      ((analysis.source === "opencv" || analysis.source === "pdf_vector") &&
+    ((analysis.source === "ai_row_color" || analysis.source === "ticket_row_anchor") && analysis.reliable === true && analysis.exactRowAligned === true) ||
+      ((analysis.source === "opencv" || analysis.source === "pdf_vector" || analysis.source === "paddle_ppstructure") &&
         table.rowColorExactBackendAligned &&
         aligned.exact === true &&
         assignedRows.length === table.rows.length),
@@ -5338,47 +6145,79 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
     rightmostCellColoredRatio: row?.rightmostCellColoredRatio || 0,
     rightmostCellWhiteRatio: row?.rightmostCellWhiteRatio || 0,
     cellResults: Array.isArray(row?.cellResults) ? row.cellResults : [],
+    rowBox: row?.rowBox || row?.row_box || row?.bbox || null,
+    bbox: row?.bbox || row?.rowBox || row?.row_box || null,
+    sampleBox: row?.sampleBox || null,
     strong: row?.strong === true,
     action: row?.action || "",
     reason: row?.reason || "",
+    rowTextVerified: row?.rowTextVerified === true,
+    rowGeometryVerified: row?.rowGeometryVerified === true,
+    pixelMismatch: row?.pixelMismatch === true,
+    matchedText: row?.matchedText || "",
+    localPixelLabel: row?.localPixelLabel || "",
+    localPixelRedRatio: row?.localPixelRedRatio || 0,
+    localPixelWhiteRatio: row?.localPixelWhiteRatio || 0,
+    localPixelColoredRatio: row?.localPixelColoredRatio || 0,
     sourceIndex: alignedSourceIndexes[index] ?? row?.index ?? "",
     y: row?.y ?? "",
   }));
 
   const exactRowCount = assignedRows.length === table.rows.length;
   const labels = table.rowColorRows.map((row) => getOpenCvItemConflictActionLabel(row) || getOpenCvItemRawColorLabel(row)).filter(Boolean);
-  const allEffectiveRowsHaveSignal = assignedRows.every((colorItem, rowIndex) =>
-    hasUsableOpenCvColorSignalForEffectiveTicket(table, table.rows[rowIndex], rowIndex, colorItem),
-  );
-  table.rowColorReliable = Boolean(
+  const canAttemptReliableColorDecision = Boolean(
     (analysis.reliable || sourceIndexedAlignment) &&
+      (analysis.source !== "ai_row_color" || table.rowColorAiGeometryVerified === true) &&
       table.rowColorExactBackendAligned &&
       exactRowCount &&
-      allEffectiveRowsHaveSignal &&
-      table.rowColorExactRowAligned,
+      table.rowColorExactRowAligned &&
+      hasStableOpenCvActionableAlignment(table, analysis, aligned, availableRows),
   );
-  const colorState = getOpenCvEffectiveColorState(table);
+  const allEffectiveRowsHaveSignal = canAttemptReliableColorDecision
+    ? assignedRows.every((colorItem, rowIndex) =>
+        hasUsableOpenCvColorSignalForEffectiveTicket(table, table.rows[rowIndex], rowIndex, colorItem),
+      )
+    : false;
+  table.rowColorReliable = Boolean(canAttemptReliableColorDecision && allEffectiveRowsHaveSignal);
+  const colorState = table.rowColorReliable
+    ? getOpenCvEffectiveColorState(table)
+    : {
+        hasWhite: false,
+        hasNonWhite: false,
+        whiteCount: 0,
+        nonWhiteCount: 0,
+        labels: [],
+      };
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
+  const hasVerifiedRowColorConflict = hasVerifiedWhiteAndNonWhiteRowColorHold(table);
+  table.rowColorActionableConflict = Boolean((table.rowColorReliable && hasColorConflict) || hasVerifiedRowColorConflict);
   applyOpenCvWhiteVsColoredAutoDecision(table);
+  const actionableColorState = table.rowColorActionableConflict ? getOpenCvEffectiveColorState(table) : colorState;
+  const hasActionableColorConflict = actionableColorState.hasWhite && actionableColorState.hasNonWhite;
   const untrustedColorMapping =
     !table.rowColorReliable &&
-    ((analysis.source === "opencv" || analysis.source === "pdf_vector") &&
+    ((analysis.source === "opencv" || analysis.source === "pdf_vector" || analysis.source === "paddle_ppstructure") &&
       (!table.rowColorExactBackendAligned || !table.rowColorExactRowAligned || table.rowColorPartialSequenceAligned));
   if (untrustedColorMapping) clearUntrustedRowColorPublishHolds(table);
   if (
+    analysis.source !== "ai_row_color" &&
     !table.rowColorReliable &&
-    !hasOpenCvSoldTextColorAnchor(table) &&
-    !hasOpenCvCurrentRedWhiteFallback(table) &&
-    !hasOpenCvSparseMappedRedPageSignalForTable(table) &&
-    !hasOpenCvRawColorDifference(table) &&
-    !hasAnyOpenCvWhiteAndColoredConflict(table)
+    !hasActionableOpenCvColorSource(table)
   ) {
     Object.keys(table.publishRows || {}).forEach((rowIndex) => {
       if (table.manualSkipRows?.[rowIndex] !== true && table.publishRows[rowIndex] === false) delete table.publishRows[rowIndex];
     });
   }
   const engineName = getRowColorEngineName(table);
-  if (table.rowColorReliable && colorState.hasNonWhite && !colorState.hasWhite) {
+  if (analysis.source === "ai_row_color" && table.rowColorAutoApplied === true) {
+    table.rowColorMessage = table.rowColorMessage || `${engineName} 已按高置信逐行结果处理。`;
+  } else if (analysis.source === "ai_row_color" && table.rowColorAiAutoApplyAllowed !== true) {
+    table.rowColorMessage = `${engineName} 已记录逐行颜色复核，但未通过行框级一对一验证，不会自动改变发布状态。`;
+  } else if (analysis.source === "ai_row_color" && table.rowColorAiGeometryVerified !== true) {
+    table.rowColorMessage = `${engineName} 已记录逐行建议，但没有原图行框验证，不会自动改变发布状态。`;
+  } else if (hasActionableColorConflict) {
+    table.rowColorMessage = `${engineName} 已识别 ${assignedRows.length}/${table.rows.length} 行底色，检测到白底有效票 ${actionableColorState.whiteCount} 条、非白底有效票 ${actionableColorState.nonWhiteCount} 条；非白底行会自动设为不发布。`;
+  } else if (table.rowColorReliable && colorState.hasNonWhite && !colorState.hasWhite) {
     table.rowColorMessage = `${engineName} 已匹配 ${table.rows.length} 行底色：只有非白底有效票，没有白底有效票作参照，按整表带色处理。`;
   } else if (table.rowColorReliable && colorState.hasWhite && !colorState.hasNonWhite) {
     table.rowColorMessage = `${engineName} 已匹配 ${table.rows.length} 行底色：只有白底有效票，未发现需要按颜色下架的票。`;
@@ -5472,7 +6311,79 @@ function isAvailableRowColorLabel(label) {
 }
 
 function isDefaultAutoSkipColorLabel(label) {
-  return /^红底$/.test(String(label || ""));
+  return /^(红底|橙底)$/.test(String(label || ""));
+}
+
+function hasContextualAnchorNonWhiteRowColorSignal(table, rowIndex) {
+  if (!hasOpenCvRowColorPreview(table) || isPendingRowManuallyPublished(table, rowIndex)) return false;
+  const item = table?.rowColorRows?.[rowIndex];
+  if (!item || item.userCleared || item.source !== "ticket_row_anchor") return false;
+  if (item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel) || !/^(红底|橙底|绿底)$/.test(rawLabel)) return false;
+  const coloredRatio = Number(item.coloredRatio || 0);
+  const whiteRatio = Number(item.whiteRatio || 0);
+  const coverageRatio = Number(item.coverageRatio || 0);
+  return coloredRatio >= 0.34 && coverageRatio >= 0.5 && coloredRatio >= whiteRatio + 0.1;
+}
+
+function hasVerifiedWhiteRowColorReference(table) {
+  if (!Array.isArray(table?.rows) || !table.rows.length) return false;
+  return table.rows.some((row, index) => {
+    const ticket = { table, row, index };
+    return isEffectiveTicketRowForColorDecision(ticket) && !isSoldTicket(ticket) && hasVerifiedWhiteRowColorHold(table, index);
+  });
+}
+
+function hasVerifiedNonWhiteRowColorHold(table, rowIndex) {
+  if (!hasOpenCvRowColorPreview(table) || isPendingRowManuallyPublished(table, rowIndex)) return false;
+  if (!Array.isArray(table?.rowColorRows) || !table.rowColorRows[rowIndex]) return false;
+  const item = table.rowColorRows[rowIndex];
+  const label = getStrictRowLocalOpenCvColorLabel(item) || getOpenCvItemDecisionColorLabel(item);
+  if (!label || isAvailableRowColorLabel(label)) return false;
+  if (item.source === "ticket_row_anchor") {
+    if (item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
+    if (item.strong === true) return true;
+    return hasVerifiedWhiteRowColorReference(table) && hasContextualAnchorNonWhiteRowColorSignal(table, rowIndex);
+  }
+  if (item.source === "ai_row_color") return isTrustedAiRowSkipDecision(table, rowIndex);
+  if (!hasExactVisualRowColorAlignment(table)) return false;
+  return item.strong === true || isOpenCvCellNonWhiteTicketSignal(item);
+}
+
+function hasAnyVerifiedNonWhiteRowColorHold(table) {
+  if (!Array.isArray(table?.rows) || !table.rows.length) return false;
+  return table.rows.some((row, index) => {
+    const ticket = { table, row, index };
+    return isEffectiveTicketRowForColorDecision(ticket) && !isSoldTicket(ticket) && hasVerifiedNonWhiteRowColorHold(table, index);
+  });
+}
+
+function hasVerifiedWhiteRowColorHold(table, rowIndex) {
+  if (!hasOpenCvRowColorPreview(table)) return false;
+  if (!Array.isArray(table?.rowColorRows) || !table.rowColorRows[rowIndex]) return false;
+  const item = table.rowColorRows[rowIndex];
+  const label = getStrictRowLocalOpenCvColorLabel(item) || getOpenCvItemDecisionColorLabel(item);
+  if (!isAvailableRowColorLabel(label)) return false;
+  if (item.source === "ticket_row_anchor") {
+    return item.rowTextVerified === true && item.rowGeometryVerified === true && Number(item.confidence || 0) >= 0.82;
+  }
+  if (item.source === "ai_row_color") return isTrustedAiRowPublishDecision(table, rowIndex);
+  if (!hasExactVisualRowColorAlignment(table)) return false;
+  return item.strong === true || isOpenCvCellMajorityWhite(item);
+}
+
+function hasVerifiedWhiteAndNonWhiteRowColorHold(table) {
+  if (!Array.isArray(table?.rows) || !table.rows.length) return false;
+  let hasWhite = false;
+  let hasNonWhite = false;
+  table.rows.forEach((row, index) => {
+    const ticket = { table, row, index };
+    if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
+    if (hasVerifiedWhiteRowColorHold(table, index)) hasWhite = true;
+    if (hasVerifiedNonWhiteRowColorHold(table, index)) hasNonWhite = true;
+  });
+  return hasWhite && hasNonWhite;
 }
 
 function hasWhiteOnlyRowColorRule(table) {
@@ -5561,6 +6472,9 @@ function analyzePendingTableRiskLightly(table) {
   if (zoneIndex < 0 && !hasDerivedZone) reasons.push("缺少区域列");
   if (priceIndex < 0 && !hasDerivedPrice) reasons.push("缺少售价列");
 
+  const missingPriceRows = reviewTickets.filter((ticket) => !hasTicketSalePrice(ticket)).length;
+  if (missingPriceRows) reasons.push(`${missingPriceRows} 行缺少售价`);
+
   return {
     needsManualReview: reasons.length > 0,
     reasons,
@@ -5588,8 +6502,10 @@ function updatePendingTableReviewFlags(table) {
   if (table._columnRepairChanged === true) {
     forceCanonicalOriginalDisplay(table);
   }
-  const risk = analyzePendingTableRisk(table);
+  const useLightRisk = table.lightReviewFlags === true || (table.rows || []).length > 12;
+  const risk = useLightRisk ? analyzePendingTableRiskLightly(table) : analyzePendingTableRisk(table);
   const forcedReviewReasons = table.returnedForReview ? ["从已发布退回校对"] : [];
+  table.lightReviewFlags = Boolean(table.lightReviewFlags || useLightRisk);
   table.needsManualReview = Boolean(risk.needsManualReview || forcedReviewReasons.length);
   table.reviewReasons = [...forcedReviewReasons, ...risk.reasons.filter((reason) => !forcedReviewReasons.includes(reason))];
   table.reviewFlagsVersion = REVIEW_FLAGS_VERSION;
@@ -5941,7 +6857,7 @@ function compactLargeStateBeforeSave() {
 
 function buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource, options = {}) {
   const uploadDraftText = String(uploadTableText.value || "");
-  const shouldStoreUploadDraft = !options.omitLargeDrafts && uploadDraftText.length <= MAX_UPLOAD_DRAFT_STORAGE_CHARS;
+  const shouldStoreUploadDraft = options.keepLargeDrafts === true || (!options.omitLargeDrafts && uploadDraftText.length <= MAX_UPLOAD_DRAFT_STORAGE_CHARS);
   return {
     events: serializableEvents,
     currentEventId: currentEvent.id,
@@ -5952,6 +6868,7 @@ function buildSerializableAppState(serializableEvents, serializablePendingTables
     pendingTables: serializablePendingTables,
     selectedPendingTableId,
     uploadedSource: serializableUploadedSource,
+    ocrJobState: buildSerializableOcrJobState(),
     uploadDraft: {
       tableTitle: uploadTableTitle.value,
       tableText: shouldStoreUploadDraft ? uploadDraftText : "",
@@ -5959,6 +6876,62 @@ function buildSerializableAppState(serializableEvents, serializablePendingTables
       pdfStatus: shouldStoreUploadDraft ? pdfDetectionStatus.textContent : "",
       omittedLargeDraft: !shouldStoreUploadDraft && Boolean(uploadDraftText),
     },
+  };
+}
+
+function trimAppStateForLocalStorage(state) {
+  if (!state || typeof state !== "object") return state;
+  const uploadDraft = state.uploadDraft || {};
+  const tableText = String(uploadDraft.tableText || "");
+  const ocrSnapshot = state.ocrJobState?.lastTicketOcrJobSnapshot || null;
+  const ocrText = String(ocrSnapshot?.text || "");
+  const ocrPartialText = String(ocrSnapshot?.partialText || "");
+  const ocrSavedText = String(ocrSnapshot?.savedOcrText || "");
+  const shouldTrimDraft = tableText.length > MAX_UPLOAD_DRAFT_STORAGE_CHARS;
+  const shouldTrimOcrSnapshot =
+    ocrText.length > MAX_UPLOAD_DRAFT_STORAGE_CHARS ||
+    ocrPartialText.length > MAX_UPLOAD_DRAFT_STORAGE_CHARS ||
+    ocrSavedText.length > MAX_UPLOAD_DRAFT_STORAGE_CHARS;
+  if (!shouldTrimDraft && !shouldTrimOcrSnapshot) return state;
+  const trimmedState = {
+    ...state,
+    uploadDraft: {
+      ...uploadDraft,
+      tableText: shouldTrimDraft ? "" : tableText,
+      status: shouldTrimDraft ? "" : uploadDraft.status,
+      pdfStatus: shouldTrimDraft ? "" : uploadDraft.pdfStatus,
+      omittedLargeDraft: shouldTrimDraft ? true : uploadDraft.omittedLargeDraft,
+    },
+  };
+  if (shouldTrimOcrSnapshot) {
+    trimmedState.ocrJobState = {
+      ...(state.ocrJobState || {}),
+      lastTicketOcrJobSnapshot: {
+        ...ocrSnapshot,
+        text: "",
+        partialText: "",
+        savedOcrText: "",
+        omittedLargeText: true,
+      },
+    };
+  }
+  return trimmedState;
+}
+
+function buildSerializableOcrJobState() {
+  return {
+    activeTicketOcrJobId: activeTicketOcrJobId || "",
+    autoPendingGenerationJobId: autoPendingGenerationJobId || "",
+    lastTicketOcrJobSnapshot: lastTicketOcrJobSnapshot
+      ? {
+          ...lastTicketOcrJobSnapshot,
+          errors: Array.isArray(lastTicketOcrJobSnapshot.errors) ? lastTicketOcrJobSnapshot.errors.map((item) => ({ ...item })) : [],
+          failedPages: Array.isArray(lastTicketOcrJobSnapshot.failedPages) ? [...lastTicketOcrJobSnapshot.failedPages] : [],
+          aiColorErrors: Array.isArray(lastTicketOcrJobSnapshot.aiColorErrors) ? lastTicketOcrJobSnapshot.aiColorErrors.map((item) => ({ ...item })) : [],
+          rowColorAnalyses: lastTicketOcrJobSnapshot.rowColorAnalyses ? { ...lastTicketOcrJobSnapshot.rowColorAnalyses } : {},
+          ppStructureAnalyses: lastTicketOcrJobSnapshot.ppStructureAnalyses ? { ...lastTicketOcrJobSnapshot.ppStructureAnalyses } : {},
+        }
+      : null,
   };
 }
 
@@ -5975,6 +6948,8 @@ function makeCompactPendingTable(table) {
     sourcePage: table.sourcePage,
     sourcePart: table.sourcePart,
     eventId: table.eventId,
+    quickManualMode: Boolean(table.quickManualMode),
+    quickCheckVisible: Boolean(table.quickCheckVisible),
     columns: Array.isArray(table.columns) ? [...table.columns] : [],
     rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
     publishRows: { ...(table.publishRows || {}) },
@@ -5984,23 +6959,48 @@ function makeCompactPendingTable(table) {
     userEditedRows: { ...(table.userEditedRows || {}) },
     rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
     rowColorSourceIndexMode: table.rowColorSourceIndexMode || "",
+    rowActionGeometryVersion: Number(table.rowActionGeometryVersion || 0),
+    rowColorImageWidth: Number(table.rowColorImageWidth || 0),
+    rowColorImageHeight: Number(table.rowColorImageHeight || 0),
     rowColorPartialSequenceAligned: Boolean(table.rowColorPartialSequenceAligned),
     rowColorSparseSourceRepair: Boolean(table.rowColorSparseSourceRepair),
     rowColorPageLabels: Array.isArray(table.rowColorPageLabels) ? [...table.rowColorPageLabels] : [],
     rowColorRows: Array.isArray(table.rowColorRows)
       ? table.rowColorRows.map((item) => ({
+          source: item?.source || "",
           label: item?.label || "",
           rawLabel: item?.rawLabel || "",
+          action: item?.action || "",
           confidence: Number(item?.confidence || 0),
           whiteRatio: Number(item?.whiteRatio || 0),
           coloredRatio: Number(item?.coloredRatio || 0),
           coverageRatio: Number(item?.coverageRatio || 0),
+          reason: item?.reason || "",
+          rowBox: item?.rowBox || null,
+          bbox: item?.bbox || null,
+          sampleBox: item?.sampleBox || null,
+          y1: item?.y1 ?? "",
+          y2: item?.y2 ?? "",
+          x1: item?.x1 ?? "",
+          x2: item?.x2 ?? "",
+          height: item?.height ?? "",
+          rowActionGeometry: item?.rowActionGeometry === true,
+          pixelMismatch: item?.pixelMismatch === true,
+          rowTextVerified: item?.rowTextVerified === true,
+          rowGeometryVerified: item?.rowGeometryVerified === true,
+          matchedText: item?.matchedText || "",
+          localPixelLabel: item?.localPixelLabel || "",
+          localPixelRedRatio: Number(item?.localPixelRedRatio || 0),
+          localPixelWhiteRatio: Number(item?.localPixelWhiteRatio || 0),
+          localPixelColoredRatio: Number(item?.localPixelColoredRatio || 0),
         }))
       : [],
+    aiRowColorAutoRows: Array.isArray(table.aiRowColorAutoRows) ? [...table.aiRowColorAutoRows] : [],
     rowColorSource: table.rowColorSource || "",
     rowColorReliable: Boolean(table.rowColorReliable),
     rowColorConfirmed: Boolean(table.rowColorConfirmed),
     rowColorExactRowAligned: Boolean(table.rowColorExactRowAligned),
+    rowColorActionableConflict: Boolean(table.rowColorActionableConflict),
     rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
     publishDecisionLogicVersion: Number(table.publishDecisionLogicVersion || 0),
     colorReviewSamples: { ...(table.colorReviewSamples || {}) },
@@ -6010,11 +7010,82 @@ function makeCompactPendingTable(table) {
           labels: Array.isArray(table.rowColorSoldTextAnchor.labels) ? [...table.rowColorSoldTextAnchor.labels] : [],
         }
       : null,
+    ppStructureAnalysis: compactPpStructureAnalysis(table.ppStructureAnalysis),
+    ppStructureTicketRowMatches: clonePpStructureMatches(table.ppStructureTicketRowMatches),
+    ppStructureMessage: table.ppStructureMessage || "",
     needsManualReview: Boolean(table.needsManualReview),
     reviewReasons: Array.isArray(table.reviewReasons) ? [...table.reviewReasons] : [],
     reviewFlagsVersion: table.reviewFlagsVersion || 0,
     lightReviewFlags: Boolean(table.lightReviewFlags),
   };
+}
+
+function clonePpStructureMatch(match) {
+  return {
+    ticketRowIndex: Number(match?.ticketRowIndex || 0),
+    matched: match?.matched === true,
+    score: Number(match?.score || 0),
+    confidence: match?.confidence || "",
+    reason: match?.reason || "",
+    ppTableIndex: Number(match?.ppTableIndex || 0),
+    ppRowIndex: Number(match?.ppRowIndex || 0),
+    ppText: match?.ppText || "",
+    color: match?.color
+      ? {
+          label: match.color.label || "",
+          rawLabel: match.color.rawLabel || "",
+          confidence: Number(match.color.confidence || 0),
+          coloredRatio: Number(match.color.coloredRatio || 0),
+          whiteRatio: Number(match.color.whiteRatio || 0),
+          coverageRatio: Number(match.color.coverageRatio || 0),
+        }
+      : null,
+    matchedTokens: Array.isArray(match?.matchedTokens) ? [...match.matchedTokens] : [],
+    priceMatched: match?.priceMatched === true,
+    dateMatched: match?.dateMatched === true,
+  };
+}
+
+function compactPpStructureAnalysis(analysis) {
+  if (!analysis || typeof analysis !== "object") return null;
+  return {
+    source: analysis.source || "paddle_ppstructure",
+    tableCount: Number(analysis.tableCount || 0),
+    tables: Array.isArray(analysis.tables)
+      ? analysis.tables.map((table) => ({
+          bbox: table.bbox || null,
+          rowCount: Number(table.rowCount || 0),
+          cellCount: Number(table.cellCount || 0),
+          cellBBoxCount: Number(table.cellBBoxCount || 0),
+          ocrBoxCount: Number(table.ocrBoxCount || 0),
+          htmlCellCount: Number(table.htmlCellCount || 0),
+          cellAlignmentExact: table.cellAlignmentExact === true,
+        }))
+      : [],
+    rowColorAnalysis: analysis.rowColorAnalysis
+      ? {
+          source: analysis.rowColorAnalysis.source || "paddle_ppstructure",
+          expectedRows: Number(analysis.rowColorAnalysis.expectedRows || 0),
+          detectedRows: Number(analysis.rowColorAnalysis.detectedRows || 0),
+          selectionMode: analysis.rowColorAnalysis.selectionMode || "",
+          reliable: analysis.rowColorAnalysis.reliable === true,
+          exactRowAligned: analysis.rowColorAnalysis.exactRowAligned === true,
+          unreliableReasons: Array.isArray(analysis.rowColorAnalysis.unreliableReasons) ? [...analysis.rowColorAnalysis.unreliableReasons] : [],
+        }
+      : null,
+    ticketAlignedRowColorAnalysis: analysis.ticketAlignedRowColorAnalysis
+      ? {
+          ...analysis.ticketAlignedRowColorAnalysis,
+          rows: Array.isArray(analysis.ticketAlignedRowColorAnalysis.rows)
+            ? analysis.ticketAlignedRowColorAnalysis.rows.map((row) => ({ ...row, bbox: row?.bbox || null }))
+            : [],
+        }
+      : null,
+  };
+}
+
+function clonePpStructureMatches(matches) {
+  return Array.isArray(matches) ? matches.map(clonePpStructureMatch) : [];
 }
 
 function buildSerializableEvents() {
@@ -6054,8 +7125,13 @@ function buildSerializablePendingTables({ compact = false } = {}) {
     manualSkipRows: { ...(table.manualSkipRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
+    quickManualMode: Boolean(table.quickManualMode),
+    quickCheckVisible: Boolean(table.quickCheckVisible),
     aiReviewDecisions: Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions.map((item) => ({ ...item })) : [],
     colorReviewSamples: { ...(table.colorReviewSamples || {}) },
+    ppStructureAnalysis: compactPpStructureAnalysis(table.ppStructureAnalysis),
+    ppStructureTicketRowMatches: clonePpStructureMatches(table.ppStructureTicketRowMatches),
+    ppStructureMessage: table.ppStructureMessage || "",
     reviewSnapshots: Array.isArray(table.reviewSnapshots)
       ? table.reviewSnapshots.map((snapshot) => ({
           ...snapshot,
@@ -6089,32 +7165,150 @@ function buildSerializableUploadedSource() {
     : null;
 }
 
-function saveAppState() {
+function openAppStateBackupDb() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("当前浏览器不支持本地大容量备份。"));
+      return;
+    }
+    const request = indexedDB.open(APP_STATE_BACKUP_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(APP_STATE_BACKUP_STORE)) db.createObjectStore(APP_STATE_BACKUP_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("打开本地备份失败。"));
+  });
+}
+
+function withAppStateBackupStore(mode, callback) {
+  return openAppStateBackupDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const transaction = db.transaction(APP_STATE_BACKUP_STORE, mode);
+        const store = transaction.objectStore(APP_STATE_BACKUP_STORE);
+        let callbackResult;
+        transaction.oncomplete = () => {
+          db.close();
+          resolve(callbackResult);
+        };
+        transaction.onerror = () => {
+          db.close();
+          reject(transaction.error || new Error("本地备份读写失败。"));
+        };
+        callbackResult = callback(store);
+      }),
+  );
+}
+
+function saveAppStateToIndexedBackup(state) {
+  if (!state) return;
+  withAppStateBackupStore("readwrite", (store) => {
+    store.put({ state, savedAt: Date.now() }, APP_STATE_BACKUP_KEY);
+  })
+    .then(() => {
+      updateLocalSaveStatus({ saved: true, backup: "大容量备份完成" });
+    })
+    .catch((error) => {
+      console.warn("Indexed app state backup skipped.", error);
+      updateLocalSaveStatus({ saved: true, backup: "主缓存已保存，大容量备份失败" });
+    });
+}
+
+function loadAppStateFromIndexedBackup() {
+  return withAppStateBackupStore("readonly", (store) => {
+    return new Promise((resolve, reject) => {
+      const request = store.get(APP_STATE_BACKUP_KEY);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error || new Error("读取本地备份失败。"));
+    });
+  });
+}
+
+function getAppStateRecoveryScore(state) {
+  if (!state || typeof state !== "object") return 0;
+  const pendingCount = Array.isArray(state.pendingTables) ? state.pendingTables.length : 0;
+  const publishedCount = Array.isArray(state.events)
+    ? state.events.reduce((sum, event) => sum + (Array.isArray(event.tables) ? event.tables.length : 0), 0)
+    : 0;
+  const uploadTextLength = String(state.uploadDraft?.tableText || "").length;
+  const snapshot = state.ocrJobState?.lastTicketOcrJobSnapshot || null;
+  const ocrTextLength = String(snapshot?.savedOcrText || snapshot?.text || snapshot?.partialText || "").length;
+  const hasSource = state.uploadedSource ? 1 : 0;
+  return pendingCount * 10000 + publishedCount * 1000 + hasSource * 100 + Math.min(uploadTextLength + ocrTextLength, 99999) / 1000;
+}
+
+function shouldReplaceIndexedBackup(existingState, nextState) {
+  if (!existingState) return true;
+  const existingScore = getAppStateRecoveryScore(existingState);
+  const nextScore = getAppStateRecoveryScore(nextState);
+  const existingPending = Array.isArray(existingState.pendingTables) ? existingState.pendingTables.length : 0;
+  const nextPending = Array.isArray(nextState?.pendingTables) ? nextState.pendingTables.length : 0;
+  const existingSnapshot = existingState.ocrJobState?.lastTicketOcrJobSnapshot || null;
+  const nextSnapshot = nextState?.ocrJobState?.lastTicketOcrJobSnapshot || null;
+  const existingHasLargeOcr = Boolean(String(existingSnapshot?.savedOcrText || existingSnapshot?.text || existingSnapshot?.partialText || "").trim());
+  const nextHasLargeOcr = Boolean(String(nextSnapshot?.savedOcrText || nextSnapshot?.text || nextSnapshot?.partialText || "").trim());
+  if (existingPending > 0 && nextPending === 0) return false;
+  if (existingHasLargeOcr && !nextHasLargeOcr && nextPending <= existingPending) return false;
+  return nextScore >= existingScore * 0.85;
+}
+
+function saveAppState(options = {}) {
   compactLargeStateBeforeSave();
   const serializableEvents = buildSerializableEvents();
   const serializablePendingTables = buildSerializablePendingTables();
   const serializableUploadedSource = buildSerializableUploadedSource();
+  const indexedBackupState = () =>
+    buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource, { keepLargeDrafts: true });
+  const saveIndexedBackup = () => {
+    if (largeAppStateBackupRestorePending && !String(uploadTableText.value || "").trim() && options.forceIndexedBackupReplace !== true) return;
+    const nextState = indexedBackupState();
+    if (options.forceIndexedBackupReplace === true) {
+      saveAppStateToIndexedBackup(nextState);
+      return;
+    }
+    loadAppStateFromIndexedBackup()
+      .then((backup) => {
+        if (shouldReplaceIndexedBackup(backup?.state, nextState)) {
+          saveAppStateToIndexedBackup(nextState);
+        } else {
+          updateLocalSaveStatus({ saved: true, backup: "已保留更完整的大容量备份" });
+        }
+      })
+      .catch(() => saveAppStateToIndexedBackup(nextState));
+  };
   try {
     mergeEventDraftHistory();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource)));
+    const state = buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimAppStateForLocalStorage(state)));
+    saveIndexedBackup();
+    updateLocalSaveStatus({ saved: true, backup: largeAppStateBackupRestorePending ? "等待恢复完整 OCR" : "主缓存完成" });
     return true;
   } catch (error) {
     const trimmedPendingTables = serializablePendingTables.map((table) => ({ ...table, reviewSnapshots: [] }));
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSerializableAppState(serializableEvents, trimmedPendingTables, serializableUploadedSource, { omitLargeDrafts: true })));
+      const state = buildSerializableAppState(serializableEvents, trimmedPendingTables, serializableUploadedSource, { omitLargeDrafts: true });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(trimAppStateForLocalStorage(state)));
+      saveIndexedBackup();
+      updateLocalSaveStatus({ saved: true, backup: "主缓存精简保存" });
       pendingTables.forEach((table) => {
         table.reviewSnapshots = [];
       });
       return true;
     } catch {
       try {
+        const state = buildSerializableAppState(serializableEvents, pendingTables.map(makeCompactPendingTable), serializableUploadedSource, { omitLargeDrafts: true });
         localStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify(buildSerializableAppState(serializableEvents, pendingTables.map(makeCompactPendingTable), serializableUploadedSource, { omitLargeDrafts: true })),
+          JSON.stringify(trimAppStateForLocalStorage(state)),
         );
+        saveIndexedBackup();
+        updateLocalSaveStatus({ saved: true, backup: "主缓存压缩保存" });
         return true;
       } catch {
+        saveIndexedBackup();
         console.warn("App state auto-save skipped because local storage is full.");
+        updateLocalSaveStatus({ error: "主缓存已满，正在依赖大容量备份" });
       }
     }
     return false;
@@ -6250,6 +7444,16 @@ function clearOperationArchives() {
 
 let pendingAppStateSaveTimer = null;
 let appStateSaveBackoffUntil = 0;
+let largeAppStateBackupRestorePending = false;
+
+function stateNeedsLargeBackupRestore(state) {
+  if (!state || typeof state !== "object") return false;
+  const uploadDraft = state.uploadDraft || {};
+  const snapshot = state.ocrJobState?.lastTicketOcrJobSnapshot || null;
+  const draftWasTrimmed = uploadDraft.omittedLargeDraft === true && !String(uploadDraft.tableText || "").trim();
+  const snapshotWasTrimmed = snapshot?.omittedLargeText === true && !String(snapshot.savedOcrText || snapshot.text || snapshot.partialText || "").trim();
+  return draftWasTrimmed || snapshotWasTrimmed;
+}
 
 function scheduleAppStateSave(delay = 500) {
   if (pendingAppStateSaveTimer) clearTimeout(pendingAppStateSaveTimer);
@@ -6268,6 +7472,71 @@ function scheduleAppStateSave(delay = 500) {
   }, wait);
 }
 
+function restoreAppStateFromBackupAfterLoad(reason = "") {
+  loadAppStateFromIndexedBackup()
+    .then((backup) => {
+      const state = backup?.state;
+      if (!state || !Array.isArray(state.events) || !state.events.length) return;
+      const pendingCount = Array.isArray(state.pendingTables) ? state.pendingTables.length : 0;
+      const publishedCount = Array.isArray(state.events)
+        ? state.events.reduce((sum, event) => sum + (Array.isArray(event.tables) ? event.tables.length : 0), 0)
+        : 0;
+      if (!pendingCount && !publishedCount && !state.uploadedSource) return;
+      applyLoadedAppState(state);
+      largeAppStateBackupRestorePending = false;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(trimAppStateForLocalStorage(state)));
+      showToast(reason ? `已从本地备份恢复页面数据：${reason}` : "已从本地备份恢复页面数据。", "success");
+      render();
+      renderAdminEvent();
+      renderUploadRecords();
+      renderFieldMappingPreview();
+      renderPublishedTables();
+      renderOperationArchives();
+      renderReviewPanel();
+      resumeRestoredTicketOcrJobIfNeeded();
+      updateLocalSaveStatus({ saved: true, backup: "已从大容量备份恢复" });
+    })
+    .catch((error) => {
+      console.warn("Indexed app state restore skipped.", error);
+    });
+}
+
+function restoreAppStateFromBackupIfRicher(reason = "") {
+  loadAppStateFromIndexedBackup()
+    .then((backup) => {
+      const backupState = backup?.state;
+      if (!backupState || !Array.isArray(backupState.events) || !backupState.events.length) return;
+      const currentState = buildSerializableAppState(buildSerializableEvents(), buildSerializablePendingTables(), buildSerializableUploadedSource(), {
+        keepLargeDrafts: true,
+      });
+      if (getAppStateRecoveryScore(backupState) <= getAppStateRecoveryScore(currentState) + 1) return;
+      applyLoadedAppState(backupState);
+      largeAppStateBackupRestorePending = false;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(trimAppStateForLocalStorage(backupState)));
+      showToast(reason ? `已找回上次数据：${reason}` : "已从本地备份找回上次数据。", "success");
+      render();
+      renderAdminEvent();
+      renderUploadRecords();
+      renderFieldMappingPreview();
+      renderPublishedTables();
+      renderOperationArchives();
+      renderReviewPanel();
+      resumeRestoredTicketOcrJobIfNeeded();
+      updateLocalSaveStatus({ saved: true, backup: "已用更完整备份回填" });
+    })
+    .catch((error) => {
+      console.warn("Richer Indexed app state restore skipped.", error);
+    });
+}
+
+function flushAppStateSaveNow() {
+  if (pendingAppStateSaveTimer) {
+    clearTimeout(pendingAppStateSaveTimer);
+    pendingAppStateSaveTimer = null;
+  }
+  saveAppState();
+}
+
 function normalizeLoadedPendingTable(table) {
   const loadedRowColorVersion = Number(table?.rowColorLogicVersion || 0);
   const hasStaleRowColorLogic = loadedRowColorVersion !== ROW_COLOR_LOGIC_VERSION;
@@ -6282,6 +7551,9 @@ function normalizeLoadedPendingTable(table) {
     manualSkipRows: { ...(table.manualSkipRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
+    ppStructureAnalysis: compactPpStructureAnalysis(table.ppStructureAnalysis),
+    ppStructureTicketRowMatches: clonePpStructureMatches(table.ppStructureTicketRowMatches),
+    ppStructureMessage: table.ppStructureMessage || "",
   };
   if (hasStaleRowColorLogic) {
     normalizedTable._rowColorRepairing = false;
@@ -6296,8 +7568,10 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable.rowColorReliable = false;
     normalizedTable.rowColorConfirmed = false;
     normalizedTable.rowColorExactRowAligned = false;
+    normalizedTable.rowColorActionableConflict = false;
     normalizedTable.rowColorAutoApplied = false;
     normalizedTable.rowColorAutoSkipCount = 0;
+    normalizedTable.aiRowColorAutoRows = [];
     normalizedTable.rowColorRows = [];
     normalizedTable.rowColorSoldTextAnchor = null;
     normalizedTable.rowColorPartialSequenceAligned = false;
@@ -6308,8 +7582,23 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable._rowColorRepairDone = false;
     normalizedTable._rowColorRepairTried = false;
   }
+  if (
+    normalizedTable.quickManualMode === true &&
+    Array.isArray(normalizedTable.rowColorRows) &&
+    normalizedTable.rowColorRows.length &&
+    Number(normalizedTable.rowActionGeometryVersion || 0) !== ROW_ACTION_GEOMETRY_VERSION
+  ) {
+    normalizedTable.rowColorRows = [];
+    normalizedTable.rowColorImageWidth = 0;
+    normalizedTable.rowColorImageHeight = 0;
+    normalizedTable.rowActionGeometryVersion = 0;
+    normalizedTable.quickRowActionGeometryTried = false;
+    normalizedTable.quickRowActionGeometryTriedVersion = 0;
+    normalizedTable.rowColorMessage = "旧版原图贴行按钮坐标已作废，已切回稳定表格核对。";
+  }
   normalizedTable.rowColorLogicVersion = Number(normalizedTable.rowColorLogicVersion || 0);
   repairMisreadDataHeaderTable(normalizedTable);
+  normalizePendingTableColumns(normalizedTable);
   ensurePendingTableSourceRowIndexes(normalizedTable);
   if (hasStalePublishDecisionLogic) clearStalePublishDecisionBlocks(normalizedTable);
   normalizedTable.publishDecisionLogicVersion = PUBLISH_DECISION_LOGIC_VERSION;
@@ -6377,6 +7666,7 @@ function getPendingTablesNormalizeCacheKey() {
         Array.isArray(table?.rows) ? table.rows.length : 0,
         Number(table?.rowColorLogicVersion || 0) || 0,
         Number(table?.publishDecisionLogicVersion || 0) || 0,
+        Number(table?._columnNormalizationVersion || 0) || 0,
         table?.rowColorSource || "",
         Object.keys(table?.publishRows || {}).length,
         Object.keys(table?.manualSkipRows || {}).length,
@@ -6417,78 +7707,109 @@ function normalizePendingTablesInMemory({ save = false } = {}) {
   return true;
 }
 
+function applyLoadedAppState(parsed) {
+  if (!Array.isArray(parsed?.events) || !parsed.events.length) return false;
+  sessionStorage.removeItem("ticket-admin-state-backup-restore-attempted");
+  eventDraftHistory = parsed.eventDraftHistory || eventDraftHistory;
+  seatmapTemplates = Array.isArray(parsed.seatmapTemplates) ? parsed.seatmapTemplates : [];
+  fieldMappingTemplates = Array.isArray(parsed.fieldMappingTemplates) ? parsed.fieldMappingTemplates : [];
+  fieldMappingDraft = parsed.fieldMappingDraft || null;
+  const loadedPendingTables = Array.isArray(parsed.pendingTables)
+    ? mergeFragmentedPendingTables(parsed.pendingTables.map(normalizeLoadedPendingTable))
+    : [];
+  pendingTables.splice(0, pendingTables.length, ...loadedPendingTables);
+  selectedPendingTableId = parsed.selectedPendingTableId || null;
+  uploadedSource = parsed.uploadedSource || null;
+  if (uploadedSource?.dataUrl && !uploadedSource.url) uploadedSource.url = uploadedSource.dataUrl;
+  const loadedOcrJobState = parsed.ocrJobState || {};
+  activeTicketOcrJobId = loadedOcrJobState.activeTicketOcrJobId || loadedOcrJobState.lastTicketOcrJobSnapshot?.id || activeTicketOcrJobId || null;
+  autoPendingGenerationJobId = loadedOcrJobState.autoPendingGenerationJobId || autoPendingGenerationJobId || null;
+  lastTicketOcrJobSnapshot = loadedOcrJobState.lastTicketOcrJobSnapshot || lastTicketOcrJobSnapshot;
+  largeAppStateBackupRestorePending = stateNeedsLargeBackupRestore(parsed);
+  if (parsed.uploadDraft) {
+    const recoverableOcrText = getRecoverableOcrTextFromState(parsed);
+    const draftText = String(parsed.uploadDraft.tableText || "");
+    uploadTableTitle.value = parsed.uploadDraft.tableTitle || "";
+    uploadTableText.value = draftText || recoverableOcrText || "";
+    uploadStatus.textContent = parsed.uploadDraft.status || uploadStatus.textContent;
+    pdfDetectionStatus.textContent = parsed.uploadDraft.pdfStatus || pdfDetectionStatus.textContent;
+    if (!draftText && recoverableOcrText) {
+      uploadStatus.textContent = `已恢复 OCR 文本 ${recoverableOcrText.length.toLocaleString("zh-CN")} 字；可以重新生成确认表。`;
+      uploadStatus.dataset.status = "success";
+    } else if (parsed.uploadDraft.omittedLargeDraft) {
+      uploadStatus.textContent = "上次 OCR 草稿过大，未写入浏览器主缓存；如果本地备份可用会自动恢复 OCR 文本。";
+      uploadStatus.dataset.status = "idle";
+    }
+    if (uploadedSource?.name) {
+      selectedSourceName.textContent = `已恢复：${getSelectedFileDisplayName(uploadedSource.name)}`;
+      selectedSourceName.title = decodePossiblyEncodedFileName(uploadedSource.name);
+    }
+  } else {
+    const recoverableOcrText = getRecoverableOcrTextFromState(parsed);
+    if (recoverableOcrText) {
+      uploadTableText.value = recoverableOcrText;
+      setUploadStatus(`已恢复 OCR 文本 ${recoverableOcrText.length.toLocaleString("zh-CN")} 字；可以重新生成确认表。`, "success");
+    }
+  }
+  const builtInEvents = events.map((event) => ({
+    ...event,
+    dateOptions: Array.isArray(event.dateOptions) ? event.dateOptions.map((date) => ({ ...date })) : [],
+    zones: Array.isArray(event.zones) ? event.zones.map((zone) => ({ ...zone, polygon: Array.isArray(zone.polygon) ? zone.polygon.map((point) => [...point]) : [] })) : [],
+    tables: Array.isArray(event.tables)
+      ? event.tables.map((table) => ({ ...table, columns: [...table.columns], rows: table.rows.map((row) => [...row]) }))
+      : [],
+  }));
+  const templateGuideZones = seatmapTemplates.reduce((count, template) => {
+    if (!Array.isArray(template.zones)) return count;
+    const before = template.zones.length;
+    template.zones = template.zones.filter((zone) => !isGuideOnlySeatmapZone(zone));
+    return count + before - template.zones.length;
+  }, 0);
+  const savedEvents = parsed.events.map((event) => ({
+    ...event,
+    artist: event.artist || getEventArtist(event),
+    city: event.city || getEventCity(event),
+    venueLocal: event.venueLocal || getEventVenue(event),
+  }));
+  const missingBuiltInEvents = builtInEvents.filter((event) => !savedEvents.some((savedEvent) => savedEvent.id === event.id));
+  events.splice(
+    0,
+    events.length,
+    ...savedEvents,
+    ...missingBuiltInEvents,
+  );
+  const repairedTemplateMismatch = events.reduce((count, event) => count + (repairKnownEventTemplateMismatch(event) ? 1 : 0), 0);
+  const syncedBuiltIns = events.reduce((count, event) => count + (syncBuiltInSeatmapTemplate(event) ? 1 : 0), 0);
+  currentEvent = events.find((event) => event.id === parsed.currentEventId) || events[0];
+  const removedSoldRows = removeSoldRowsEverywhere();
+  const hydrated = hydrateSeatmapTemplatesFromEvents();
+  const removed = events.reduce((count, event) => count + removeOversizedZones(event), 0);
+  const removedGuides = events.reduce((count, event) => count + removeGuideOnlySeatmapZones(event), 0);
+  if (removedSoldRows || removed || removedGuides || syncedBuiltIns || templateGuideZones || hydrated || missingBuiltInEvents.length || repairedTemplateMismatch) saveAppState();
+  updateLocalSaveStatus({ saved: true, backup: largeAppStateBackupRestorePending ? "等待恢复完整 OCR" : "已恢复" });
+  return true;
+}
+
 function loadAppState({ includeArchives = true } = {}) {
   if (includeArchives) loadOperationArchives();
   const saved = localStorage.getItem(STORAGE_KEY);
   if (!saved) {
+    restoreAppStateFromBackupAfterLoad("主缓存为空");
     renderOperationArchives();
     return;
   }
   try {
     const parsed = JSON.parse(saved);
-    if (!Array.isArray(parsed.events) || !parsed.events.length) return;
-    eventDraftHistory = parsed.eventDraftHistory || eventDraftHistory;
-    seatmapTemplates = Array.isArray(parsed.seatmapTemplates) ? parsed.seatmapTemplates : [];
-    fieldMappingTemplates = Array.isArray(parsed.fieldMappingTemplates) ? parsed.fieldMappingTemplates : [];
-    fieldMappingDraft = parsed.fieldMappingDraft || null;
-    const loadedPendingTables = Array.isArray(parsed.pendingTables)
-      ? mergeFragmentedPendingTables(parsed.pendingTables.map(normalizeLoadedPendingTable))
-      : [];
-    pendingTables.splice(0, pendingTables.length, ...loadedPendingTables);
-    selectedPendingTableId = parsed.selectedPendingTableId || null;
-    uploadedSource = parsed.uploadedSource || null;
-    if (uploadedSource?.dataUrl && !uploadedSource.url) uploadedSource.url = uploadedSource.dataUrl;
-    if (parsed.uploadDraft) {
-      uploadTableTitle.value = parsed.uploadDraft.tableTitle || "";
-      uploadTableText.value = parsed.uploadDraft.tableText || "";
-      uploadStatus.textContent = parsed.uploadDraft.status || uploadStatus.textContent;
-      pdfDetectionStatus.textContent = parsed.uploadDraft.pdfStatus || pdfDetectionStatus.textContent;
-      if (parsed.uploadDraft.omittedLargeDraft) {
-        uploadStatus.textContent = "上次 OCR 草稿过大，未写入浏览器缓存以避免刷新白屏；请从待确认表继续，或重新识别原文件。";
-        uploadStatus.dataset.status = "idle";
-      }
-      if (uploadedSource?.name) {
-        selectedSourceName.textContent = `已恢复：${getSelectedFileDisplayName(uploadedSource.name)}`;
-        selectedSourceName.title = decodePossiblyEncodedFileName(uploadedSource.name);
-      }
+    if (!applyLoadedAppState(parsed)) {
+      restoreAppStateFromBackupAfterLoad("主缓存无可用数据");
+    } else if (stateNeedsLargeBackupRestore(parsed)) {
+      restoreAppStateFromBackupAfterLoad("OCR 文本在大容量备份中");
+    } else if (!pendingTables.length) {
+      restoreAppStateFromBackupIfRicher("主缓存没有确认表，已回填更完整备份");
     }
-    const builtInEvents = events.map((event) => ({
-      ...event,
-      dateOptions: Array.isArray(event.dateOptions) ? event.dateOptions.map((date) => ({ ...date })) : [],
-      zones: Array.isArray(event.zones) ? event.zones.map((zone) => ({ ...zone, polygon: Array.isArray(zone.polygon) ? zone.polygon.map((point) => [...point]) : [] })) : [],
-      tables: Array.isArray(event.tables)
-        ? event.tables.map((table) => ({ ...table, columns: [...table.columns], rows: table.rows.map((row) => [...row]) }))
-        : [],
-    }));
-    const templateGuideZones = seatmapTemplates.reduce((count, template) => {
-      if (!Array.isArray(template.zones)) return count;
-      const before = template.zones.length;
-      template.zones = template.zones.filter((zone) => !isGuideOnlySeatmapZone(zone));
-      return count + before - template.zones.length;
-    }, 0);
-    const savedEvents = parsed.events.map((event) => ({
-      ...event,
-      artist: event.artist || getEventArtist(event),
-      city: event.city || getEventCity(event),
-      venueLocal: event.venueLocal || getEventVenue(event),
-    }));
-    const missingBuiltInEvents = builtInEvents.filter((event) => !savedEvents.some((savedEvent) => savedEvent.id === event.id));
-    events.splice(
-      0,
-      events.length,
-      ...savedEvents,
-      ...missingBuiltInEvents,
-    );
-    const repairedTemplateMismatch = events.reduce((count, event) => count + (repairKnownEventTemplateMismatch(event) ? 1 : 0), 0);
-    const syncedBuiltIns = events.reduce((count, event) => count + (syncBuiltInSeatmapTemplate(event) ? 1 : 0), 0);
-    currentEvent = events.find((event) => event.id === parsed.currentEventId) || events[0];
-    const removedSoldRows = removeSoldRowsEverywhere();
-    const hydrated = hydrateSeatmapTemplatesFromEvents();
-    const removed = events.reduce((count, event) => count + removeOversizedZones(event), 0);
-    const removedGuides = events.reduce((count, event) => count + removeGuideOnlySeatmapZones(event), 0);
-    if (removedSoldRows || removed || removedGuides || syncedBuiltIns || templateGuideZones || hydrated || missingBuiltInEvents.length || repairedTemplateMismatch) saveAppState();
-  } catch {
-    localStorage.removeItem(STORAGE_KEY);
+  } catch (error) {
+    console.warn("App state load failed; keeping local state and trying IndexedDB backup.", error);
+    restoreAppStateFromBackupAfterLoad("主缓存读取失败");
   }
 }
 
@@ -6647,6 +7968,16 @@ function rowSourceHasSoldText(source) {
 }
 
 function isSoldTicket(ticket) {
+  const table = ticket?.table;
+  const rowIndex = Number(ticket?.index);
+  if (table && Number.isInteger(rowIndex) && rowIndex >= 0 && Array.isArray(ticket.row)) {
+    table._soldTicketCache = table._soldTicketCache || {};
+    const cacheKey = `${rowIndex}:${(table.columns || []).join("\u0001")}:${ticket.row.join("\u0001")}`;
+    if (Object.prototype.hasOwnProperty.call(table._soldTicketCache, cacheKey)) return table._soldTicketCache[cacheKey];
+    const value = getTicketRowsForSoldScan(ticket).some(rowSourceHasSoldText);
+    table._soldTicketCache[cacheKey] = value;
+    return value;
+  }
   return getTicketRowsForSoldScan(ticket).some(rowSourceHasSoldText);
 }
 
@@ -7184,6 +8515,20 @@ function ensureDateColumn(table) {
 }
 
 function hasTicketSalePrice(ticket) {
+  const table = ticket?.table;
+  const rowIndex = Number(ticket?.index);
+  if (table && Number.isInteger(rowIndex) && Array.isArray(ticket.row)) {
+    table._ticketSalePriceCache = table._ticketSalePriceCache || {};
+    const cacheKey = `${rowIndex}:${(table.columns || []).join("\u0001")}:${ticket.row.join("\u0001")}`;
+    if (Object.prototype.hasOwnProperty.call(table._ticketSalePriceCache, cacheKey)) return table._ticketSalePriceCache[cacheKey];
+    const value = hasTicketSalePriceUncached(ticket);
+    table._ticketSalePriceCache[cacheKey] = value;
+    return value;
+  }
+  return hasTicketSalePriceUncached(ticket);
+}
+
+function hasTicketSalePriceUncached(ticket) {
   const value = String(getVisibleTicketSalePriceValue(ticket) || "").trim();
   const missingLike = !value || value === "/" || value === "-" || /^无$/i.test(value);
   if (!missingLike && !isSoldText(value, { strict: true }) && extractNumber(value) !== null) return true;
@@ -7214,6 +8559,17 @@ function isNonTicketPlaceholderRow(ticket) {
 }
 
 function isEffectiveTicketRowForColorDecision(ticket) {
+  const table = ticket?.table;
+  const rowIndex = Number(ticket?.index);
+  if (table && Number.isInteger(rowIndex) && rowIndex >= 0 && Array.isArray(ticket.row)) {
+    table._rowColorEffectiveTicketCache = table._rowColorEffectiveTicketCache || {};
+    const cacheKey = `${rowIndex}:${(table.columns || []).length}:${ticket.row.join("\u0001")}`;
+    const cached = table._rowColorEffectiveTicketCache[rowIndex];
+    if (cached?.key === cacheKey) return cached.value;
+    const value = hasTicketSalePrice(ticket) && !isNonTicketPlaceholderRow(ticket);
+    table._rowColorEffectiveTicketCache[rowIndex] = { key: cacheKey, value };
+    return value;
+  }
   return hasTicketSalePrice(ticket) && !isNonTicketPlaceholderRow(ticket);
 }
 
@@ -7225,7 +8581,17 @@ function getFirstNonEmptyColumnValue(table, row, names) {
 
 function findCompositeSeatInfoInTicket(ticket) {
   if (!ticket?.table || !Array.isArray(ticket.row)) return null;
-  const columns = ticket.table.columns || [];
+  const candidateSources = [
+    { columns: ticket.table.columns || [], row: ticket.row, original: false },
+    {
+      columns: ticket.table.originalColumns || [],
+      row: Array.isArray(ticket.table.originalRows) && ticket.table.originalRows[ticket.index] ? ticket.table.originalRows[ticket.index] : null,
+      original: true,
+    },
+  ].filter((source) => Array.isArray(source.columns) && Array.isArray(source.row) && source.columns.length && source.row.length);
+  const candidates = [];
+  candidateSources.forEach((source) => {
+    const { columns, row, original } = source;
   const ignoredIndexes = new Set([
     ...findColumnIndexes(columns, DATE_COLUMN_NAMES),
     ...findSalePriceColumnIndexes(columns),
@@ -7233,22 +8599,25 @@ function findCompositeSeatInfoInTicket(ticket) {
     ...findColumnIndexes(columns, ["数量", "张数", "连坐", "qty", "count", "매수", "수량"]),
     ...findColumnIndexes(columns, ["状态", "售卖状态", "销售状态", "status", "是否售出", "售出"]),
   ]);
-  const candidates = ticket.row
+    row
     .map((value, index) => {
       const column = columns[index] || "";
       const parsed = parseCompositeSeatInfo(value);
       if (!parsed?.zone) return null;
       const ignoredPenalty = ignoredIndexes.has(index) && !(parsed.row || parsed.seat) ? 120 : ignoredIndexes.has(index) ? 15 : 0;
       const score =
-        (/(位置|区域|区|區|block|section|zone|area|구역|구|seat|side|row)/i.test(column) ? 120 : 0) +
+        (/(位置|区域|区|區|block|section|zone|area|구역|구|seat|side|row|열|좌석)/i.test(column) ? 120 : 0) +
         (currentEvent?.zones?.some((zone) => zoneTokenMatches(parsed.zone, zone)) ? 80 : 0) +
         (parsed.row ? 35 : 0) +
         (parsed.seat ? 20 : 0) -
-        ignoredPenalty;
+        ignoredPenalty +
+        (original ? 8 : 0);
       return { parsed, score, index };
     })
     .filter(Boolean)
-    .sort((a, b) => b.score - a.score || a.index - b.index);
+      .forEach((candidate) => candidates.push(candidate));
+  });
+  candidates.sort((a, b) => b.score - a.score || a.index - b.index);
   return candidates[0]?.score > 0 ? candidates[0].parsed : null;
 }
 
@@ -7275,15 +8644,16 @@ function getTicketRowValue(ticket) {
         (/票面排数|门票排数|座位排数|票面位置|门票位置|座位位置/.test(column) ? 80 : 0) +
         (/[-到至]/.test(text) ? 70 : 0) +
         (/实际/.test(text) ? 8 : 0);
-      return { index: item, value, parsed, score };
+      return { index: item, value, column, parsed, score };
     })
-    .filter(({ value, parsed }) => {
+    .filter(({ value, column, parsed }) => {
       const token = cleanZoneToken(value);
+      const strongRowColumn = /^(排|排数|行|行数|row|열)$/i.test(column.trim()) || /票面排数|门票排数|座位排数|票面位置|门票位置|座位位置/.test(column);
       return (
         String(value || "").trim() &&
         token !== zoneValue &&
-        (parsed || isLikelySeatRowValue(value)) &&
-        !isLikelyZoneCode(value) &&
+        (strongRowColumn || parsed || isLikelySeatRowValue(value)) &&
+        (strongRowColumn || !isLikelyZoneCode(value)) &&
         !isLikelySalePriceValue(value)
       );
     })
@@ -7301,11 +8671,13 @@ function getTicketRowValue(ticket) {
     .map((value, itemIndex) => ({ value, itemIndex }))
     .filter(({ value, itemIndex }) => {
       const token = cleanZoneToken(value);
+      const column = String(ticket.table.columns[itemIndex] || "");
+      const strongRowColumn = /^(排|排数|行|行数|row|열)$/i.test(column.trim()) || /票面排数|门票排数|座位排数|票面位置|门票位置|座位位置/.test(column);
       return (
         !ignoredIndexes.has(itemIndex) &&
         token !== zoneValue &&
-        (extractSeatRowFromText(value, { allowBareRange: isSeatRowColumnName(ticket.table.columns[itemIndex]) }) || isLikelySeatRowValue(value)) &&
-        !isLikelyZoneCode(value) &&
+        (strongRowColumn || extractSeatRowFromText(value, { allowBareRange: isSeatRowColumnName(ticket.table.columns[itemIndex]) }) || isLikelySeatRowValue(value)) &&
+        (strongRowColumn || !isLikelyZoneCode(value)) &&
         !isLikelySalePriceValue(value)
       );
     })
@@ -7373,13 +8745,19 @@ function getTicketPrimaryDateValue(ticket) {
 
 function getStandardTicketFields(ticket) {
   const date = getTicketPrimaryDateValue(ticket) || getFirstNonEmptyColumnValue(ticket.table, ticket.row, DATE_COLUMN_NAMES);
-  const face = getFirstFaceValue(ticket.table, ticket.row);
+  const face = getFirstFaceValueFromTicket(ticket);
+  const composite = findCompositeSeatInfoInTicket(ticket);
   const zone = getTicketZoneValue(ticket);
   const rowValue = getTicketRowValue(ticket);
   const seat = getTicketSeatValue(ticket);
   const quantity = getTicketQuantityValue(ticket);
   const salePrice = getTicketSalePriceValue(ticket);
-  const note = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["备注", "remark", "note", "说明"]);
+  const rawNote = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["备注", "remark", "note", "说明"]);
+  const fallbackNote = composite?.note || "";
+  const note =
+    salePrice && extractNumber(rawNote) === extractNumber(salePrice) && isLikelySalePriceValue(rawNote, { minPrice: 100 })
+      ? ""
+      : rawNote || fallbackNote;
   const visibleFace = String(face || "").trim() && extractNumber(face) !== extractNumber(salePrice) ? face : "";
   return [
     { label: "日期", value: date },
@@ -7391,6 +8769,23 @@ function getStandardTicketFields(ticket) {
     { label: "售价", value: salePrice },
     { label: "备注", value: note },
   ].filter((field) => String(field.value || "").trim());
+}
+
+function getQuickManualDisplayColumns(table) {
+  const preferredOrder = ["日期", "票面", "区域", "排", "座位号", "备注", "售价", "数量"];
+  const labels = new Set();
+  (table?.rows || []).slice(0, MAX_REVIEW_ROWS_RENDERED).forEach((row, index) => {
+    getStandardTicketFields({ table, row, index }).forEach((field) => labels.add(field.label));
+  });
+  return preferredOrder.filter((label) => labels.has(label));
+}
+
+function getQuickManualDisplayRowCells(table, row, rowIndex, labels) {
+  const fieldMap = new Map();
+  getStandardTicketFields({ table, row, index: rowIndex }).forEach((field) => {
+    if (!fieldMap.has(field.label)) fieldMap.set(field.label, String(field.value || "").trim());
+  });
+  return labels.map((label) => fieldMap.get(label) || "");
 }
 
 function valueMatchesCurrentSeatmapZone(value) {
@@ -8050,6 +9445,44 @@ function syncBuiltInSeatmapTemplate(event) {
 }
 
 function repairKnownEventTemplateMismatch(event) {
+  if (event?.id === "exo-encore") {
+    const zones = createExoEncoreTemplateZones();
+    const needsExoTemplate =
+      event.seatmapImage !== "assets/exo-encore-seatmap.jpg" ||
+      event.seatmapTemplateId !== "builtin-exo-encore" ||
+      event.seatmapSize?.width !== 980 ||
+      event.seatmapSize?.height !== 854 ||
+      !Array.isArray(event.zones) ||
+      event.zones.length !== zones.length;
+    if (!needsExoTemplate) return false;
+    event.seatmapTemplateId = "builtin-exo-encore";
+    event.seatmapImage = "assets/exo-encore-seatmap.jpg";
+    event.seatmapFileName = "exo-encore-seatmap.jpg";
+    event.seatmapSize = { width: 980, height: 854 };
+    event.seatmapTitle = "EXO 安可官方座位图";
+    event.zones = zones;
+    resetSeatmapTestStatusForEvent(event, "EXO 安可座位图分层热区已更新，需要逐区测试");
+    return true;
+  }
+  if (event?.id === "weeknd-goyang") {
+    const zones = createWeekndGoyangTemplateZones();
+    const needsWeekndTemplate =
+      event.seatmapImage !== "assets/weeknd-goyang-seatmap.jpg" ||
+      event.seatmapTemplateId !== "builtin-weeknd-goyang" ||
+      event.seatmapSize?.width !== 1193 ||
+      event.seatmapSize?.height !== 1590 ||
+      !Array.isArray(event.zones) ||
+      event.zones.length !== zones.length;
+    if (!needsWeekndTemplate) return false;
+    event.seatmapTemplateId = "builtin-weeknd-goyang";
+    event.seatmapImage = "assets/weeknd-goyang-seatmap.jpg";
+    event.seatmapFileName = "weeknd-goyang-seatmap.jpg";
+    event.seatmapSize = { width: 1193, height: 1590 };
+    event.seatmapTitle = "盆栽高阳官方座位图";
+    event.zones = zones;
+    resetSeatmapTestStatusForEvent(event, "盆栽高阳座位图分层热区已更新，需要逐区测试");
+    return true;
+  }
   if (!event || event.id !== "bigbang-singapore") return false;
   const hasGoyangTemplate = event.seatmapTemplateId === "builtin-bigbang-goyang" || String(event.seatmapImage || "").includes("bigbang-goyang-seatmap");
   const needsSingaporeTemplate =
@@ -9063,6 +10496,31 @@ function setUploadStatus(message, type = "idle") {
   uploadStatus.dataset.status = type;
 }
 
+function setLocalSaveStatus(message, type = "idle") {
+  if (!localSaveStatus) return;
+  localSaveStatus.textContent = message;
+  localSaveStatus.dataset.status = type;
+}
+
+function updateLocalSaveStatus({ saved = false, backup = "", error = "" } = {}) {
+  if (!localSaveStatus) return;
+  const ocrChars = String(uploadTableText.value || "").length;
+  const ocrText = ocrChars ? `OCR ${ocrChars.toLocaleString("zh-CN")} 字` : "OCR 空";
+  const currentPendingCount = pendingTables.filter((table) => table.eventId === currentEvent.id).length;
+  const pendingText = `确认表 ${currentPendingCount} 张`;
+  const snapshot = lastTicketOcrJobSnapshot;
+  const jobText = activeTicketOcrJobId
+    ? `任务 ${snapshot?.pagesProcessed || 0}/${snapshot?.pagesQueued || snapshot?.totalPages || "?"}`
+    : "无运行任务";
+  if (error) {
+    setLocalSaveStatus(`本地保存异常：${error}；${ocrText}，${pendingText}，${jobText}`, "error");
+    return;
+  }
+  const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  const backupText = backup ? `，${backup}` : "";
+  setLocalSaveStatus(`本地保存${saved ? "完成" : "待保存"} ${time}${backupText}；${ocrText}，${pendingText}，${jobText}`, saved ? "success" : "idle");
+}
+
 function showToast(message, type = "idle") {
   toast.textContent = message;
   toast.dataset.status = type;
@@ -9135,10 +10593,24 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
     `;
     return;
   }
+  const selectedIndex = Math.max(0, currentPending.findIndex((table) => table.id === selectedPendingTableId));
+  const shouldWindowRecords = currentPending.length > MAX_UPLOAD_RECORDS_RENDERED;
+  const windowStart = shouldWindowRecords
+    ? Math.min(
+        Math.max(selectedIndex - Math.floor(MAX_UPLOAD_RECORDS_RENDERED / 2), 0),
+        Math.max(0, currentPending.length - MAX_UPLOAD_RECORDS_RENDERED),
+      )
+    : 0;
+  const visiblePending = shouldWindowRecords ? currentPending.slice(windowStart, windowStart + MAX_UPLOAD_RECORDS_RENDERED) : currentPending;
+  const windowEnd = windowStart + visiblePending.length;
+  const windowNote = shouldWindowRecords
+    ? `<div class="upload-record-window-note">为避免页面卡顿，只显示当前附近第 ${windowStart + 1}-${windowEnd} / ${currentPending.length} 张待确认表；上一页/下一页仍可切到全部页面。</div>`
+    : "";
 
   uploadRecords.innerHTML = `
     <strong>当前演出待确认/本次上传记录</strong>
-    ${currentPending
+    ${windowNote}
+    ${visiblePending
       .map(
         (table) => {
           const reasons = table.reviewReasons || [];
@@ -9189,19 +10661,23 @@ function selectPendingTable(tableId, { scroll = false } = {}) {
   ensurePendingTableReviewFlags(table);
   pendingReviewFocusRowIndex = getReviewableRowIndexes(table)[0] ?? getVisibleReviewRowIndexes(table)[0] ?? null;
   renderReviewPanel(pendingReviewFocusRowIndex, { normalize: false });
-  queuePendingTableRowColorRepair(table);
   window.requestAnimationFrame(() => renderUploadRecords({ normalize: false }));
   if (scroll) document.querySelector("#reviewPanel")?.scrollIntoView({ behavior: "auto", block: "start" });
   return true;
 }
 
-function selectAdjacentPendingTable(direction) {
+function selectAdjacentPendingTable(direction, { saveCurrent = true } = {}) {
   const table = getSelectedPendingTable();
   const navigation = getReviewTableNavigation(table);
   const target = direction < 0 ? navigation.previous : navigation.next;
   if (!target) {
     showToast(direction < 0 ? "前面没有待校对表了。" : "后面没有待校对表了。", "error");
     return;
+  }
+  if (saveCurrent && table) {
+    updatePendingTableReviewFlags(table);
+    renderUploadRecords();
+    saveAppState();
   }
   selectPendingTable(target.id, { scroll: true });
 }
@@ -9303,6 +10779,7 @@ function cloneReviewState(table) {
     rowColorReliable: Boolean(table.rowColorReliable),
     rowColorConfirmed: Boolean(table.rowColorConfirmed),
     rowColorExactRowAligned: Boolean(table.rowColorExactRowAligned),
+    rowColorActionableConflict: Boolean(table.rowColorActionableConflict),
     rowColorAutoApplied: Boolean(table.rowColorAutoApplied),
     rowColorAutoSkipCount: Number(table.rowColorAutoSkipCount || 0),
     rowColorMessage: table.rowColorMessage || "",
@@ -9320,6 +10797,10 @@ function cloneReviewState(table) {
         }
       : null,
     rowColorRows: Array.isArray(table.rowColorRows) ? table.rowColorRows.map((item) => ({ ...item })) : [],
+    aiRowColorAutoRows: Array.isArray(table.aiRowColorAutoRows) ? [...table.aiRowColorAutoRows] : [],
+    ppStructureAnalysis: compactPpStructureAnalysis(table.ppStructureAnalysis),
+    ppStructureTicketRowMatches: clonePpStructureMatches(table.ppStructureTicketRowMatches),
+    ppStructureMessage: table.ppStructureMessage || "",
     showOpenCvColorPreview: Boolean(table.showOpenCvColorPreview),
     showSoldInReview: Boolean(table.showSoldInReview),
     bulkSkipDraft: Boolean(table.bulkSkipDraft),
@@ -9365,10 +10846,13 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.rowColorReliable = Boolean(state.rowColorReliable);
   table.rowColorConfirmed = Boolean(state.rowColorConfirmed);
   table.rowColorExactRowAligned = Boolean(state.rowColorExactRowAligned);
+  table.rowColorActionableConflict = Boolean(state.rowColorActionableConflict);
   table.rowColorAutoApplied = Boolean(state.rowColorAutoApplied);
   table.rowColorAutoSkipCount = Number(state.rowColorAutoSkipCount || 0);
   table.rowColorMessage = state.rowColorMessage || "";
   table.rowColorSelectionMode = state.rowColorSelectionMode || "";
+  table.rowColorImageWidth = Number(state.rowColorImageWidth || 0);
+  table.rowColorImageHeight = Number(state.rowColorImageHeight || 0);
   table.rowColorContiguous = Boolean(state.rowColorContiguous);
   table.rowColorMaxGap = Number(state.rowColorMaxGap || 0);
   table.rowColorSourceIndexes = Array.isArray(state.rowColorSourceIndexes) ? [...state.rowColorSourceIndexes] : null;
@@ -9382,6 +10866,10 @@ function restoreReviewSnapshot(table, snapshotId) {
       }
     : null;
   table.rowColorRows = Array.isArray(state.rowColorRows) ? state.rowColorRows.map((item) => ({ ...item })) : [];
+  table.aiRowColorAutoRows = Array.isArray(state.aiRowColorAutoRows) ? [...state.aiRowColorAutoRows] : [];
+  table.ppStructureAnalysis = compactPpStructureAnalysis(state.ppStructureAnalysis);
+  table.ppStructureTicketRowMatches = clonePpStructureMatches(state.ppStructureTicketRowMatches);
+  table.ppStructureMessage = state.ppStructureMessage || "";
   table.showOpenCvColorPreview = Boolean(state.showOpenCvColorPreview);
   table.showSoldInReview = Boolean(state.showSoldInReview);
   table.bulkSkipDraft = Boolean(state.bulkSkipDraft);
@@ -9616,6 +11104,10 @@ function getPendingRowPublishBlockReason(ticket) {
 function getPendingRowDecisionReason(ticket, { selectedForPublish = false, publishEligible = false } = {}) {
   if (!ticket?.table || !ticket.table.rows?.[ticket.index]) return "票源行不存在";
   if (isSoldTicket(ticket)) return "文字 SOLD/已售 下架";
+  const aiItem = getAiRowColorItem(ticket.table, ticket.index);
+  if (isTrustedAiRowSkipDecision(ticket.table, ticket.index)) {
+    return `AI视觉复核不发布${aiItem?.reason ? `：${aiItem.reason}` : ""}`;
+  }
   if (isColorHeldForReviewTicket(ticket)) {
     const label = getWhiteVsColoredConflictLabel(ticket.table, ticket.index) || getTicketRowColorLabel(ticket) || "非白底";
     return `颜色${label}下架`;
@@ -9693,6 +11185,207 @@ function setPendingRowPublishDraft(table, rowIndex, shouldPublish) {
   saveAndArchiveAppStep(`${shouldPublish ? "草稿设为发布" : "草稿设为不发布"}：第 ${rowIndex + 1} 条`, "校对");
 }
 
+function updateQuickManualCounts(table) {
+  const counters = reviewLayout.querySelectorAll("[data-quick-manual-counts]");
+  if (!counters.length || !table?.rows) return;
+  const publishCount = table.rows.filter((row, rowIndex) => {
+    return isPendingRowSelectedForPublish(table, rowIndex) && isCustomerPublishableTicket({ table, row, index: rowIndex });
+  }).length;
+  counters.forEach((counter) => {
+    counter.textContent = `当前上传 ${publishCount} 条 / 下架 ${table.rows.length - publishCount} 条。`;
+  });
+}
+
+function setQuickManualRowPublish(table, rowIndex, shouldPublish, options = {}) {
+  if (!table?.rows?.[rowIndex]) return false;
+  if (shouldPublish) clearUnavailableMarkersFromRow(table, rowIndex);
+  table.publishRows = table.publishRows || {};
+  table.manualPublishRows = table.manualPublishRows || {};
+  table.manualSkipRows = table.manualSkipRows || {};
+  table.userEditedRows = table.userEditedRows || {};
+  table.quickManualReviewedRows = table.quickManualReviewedRows || {};
+  table.publishRows[rowIndex] = Boolean(shouldPublish);
+  table.userEditedRows[rowIndex] = true;
+  table.quickManualReviewedRows[rowIndex] = true;
+  if (shouldPublish) {
+    table.manualPublishRows[rowIndex] = true;
+    delete table.manualSkipRows[rowIndex];
+  } else {
+    delete table.manualPublishRows[rowIndex];
+    table.manualSkipRows[rowIndex] = true;
+  }
+  const rowElements = reviewLayout.querySelectorAll(`[data-review-row-index="${rowIndex}"]`);
+  rowElements.forEach((rowEl) => {
+    rowEl.classList.toggle("publish", Boolean(shouldPublish));
+    rowEl.classList.toggle("skip", !shouldPublish);
+    const status = rowEl.querySelector(".quick-decision-status, .source-decision-status");
+    if (status) status.textContent = shouldPublish ? "上传" : "下架";
+    rowEl.querySelectorAll("[data-quick-row-publish]").forEach((button) => {
+      const active = button.dataset.publishValue === String(Boolean(shouldPublish));
+      button.classList.toggle("active", active);
+    });
+  });
+  if (options.updateCounts !== false) updateQuickManualCounts(table);
+  if (options.save === true) scheduleAppStateSave(1200);
+  return true;
+}
+
+function markAllQuickManualRows(table, shouldPublish) {
+  if (!table || !Array.isArray(table.rows) || !table.rows.length) {
+    showToast("当前没有可批量设置的票。", "error");
+    return false;
+  }
+  pushReviewSnapshot(table, shouldPublish ? "全部改为上传前" : "全部改为下架前");
+  table.rows.forEach((_, rowIndex) => {
+    setQuickManualRowPublish(table, rowIndex, shouldPublish, { save: false, updateCounts: false });
+  });
+  updateQuickManualCounts(table);
+  updatePendingTableReviewFlags(table);
+  renderUploadRecords();
+  scheduleAppStateSave(0);
+  saveAndArchiveAppStep(`${shouldPublish ? "快速全部上传" : "快速全部下架"}：${table.rows.length} 条`, "校对");
+  showToast(`已全部改为${shouldPublish ? "上传" : "下架"}。`, "success");
+  return true;
+}
+
+function invertQuickManualRows(table) {
+  if (!table || !Array.isArray(table.rows) || !table.rows.length) {
+    showToast("当前没有可反选的票。", "error");
+    return false;
+  }
+  pushReviewSnapshot(table, "反选前");
+  table.rows.forEach((_, rowIndex) => {
+    setQuickManualRowPublish(table, rowIndex, !isPendingRowSelectedForPublish(table, rowIndex), { save: false, updateCounts: false });
+  });
+  updateQuickManualCounts(table);
+  updatePendingTableReviewFlags(table);
+  renderUploadRecords();
+  scheduleAppStateSave(0);
+  saveAndArchiveAppStep(`快速反选：${table.rows.length} 条`, "校对");
+  showToast("已反选本页所有勾叉。", "success");
+  return true;
+}
+
+function saveCurrentReviewChoices({ advance = false } = {}) {
+  const table = getSelectedPendingTable();
+  if (!table) {
+    showToast("请先选择一张待确认表。", "error");
+    return false;
+  }
+  updatePendingTableReviewFlags(table);
+  renderUploadRecords();
+  const saved = saveAndArchiveAppStep(`保存本页勾叉：${table.title || currentEvent.name}`, "校对", { silent: true });
+  showToast(saved ? (advance ? "已保存本页勾叉，进入下一页。" : "已保存本页勾叉。") : "保存失败，请稍后再试。", saved ? "success" : "error");
+  if (saved && advance) selectAdjacentPendingTable(1, { saveCurrent: false });
+  else renderReviewPanel(undefined, { normalize: false });
+  return saved;
+}
+
+function saveAllReviewChoices() {
+  const currentPending = pendingTables.filter((table) => table.eventId === currentEvent.id);
+  if (!currentPending.length) {
+    showToast("当前没有待确认表可保存。", "error");
+    return false;
+  }
+  currentPending.forEach((table) => updatePendingTableReviewFlags(table));
+  renderUploadRecords();
+  const saved = saveAndArchiveAppStep(`保存全部待确认勾叉：${currentPending.length} 张表`, "校对", { silent: true });
+  showToast(saved ? `已保存 ${currentPending.length} 张待确认表的勾叉。` : "保存失败，请稍后再试。", saved ? "success" : "error");
+  return saved;
+}
+
+function toggleQuickCheckTable(table) {
+  if (!table) return;
+  table.quickCheckVisible = !table.quickCheckVisible;
+  renderReviewPanel(undefined, { normalize: false });
+  scheduleAppStateSave(800);
+}
+
+function confirmAllQuickManualTables() {
+  if (!requireSeatmapTestBeforePublish()) return;
+  const currentPending = pendingTables.filter((table) => table.eventId === currentEvent.id && table.quickManualMode);
+  if (!currentPending.length) {
+    showToast("当前没有快速人工待提交表。", "error");
+    return;
+  }
+  let publishedRowCount = 0;
+  let publishedTableCount = 0;
+  currentPending.forEach((table) => {
+    const publishRows = [];
+    table.rows.forEach((row, rowIndex) => {
+      const ticket = { table, row, index: rowIndex };
+      if (isUnavailableTicket(ticket)) return;
+      if (table.publishRows?.[rowIndex] === true && isCustomerPublishableTicket(ticket)) publishRows.push(row);
+    });
+    if (!publishRows.length) return;
+    const publishedTable = createPublishedTableFromRows(table, publishRows, currentPending.length > 1 ? ` ${publishRows.length}条` : "");
+    currentEvent.tables.unshift(publishedTable);
+    uploadedTables.unshift(publishedTable);
+    publishedRowCount += publishRows.length;
+    publishedTableCount += 1;
+  });
+  currentPending.forEach((table) => {
+    const index = pendingTables.findIndex((item) => item.id === table.id);
+    if (index >= 0) pendingTables.splice(index, 1);
+  });
+  if (!publishedRowCount) {
+    showToast("当前没有勾选上传的票。", "error");
+    renderUploadRecords();
+    renderReviewPanel();
+    return;
+  }
+  selectedPendingTableId = pendingTables.find((table) => table.eventId === currentEvent.id)?.id || null;
+  manualReviewOnly = false;
+  selectFirstDateWithTickets();
+  const matchedRows = countZoneRowsFromTables();
+  const matchMessage = getPublishMatchMessage(`快速提交 ${publishedTableCount} 张表、${publishedRowCount} 条票`, matchedRows);
+  setUploadStatus(matchMessage.text, matchMessage.type);
+  showToast(matchMessage.toast, matchMessage.type);
+  renderUploadRecords();
+  renderReviewPanel();
+  renderPublishedTables();
+  renderAdminEvent();
+  window.setTimeout(render, 0);
+  saveAndArchiveAppStep(`快速总体提交：${publishedTableCount} 张表、${publishedRowCount} 条票`, "发布");
+}
+
+function confirmQuickManualCurrentTable() {
+  if (!requireSeatmapTestBeforePublish()) return;
+  const table = getSelectedPendingTable();
+  if (!table?.quickManualMode) {
+    confirmSelectedPendingTable();
+    return;
+  }
+  const queueSnapshot = getCurrentPendingTables();
+  const currentQueueIndex = queueSnapshot.findIndex((item) => item.id === table.id);
+  const publishRows = [];
+  table.rows.forEach((row, rowIndex) => {
+    const ticket = { table, row, index: rowIndex };
+    if (isUnavailableTicket(ticket)) return;
+    if (table.publishRows?.[rowIndex] === true && isCustomerPublishableTicket(ticket)) publishRows.push(row);
+  });
+  if (publishRows.length) {
+    const publishedTable = createPublishedTableFromRows(table, publishRows);
+    currentEvent.tables.unshift(publishedTable);
+    uploadedTables.unshift(publishedTable);
+  }
+  const index = pendingTables.findIndex((item) => item.id === table.id);
+  if (index >= 0) pendingTables.splice(index, 1);
+  selectFirstDateWithTickets();
+  selectNextPendingTableAfterPublish(queueSnapshot, currentQueueIndex);
+  const matchedRows = countZoneRowsFromTables();
+  const messageText = publishRows.length ? `${table.title} · 已提交 ${publishRows.length} 条上传票` : `${table.title} · 本页全部下架，已跳过`;
+  const matchMessage = getPublishMatchMessage(messageText, matchedRows);
+  setUploadStatus(matchMessage.text, matchMessage.type);
+  showToast(publishRows.length ? matchMessage.toast : "本页已处理，进入下一页。", publishRows.length ? matchMessage.type : "success");
+  renderUploadRecords();
+  renderReviewPanel();
+  renderPublishedTables();
+  renderAdminEvent();
+  window.setTimeout(render, 0);
+  saveAndArchiveAppStep(`快速提交本页：${table.title} · ${publishRows.length} 条上传`, "发布");
+}
+
 function getVisibleReviewRowIndexes(table) {
   if (!table) return [];
   return table.rows
@@ -9723,6 +11416,33 @@ function markAllReviewRowsSkipDraft(table) {
   showToast("已全部改为不发布，可反选少量上架。", "success");
 }
 
+function markAllReviewRowsPublishDraft(table) {
+  if (!table || !Array.isArray(table.rows) || !table.rows.length) {
+    showToast("当前没有可批量设置的票。", "error");
+    return;
+  }
+  pushReviewSnapshot(table, "全部改为上传前");
+  table.publishRows = table.publishRows || {};
+  table.manualPublishRows = table.manualPublishRows || {};
+  table.manualSkipRows = table.manualSkipRows || {};
+  let changedRows = 0;
+  table.rows.forEach((row, rowIndex) => {
+    clearUnavailableMarkersFromRow(table, rowIndex);
+    const ticket = { table, row: table.rows[rowIndex], index: rowIndex };
+    if (!isCustomerPublishableTicket(ticket)) return;
+    table.publishRows[rowIndex] = true;
+    table.manualPublishRows[rowIndex] = true;
+    delete table.manualSkipRows[rowIndex];
+    changedRows += 1;
+  });
+  table.bulkSkipDraft = false;
+  updatePendingTableReviewFlags(table);
+  renderUploadRecords();
+  renderReviewPanel(0);
+  saveAndArchiveAppStep(`批量设为上传：${changedRows} 条`, "校对");
+  showToast(`已把 ${changedRows} 条改为上传。`, "success");
+}
+
 function createPublishedTableFromRows(table, rows, suffix = "") {
   ensureOriginalTableSnapshot(table);
   const sourceIndexes = rows.map((row) => table.rows.findIndex((candidate) => candidate === row));
@@ -9740,6 +11460,12 @@ function createPublishedTableFromRows(table, rows, suffix = "") {
         : null,
     )
     .filter((value) => value !== null);
+  const ppStructureTicketRowMatches = sourceIndexes
+    .map((sourceIndex, nextIndex) => {
+      const match = getPpStructureMatchForTicket(table, sourceIndex);
+      return match ? { ...clonePpStructureMatch(match), ticketRowIndex: nextIndex } : null;
+    })
+    .filter(Boolean);
   return {
     ...table,
     id: `${table.id}-published-${Date.now()}${suffix}`,
@@ -9754,6 +11480,9 @@ function createPublishedTableFromRows(table, rows, suffix = "") {
     rowColorRows: rowColorRows.length === rows.length ? rowColorRows : [],
     rowColorSourceIndexes: rowColorSourceIndexes.length === rows.length ? rowColorSourceIndexes : null,
     rowColorSourceIndexMode: table.rowColorSourceIndexMode || "",
+    ppStructureAnalysis: compactPpStructureAnalysis(table.ppStructureAnalysis),
+    ppStructureTicketRowMatches: ppStructureTicketRowMatches.length === rows.length ? ppStructureTicketRowMatches : [],
+    ppStructureMessage: ppStructureTicketRowMatches.length ? getPpStructureMatchSummary({ ppStructureTicketRowMatches }) : table.ppStructureMessage || "",
     rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
       ? {
           soldNonWhiteCount: Number(table.rowColorSoldTextAnchor.soldNonWhiteCount || 0),
@@ -9763,6 +11492,7 @@ function createPublishedTableFromRows(table, rows, suffix = "") {
     rowColorReliable: rowColorRows.length === rows.length ? table.rowColorReliable : false,
     rowColorConfirmed: rowColorRows.length === rows.length ? table.rowColorConfirmed : false,
     rowColorExactRowAligned: rowColorRows.length === rows.length ? table.rowColorExactRowAligned : false,
+    rowColorActionableConflict: rowColorRows.length === rows.length ? table.rowColorActionableConflict : false,
     rowColorAutoApplied: rowColorRows.length === rows.length ? table.rowColorAutoApplied : false,
     needsManualReview: false,
     reviewReasons: [],
@@ -9836,6 +11566,10 @@ function getReviewSourceCheckUrl(sourceUrl) {
   return url && !url.startsWith("data:") ? url : "";
 }
 
+function isLocalUploadedReviewSource(url) {
+  return /^\.?\/?uploads\//.test(String(url || "").trim());
+}
+
 async function assertReviewSourceReadable(response, url) {
   if (!response.ok) throw new Error(`source ${response.status}`);
   const contentType = String(response.headers.get("content-type") || "");
@@ -9849,6 +11583,12 @@ async function assertReviewSourceReadable(response, url) {
 function ensureReviewSourceAvailability(sourceUrl) {
   const url = getReviewSourceCheckUrl(sourceUrl);
   if (!url || reviewSourceCheckingUrls.has(url)) return;
+  if (isLocalUploadedReviewSource(url)) {
+    reviewSourceMissingUrls.delete(url);
+    reviewSourceAvailableUrls.add(url);
+    reviewSourceCheckedAt.set(url, Date.now());
+    return;
+  }
   const lastCheckedAt = reviewSourceCheckedAt.get(url) || 0;
   if (reviewSourceAvailableUrls.has(url) && Date.now() - lastCheckedAt < REVIEW_SOURCE_CHECK_TTL) return;
   reviewSourceAvailableUrls.delete(url);
@@ -9883,6 +11623,7 @@ function isReviewSourceMissing(sourceUrl) {
 
 function isReviewSourceWaiting(sourceUrl) {
   const url = getReviewSourceCheckUrl(sourceUrl);
+  if (isLocalUploadedReviewSource(url)) return false;
   return Boolean(url && !reviewSourceAvailableUrls.has(url) && !reviewSourceMissingUrls.has(url));
 }
 
@@ -9917,13 +11658,14 @@ async function getReviewSourceDataUrl(table) {
 }
 
 function shouldAutoRepairRowColors(table) {
+  if (!AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN && table?.forceRowColorRepair !== true) return false;
   if (!table || !Array.isArray(table.rows) || !table.rows.length) return false;
   const hasFreshRowColorLogic = Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION;
+  if (hasFreshRowColorLogic && table.rowColorSource === "ai_row_color") return false;
   if (hasFreshRowColorLogic && (table._rowColorRepairing || table._rowColorRepairDone || table._rowColorRepairTried)) return false;
   if (isVisualRowColorSource(table) && hasFreshRowColorLogic) {
     const hasAnyAutoSkip = table.rows.some((row, rowIndex) => isColorMarkedSoldTicket({ table, row, index: rowIndex }));
-    const hasMixedRawSignal = hasOpenCvRawColorDifference(table) || hasAnyOpenCvWhiteAndColoredConflict(table);
-    if (hasAnyAutoSkip || !hasMixedRawSignal) return false;
+    if (hasAnyAutoSkip || !hasAnyOpenCvWhiteAndColoredConflict(table)) return false;
   }
   if (!isPdfTableSource(table) && !String(table.originalType || "").startsWith("image/")) return false;
   if (!table.originalImage) return false;
@@ -9980,6 +11722,77 @@ function waitForPendingTableRowColorRepair(table) {
   });
 }
 
+function shouldEscalateRowColorAnalysisToAi(table, analysis) {
+  if (!table || table.rowColorSource === "ai_row_color") return false;
+  const rowCount = Array.isArray(table.rows) ? table.rows.length : 0;
+  if (!rowCount || rowCount > 80) return false;
+  if (!analysis || !Array.isArray(analysis.rows)) return true;
+  const labels = uniqueCleanValues((analysis.labels || analysis.rows.map((row) => row?.label || row?.rawLabel)).map(normalizeRowColorLabel).filter(Boolean));
+  if (analysis.reliable === true && analysis.exactRowAligned === true && !(Array.isArray(analysis.lowConfidenceRows) && analysis.lowConfidenceRows.length)) return false;
+  const hasWhite = labels.some(isAvailableRowColorLabel);
+  const hasNonWhite = labels.some((label) => label && !isAvailableRowColorLabel(label));
+  if (analysis.reliable !== true || analysis.exactRowAligned !== true) return true;
+  if (Array.isArray(analysis.lowConfidenceRows) && analysis.lowConfidenceRows.length) return true;
+  if (hasWhite && hasNonWhite) return true;
+  return false;
+}
+
+async function requestAiRowColorAnalysisForTable(table, sourcePayload) {
+  const response = await fetch("/api/tables/analyze-row-colors-ai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...sourcePayload,
+      sourcePage: table.sourcePage || 1,
+      columns: table.columns,
+      rows: table.rows,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.message || result.error || "AI 视觉复核失败。");
+  if (!result.rowColorAnalysis) throw new Error("AI 视觉复核没有返回逐行结果。");
+  return result.rowColorAnalysis;
+}
+
+async function requestAnchorRowColorAnalysisForTable(table, sourcePayload) {
+  const response = await fetch("/api/tables/analyze-row-colors-anchor", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...sourcePayload,
+      sourcePage: table.sourcePage || 1,
+      columns: table.columns,
+      rows: table.rows,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.message || result.error || "文字锚点取色失败。");
+  if (!result.rowColorAnalysis) throw new Error("文字锚点取色没有返回逐行结果。");
+  return result.rowColorAnalysis;
+}
+
+async function requestAnchorRowColorAnalysesForTables(tables, sourcePayload) {
+  const payloadTables = (tables || [])
+    .map((table) => ({
+      sourcePage: table.sourcePage || 1,
+      columns: table.columns || [],
+      rows: table.rows || [],
+    }))
+    .filter((table) => Array.isArray(table.rows) && table.rows.length > 0 && table.rows.length <= 80);
+  if (!payloadTables.length) return {};
+  const response = await fetch("/api/tables/analyze-row-colors-anchor-batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...sourcePayload,
+      tables: payloadTables,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.message || result.error || "批量文字锚点取色失败。");
+  return result.rowColorAnalyses && typeof result.rowColorAnalyses === "object" ? result.rowColorAnalyses : {};
+}
+
 function queuePendingTableRowColorRepair(table) {
   if (!shouldAutoRepairRowColors(table) || table._rowColorRepairQueued) return false;
   table._rowColorRepairQueued = true;
@@ -9997,34 +11810,50 @@ async function repairPendingTableRowColors(table) {
   table._rowColorRepairing = true;
   table._rowColorRepairTried = true;
   const wasLightReview = table.lightReviewFlags === true;
-  table.rowColorMessage = "正在用像素逐行检测原图行底色...";
+  table.rowColorMessage = "正在用文字锚点定位原图票行底色...";
   renderUploadRecords({ normalize: false });
   try {
     const source = String(table.originalImage || "");
     const sourcePayload = source.startsWith("uploads/") ? { sourceUrl: source } : { image: await getReviewSourceDataUrl(table) };
-    let response = await fetch("/api/tables/analyze-row-colors", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...sourcePayload,
-        sourcePage: table.sourcePage || 1,
-        expectedRows: getRowColorExpectedRowsForPendingTable(table),
-      }),
-    });
-    let result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      table.rowColorMessage = "像素行底色检测不可用，正在用 AI 逐行兜底...";
-      response = await fetch("/api/tables/analyze-row-colors-ai", {
+    let response = { ok: true };
+    let result;
+    let anchorError = null;
+    try {
+      const anchorAnalysis = await requestAnchorRowColorAnalysisForTable(table, sourcePayload);
+      if (anchorAnalysis?.reliable === true && anchorAnalysis?.exactRowAligned === true && anchorAnalysis?.autoApplyAllowed === true) {
+        result = { rowColorAnalysis: anchorAnalysis };
+      } else {
+        anchorError = new Error(anchorAnalysis?.error || "文字锚点未能一一匹配全部票行。");
+      }
+    } catch (error) {
+      anchorError = error;
+    }
+    if (!result) {
+      try {
+        table.rowColorMessage = "文字锚点未能稳定定位全部票行，正在用 AI 视觉复核...";
+        renderReviewPanel(undefined, { normalize: false });
+        result = { rowColorAnalysis: await requestAiRowColorAnalysisForTable(table, sourcePayload) };
+        result.rowColorAnalysis.anchorFallbackError = anchorError?.message || "文字锚点未能一一匹配全部票行。";
+      } catch (aiError) {
+      table.rowColorMessage = "文字锚点/AI 视觉复核失败，改用像素颜色参考，不自动覆盖规则...";
+      renderReviewPanel(undefined, { normalize: false });
+      response = await fetch("/api/tables/analyze-row-colors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...sourcePayload,
           sourcePage: table.sourcePage || 1,
-          columns: table.columns,
-          rows: table.rows,
+          expectedRows: getRowColorExpectedRowsForPendingTable(table),
         }),
       });
       result = await response.json().catch(() => ({}));
+      if (result.rowColorAnalysis) {
+        result.rowColorAnalysis = {
+          ...result.rowColorAnalysis,
+          aiFallbackError: [anchorError?.message, aiError.message || "AI 视觉复核失败。"].filter(Boolean).join("；"),
+        };
+      }
+      }
     }
     if (!response.ok) throw new Error(result.message || result.error || "行底色重新检测失败。");
     const analysis = result.rowColorAnalysis;
@@ -10032,6 +11861,11 @@ async function repairPendingTableRowColors(table) {
     table.rowColorSparseSourceRepair = isPdfTableSource(table) && getRowColorExpectedRowsForPendingTable(table) > (table.rows?.length || 0);
     const rowColorStart = Math.max(0, Math.floor(Number(table.rowColorAlignedStart ?? table.rowColorPageRowOffset ?? 0) || 0));
     applyOpenCvRowColorsToTable(table, analysis, rowColorStart);
+    if (analysis.aiFallbackError) {
+      table.rowColorMessage = `${table.rowColorMessage || "像素颜色已保留为参考"}；AI 视觉复核未完成：${analysis.aiFallbackError}`;
+    } else if (analysis.anchorFallbackError) {
+      table.rowColorMessage = `${table.rowColorMessage || "AI 视觉复核已完成"}；文字锚点未接管：${analysis.anchorFallbackError}`;
+    }
     table._rowColorRepairDone = true;
     table._rowColorRepairError = "";
     if (wasLightReview) markPendingTableReviewFlagsLightly(table);
@@ -10131,10 +11965,591 @@ function applyReviewAiSuggestions(table) {
   showToast("已应用 AI 建议。", "success");
 }
 
+function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
+  reviewLayout.classList.add("quick-manual-review-layout");
+  const source = table.originalImage || "";
+  const isPdf = isPdfTableSource(table);
+  const page = Number(table.sourcePage || 0);
+  const sourceUrl = isPdf && page > 0 ? `${source.split("#")[0]}#page=${page}` : source;
+  ensureReviewSourceAvailability(sourceUrl);
+  const sourceMissing = isReviewSourceMissing(sourceUrl);
+  const sourceWaiting = isReviewSourceWaiting(sourceUrl);
+  const sourceRowActionOverlays = getSourceRowActionOverlays(table);
+  const hasSourceRowActions = sourceRowActionOverlays.length > 0;
+  const hasEstimatedSourceRowActions = sourceRowActionOverlays.some((item) => item.estimated === true);
+  const hasMeasuredSourceRowActions = getSourceRowActionOverlays(table, { includeEstimated: false }).length > 0;
+  reviewLayout.classList.toggle("source-action-review-layout", hasSourceRowActions);
+  const sourceActionStatusText = hasSourceRowActions
+    ? hasEstimatedSourceRowActions
+      ? "已在原图旁按 OCR 行数贴上逐行按钮；请直接对照原图颜色勾叉。"
+      : "已在原图旁生成逐行按钮；请直接对照原图颜色勾叉。"
+    : table.rowColorMessage || "";
+  if (!hasMeasuredSourceRowActions && !sourceMissing && !sourceWaiting) queueQuickManualRowActionGeometry(table);
+  const waitingForSourceRowActions =
+    table.quickManualMode &&
+    !hasSourceRowActions &&
+    !sourceMissing &&
+    !sourceWaiting &&
+    (table._quickRowActionGeometryQueued || table._quickRowActionGeometryRunning);
+  const publishCount = table.rows.filter((row, rowIndex) => {
+    return isPendingRowSelectedForPublish(table, rowIndex) && isCustomerPublishableTicket({ table, row, index: rowIndex });
+  }).length;
+  const skipCount = table.rows.length - publishCount;
+  const visibleColumns = getQuickManualDisplayColumns(table);
+  const headerCells = visibleColumns.map((column) => `<th>${escapeHtml(column)}</th>`).join("");
+  const renderedRows = table.rows.slice(0, MAX_REVIEW_ROWS_RENDERED);
+  const hiddenRowCount = Math.max(0, table.rows.length - renderedRows.length);
+  const rows = renderedRows
+    .map((row, rowIndex) => {
+      const ticket = { table, row, index: rowIndex };
+      const selectedForPublish = isPendingRowSelectedForPublish(table, rowIndex);
+      const publishEligible = isCustomerPublishableTicket(ticket);
+      const shouldPublish = selectedForPublish && publishEligible;
+      const soldLike = isSoldTicket(ticket);
+      const publishBlockReason = selectedForPublish && !publishEligible ? getPendingRowPublishBlockReason(ticket) : "";
+      const cells = getQuickManualDisplayRowCells(table, row, rowIndex, visibleColumns)
+        .map((value) => `<td>${escapeHtml(value)}</td>`)
+        .join("");
+      return `
+        <tr class="quick-ticket-row ${shouldPublish ? "publish" : "skip"} ${soldLike ? "sold-row" : ""}" data-review-row-index="${rowIndex}">
+          <td class="quick-row-number">${rowIndex + 1}</td>
+          ${cells || `<td class="review-ticket-empty" colspan="${Math.max(1, visibleColumns.length)}">这一行没有识别到有效内容</td>`}
+          <td class="quick-decision-cell">
+            <div class="quick-decision-status">${publishBlockReason ? "需修改" : shouldPublish ? "上传" : "下架"}</div>
+            <div class="quick-decision-buttons">
+              <button class="quick-check-button ${selectedForPublish ? "active" : ""}" type="button" data-quick-row-publish="${rowIndex}" data-publish-value="true" title="上传">✓</button>
+              <button class="quick-check-button danger ${!selectedForPublish ? "active" : ""}" type="button" data-quick-row-publish="${rowIndex}" data-publish-value="false" title="下架">×</button>
+              <button class="quick-edit-button" type="button" data-edit-review-row="${rowIndex}" title="修改">改</button>
+            </div>
+            ${publishBlockReason ? `<small>${escapeHtml(publishBlockReason)}</small>` : ""}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  reviewLayout.innerHTML = `
+    <div class="manual-review-note ok">
+      <strong>快速人工通道</strong>
+      <span>只等 OCR 文本；不等 AI 复核。当前只会生成已读到 OCR 文本的页，后面页读完后可再追加生成。</span>
+    </div>
+    <div class="review-source-panel">
+      <div class="review-source-head">
+        <span>原始图片/PDF 页面</span>
+        <button class="small-button ghost" type="button" data-review-source="${table.id}">放大查看</button>
+      </div>
+      <strong>${escapeHtml(getTableSourceSummary(table))}</strong>
+      ${sourceActionStatusText ? `<p class="review-source-action-status">${escapeHtml(sourceActionStatusText)}</p>` : ""}
+      <div class="review-source-with-actions">
+        ${renderReviewSourceMedia(table, sourceUrl, { sourceMissing, sourceWaiting, isPdf, page })}
+      </div>
+    </div>
+    <div class="review-ticket-list quick-manual-list">
+      <div class="review-ticket-list-head">
+        <div>
+          <strong>快速逐行选择</strong>
+          <span data-quick-manual-counts>当前上传 ${publishCount} 条 / 下架 ${skipCount} 条。</span>
+        </div>
+        <div class="review-bulk-actions">
+          <button class="small-button ghost" type="button" data-quick-mark-all-publish>一键全打勾</button>
+          <button class="small-button ghost danger" type="button" data-quick-mark-all-skip>一键全打叉</button>
+          <button class="small-button ghost" type="button" data-quick-invert-selection>反选</button>
+          <button class="small-button ghost" type="button" data-cache-review-page-next>保存并下一页</button>
+          <button class="small-button" type="button" data-quick-submit-page>提交本页并下一页</button>
+          <button class="small-button" type="button" data-quick-submit-all>全部提交已选择</button>
+        </div>
+      </div>
+      <div class="review-table-nav">
+        <button class="small-button ghost" type="button" data-review-table-nav="prev" ${navigation.previous ? "" : "disabled"}>上一页</button>
+        <span>${escapeHtml(navigationLabel)}</span>
+        <button class="small-button ghost" type="button" data-review-table-nav="next" ${navigation.next ? "" : "disabled"}>下一页</button>
+      </div>
+      ${
+        hasSourceRowActions
+          ? `<div class="review-ticket-limit-note">${hasEstimatedSourceRowActions ? "本页已先按 OCR 行数生成原图贴行按钮；请对照原图颜色快速勾叉。" : "本页已启用原图贴行按钮；下方表格已隐藏，减少来回对齐。"}</div>`
+          : waitingForSourceRowActions
+            ? `<div class="review-ticket-limit-note">正在定位原图逐行按钮；定位完成后会直接贴在原图右侧。</div>`
+          : hiddenRowCount
+            ? `<div class="review-ticket-limit-note">正在尝试生成原图贴行按钮；本页先显示前 ${MAX_REVIEW_ROWS_RENDERED} 条，剩余 ${hiddenRowCount} 条仍保留在待确认表里。</div>`
+            : ""
+      }
+      ${
+        !hasSourceRowActions && !waitingForSourceRowActions && rows
+          ? `<div class="quick-table-wrap">
+              <table class="quick-decision-table">
+                <thead>
+                  <tr>
+                    <th class="quick-row-number">#</th>
+                    ${headerCells || `<th>票源</th>`}
+                    <th class="quick-decision-head">操作</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>`
+          : !hasSourceRowActions && !waitingForSourceRowActions
+            ? `<div class="empty-state">这张表没有识别到票源行。</div>`
+            : ""
+      }
+      <div class="quick-submit-footer">
+        <button class="small-button ghost" type="button" data-cache-review-page>保存本页</button>
+        <button class="small-button ghost" type="button" data-cache-review-page-next>保存并下一页</button>
+        <button class="small-button ghost" type="button" data-cache-all-review-choices>保存全部已选</button>
+        <button class="small-button ghost" type="button" data-quick-submit-page>提交本页并下一页</button>
+        <button class="small-button" type="button" data-quick-submit-all>全部提交已选择</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderQuickCheckTablePanel(table) {
+  const publishCount = table.rows.filter((row, rowIndex) => {
+    return isPendingRowSelectedForPublish(table, rowIndex) && isCustomerPublishableTicket({ table, row, index: rowIndex });
+  }).length;
+  const skipCount = table.rows.length - publishCount;
+  const visibleColumns = getQuickManualDisplayColumns(table);
+  const headerCells = visibleColumns.map((column) => `<th>${escapeHtml(column)}</th>`).join("");
+  const renderedRows = table.rows.slice(0, MAX_REVIEW_ROWS_RENDERED);
+  const hiddenRowCount = Math.max(0, table.rows.length - renderedRows.length);
+  const rows = renderedRows
+    .map((row, rowIndex) => {
+      const ticket = { table, row, index: rowIndex };
+      const selectedForPublish = isPendingRowSelectedForPublish(table, rowIndex);
+      const publishEligible = isCustomerPublishableTicket(ticket);
+      const shouldPublish = selectedForPublish && publishEligible;
+      const soldLike = isSoldTicket(ticket);
+      const publishBlockReason = selectedForPublish && !publishEligible ? getPendingRowPublishBlockReason(ticket) : "";
+      const cells = getQuickManualDisplayRowCells(table, row, rowIndex, visibleColumns)
+        .map((value) => `<td>${escapeHtml(value)}</td>`)
+        .join("");
+      return `
+        <tr class="quick-ticket-row ${shouldPublish ? "publish" : "skip"} ${soldLike ? "sold-row" : ""}" data-review-row-index="${rowIndex}">
+          <td class="quick-row-number">${rowIndex + 1}</td>
+          ${cells || `<td class="review-ticket-empty" colspan="${Math.max(1, visibleColumns.length)}">这一行没有识别到有效内容</td>`}
+          <td class="quick-decision-cell">
+            <div class="quick-decision-status">${publishBlockReason ? "需修改" : shouldPublish ? "上传" : "下架"}</div>
+            <div class="quick-decision-buttons">
+              <button class="quick-check-button ${selectedForPublish ? "active" : ""}" type="button" data-quick-row-publish="${rowIndex}" data-publish-value="true" title="上传">✓</button>
+              <button class="quick-check-button danger ${!selectedForPublish ? "active" : ""}" type="button" data-quick-row-publish="${rowIndex}" data-publish-value="false" title="下架">×</button>
+              <button class="quick-edit-button" type="button" data-edit-review-row="${rowIndex}" title="修改">改</button>
+            </div>
+            ${publishBlockReason ? `<small>${escapeHtml(publishBlockReason)}</small>` : ""}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+  return `
+    <div class="review-quick-table-panel">
+      <div class="review-ticket-list-head">
+        <div>
+          <strong>表格快速检查</strong>
+          <span data-quick-manual-counts>当前上传 ${publishCount} 条 / 下架 ${skipCount} 条。</span>
+        </div>
+        <div class="review-bulk-actions">
+          <button class="small-button ghost" type="button" data-quick-mark-all-publish>一键全打勾</button>
+          <button class="small-button ghost danger" type="button" data-quick-mark-all-skip>一键全打叉</button>
+          <button class="small-button ghost" type="button" data-quick-invert-selection>反选</button>
+        </div>
+      </div>
+      ${hiddenRowCount ? `<div class="review-ticket-limit-note">本页先显示前 ${MAX_REVIEW_ROWS_RENDERED} 条，剩余 ${hiddenRowCount} 条仍保留在待确认表里。</div>` : ""}
+      ${
+        rows
+          ? `<div class="quick-table-wrap">
+              <table class="quick-decision-table">
+                <thead>
+                  <tr>
+                    <th class="quick-row-number">#</th>
+                    ${headerCells || `<th>票源</th>`}
+                    <th class="quick-decision-head">操作</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>`
+          : `<div class="empty-state">这张表没有识别到票源行。</div>`
+      }
+      <div class="quick-submit-footer review-cache-footer">
+        <button class="small-button ghost" type="button" data-cache-review-page>保存本页</button>
+        <button class="small-button ghost" type="button" data-cache-review-page-next>保存并下一页</button>
+        <button class="small-button ghost" type="button" data-cache-all-review-choices>保存全部已选</button>
+      </div>
+    </div>
+  `;
+}
+
+function getRowActionOverlayBox(item) {
+  const box = item?.rowBox || item?.row_box || item?.bbox || item?.sampleBox || item || null;
+  if (!box || typeof box !== "object") return null;
+  const y1 = Number(box.y1 ?? box.top ?? box.y ?? NaN);
+  const y2 = Number(box.y2 ?? box.bottom ?? (Number.isFinite(y1) ? y1 + Number(box.height || 0) : NaN));
+  const x1 = Number(box.x1 ?? box.left ?? box.x ?? NaN);
+  const x2 = Number(box.x2 ?? box.right ?? (Number.isFinite(x1) ? x1 + Number(box.width || 0) : NaN));
+  if (!Number.isFinite(y1) || !Number.isFinite(y2) || y2 <= y1) return null;
+  return {
+    y1,
+    y2,
+    x1: Number.isFinite(x1) ? x1 : null,
+    x2: Number.isFinite(x2) ? x2 : null,
+  };
+}
+
+function getEstimatedQuickManualRowActionOverlays(table) {
+  if (!table?.quickManualMode || !Array.isArray(table.rows) || !table.rows.length) return [];
+  const count = Math.min(table.rows.length, MAX_REVIEW_ROWS_RENDERED);
+  const defaultStartPct = count >= 20 ? 10.8 : 16;
+  const defaultEndPct = count >= 20 ? 93.2 : 88;
+  const startPct = Number.isFinite(Number(table.rowActionEstimatedStartPct)) ? Number(table.rowActionEstimatedStartPct) : defaultStartPct;
+  const endPct = Number.isFinite(Number(table.rowActionEstimatedEndPct)) ? Number(table.rowActionEstimatedEndPct) : defaultEndPct;
+  const usableSpan = Math.max(20, endPct - startPct);
+  const pitch = usableSpan / Math.max(1, count);
+  const heightPct = Math.max(1.4, Math.min(4.8, pitch * 0.76));
+  return table.rows.slice(0, count).map((row, rowIndex) => {
+    const selectedForPublish = isPendingRowSelectedForPublish(table, rowIndex);
+    const ticket = { table, row, index: rowIndex };
+    const shouldPublish = selectedForPublish && isCustomerPublishableTicket(ticket);
+    return {
+      rowIndex,
+      topPct: Math.max(0, Math.min(100, startPct + pitch * (rowIndex + 0.5))),
+      heightPct,
+      selectedForPublish,
+      shouldPublish,
+      actionLeftCss: "calc(100% + 6px)",
+      estimated: true,
+    };
+  });
+}
+
+function getSourceRowActionOverlays(table, { includeEstimated = true } = {}) {
+  if (!table || !Array.isArray(table.rows)) return [];
+  if (!Array.isArray(table.rowColorRows)) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
+  if (table.quickManualMode && Number(table.rowActionGeometryVersion || 0) !== ROW_ACTION_GEOMETRY_VERSION) {
+    return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
+  }
+  const sourceRows = table.rowColorRows;
+  if (sourceRows.length < table.rows.length) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
+  if (table.quickManualMode && !sourceRows.slice(0, table.rows.length).every((item) => item?.rowActionGeometry === true)) {
+    return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
+  }
+  let imageHeight = Number(table.rowColorImageHeight || 0);
+  if (!imageHeight) {
+    const maxY = Math.max(
+      0,
+      ...sourceRows.map((item) => {
+        const box = getRowActionOverlayBox(item);
+        return box ? box.y2 : 0;
+      }),
+    );
+    imageHeight = maxY > 0 ? maxY * 1.04 : 0;
+  }
+  if (!imageHeight) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
+  const overlays = table.rows
+    .slice(0, MAX_REVIEW_ROWS_RENDERED)
+    .map((row, rowIndex) => {
+      const item = sourceRows[rowIndex] || {};
+      const box = getRowActionOverlayBox(item);
+      if (!box) return null;
+      const centerPct = Math.max(0, Math.min(100, (((box.y1 + box.y2) / 2) / imageHeight) * 100));
+      const heightPct = Math.max(0.8, Math.min(7, ((box.y2 - box.y1) / imageHeight) * 100));
+      const imageWidth = Math.max(1, Number(table.rowColorImageWidth || 0) || Number(box.x2 || 0) || 1);
+      const rowRightPct = Number.isFinite(box.x2) ? ((box.x2 || 0) / imageWidth) * 100 : NaN;
+      const selectedForPublish = isPendingRowSelectedForPublish(table, rowIndex);
+      const ticket = { table, row, index: rowIndex };
+      const shouldPublish = selectedForPublish && isCustomerPublishableTicket(ticket);
+      return {
+        rowIndex,
+        topPct: centerPct,
+        heightPct,
+        selectedForPublish,
+        shouldPublish,
+        actionLeftCss: Number.isFinite(rowRightPct) && rowRightPct < 88 ? `${Math.max(0, rowRightPct + 0.6)}%` : "calc(100% + 6px)",
+      };
+    })
+    .filter(Boolean);
+  return overlays.length ? overlays : includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
+}
+
+function getReviewSourceImageUrlForRowActions(sourceUrl, isPdf, page) {
+  if (!isPdf) return sourceUrl;
+  const source = normalizeUploadSourceReference(sourceUrl);
+  if (!source) return "";
+  return `/api/source/page-image?source=${encodeURIComponent(source)}&page=${encodeURIComponent(String(Math.max(1, Number(page || 1))))}`;
+}
+
+function normalizeUploadSourceReference(value) {
+  const raw = String(value || "").split("#")[0].trim();
+  if (!raw) return "";
+  if (raw.startsWith("uploads/")) return raw;
+  if (raw.startsWith("/uploads/")) return raw.slice(1);
+  try {
+    const url = new URL(raw, window.location.href);
+    const path = decodeURIComponent(url.pathname || "").replace(/^\/+/, "");
+    return path.startsWith("uploads/") ? path : "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function applyRowActionGeometryToTable(table, analysis) {
+  if (!table || !Array.isArray(table.rows) || !analysis || !Array.isArray(analysis.rows)) return false;
+  const aligned = getAlignedOpenCvRowsForTable(table, analysis.rows, 0);
+  if (!aligned.rows?.length || aligned.rows.length !== table.rows.length) {
+    return applyInterpolatedRowActionGeometryToTable(table, analysis);
+  }
+  table.rowColorSource = "quick_manual_row_geometry";
+  table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
+  table.rowActionGeometryVersion = ROW_ACTION_GEOMETRY_VERSION;
+  table.rowColorImageWidth = Number(analysis.imageWidth || 0);
+  table.rowColorImageHeight = Number(analysis.imageHeight || 0);
+  table.rowColorRows = aligned.rows.map((row, index) => ({
+    source: analysis.source || "row_geometry",
+    label: row?.label || "",
+    rawLabel: row?.rawLabel || "",
+    confidence: row?.confidence || 0,
+    rowBox: row?.rowBox || row?.row_box || row?.bbox || null,
+    bbox: row?.bbox || row?.rowBox || row?.row_box || null,
+    sampleBox: row?.sampleBox || null,
+    y1: row?.y1 ?? row?.top ?? "",
+    y2: row?.y2 ?? row?.bottom ?? "",
+    x1: row?.x1 ?? row?.left ?? "",
+    x2: row?.x2 ?? row?.right ?? "",
+    height: row?.height ?? "",
+    rowActionGeometry: true,
+    sourceIndex: aligned.sourceIndexes?.[index] ?? row?.index ?? index,
+  }));
+  table.rowColorSourceIndexes = Array.isArray(aligned.sourceIndexes) ? aligned.sourceIndexes : table.rowColorSourceIndexes;
+  table.rowColorMessage = "已生成原图逐行操作按钮。";
+  return table.rowColorRows.every((item) => getRowActionOverlayBox(item));
+}
+
+function getSortedRowActionBoxes(rows = []) {
+  return rows
+    .map((row, index) => ({ box: getRowActionOverlayBox(row), row, index }))
+    .filter((item) => item.box)
+    .sort((left, right) => ((left.box.y1 + left.box.y2) / 2) - ((right.box.y1 + right.box.y2) / 2));
+}
+
+function buildInterpolatedRowActionBoxes(table, analysis) {
+  const expectedRows = Array.isArray(table?.rows) ? table.rows.length : 0;
+  const imageHeight = Number(analysis?.imageHeight || 0);
+  const sorted = getSortedRowActionBoxes(analysis?.rows || []);
+  if (!table?.quickManualMode || expectedRows < 5 || !imageHeight) return [];
+
+  const textRows = Array.isArray(analysis?.rowActionTextRows)
+    ? analysis.rowActionTextRows
+        .map((item) => {
+          const center = Number(item?.textCenter ?? ((Number(item?.y1) + Number(item?.y2)) / 2));
+          const y1 = Number(item?.y1);
+          const y2 = Number(item?.y2);
+          return Number.isFinite(center) && Number.isFinite(y1) && Number.isFinite(y2) && y2 > y1
+            ? { center, y1, y2 }
+            : null;
+        })
+        .filter(Boolean)
+        .sort((left, right) => left.center - right.center)
+    : [];
+  const textGaps = textRows
+    .slice(1)
+    .map((item, index) => item.center - textRows[index].center)
+    .filter((gap) => gap >= 8 && gap <= 70)
+    .sort((a, b) => a - b);
+  const textPitch = textGaps.length >= 3 ? textGaps[Math.floor(textGaps.length / 2)] : 0;
+  const useTextAnchor = textRows.length === expectedRows && textPitch >= 8;
+
+  if (textRows.length && textRows.length !== expectedRows) {
+    table.rowColorMessage = `原图识别到 ${textRows.length} 条视觉票行，但 OCR 有 ${expectedRows} 条票；为保证一对一，未生成贴图按钮，请用下方表格核对。`;
+    return [];
+  }
+  if (!useTextAnchor) {
+    table.rowColorMessage = "未能从原图识别到完整逐行文字中心；为保证一对一，未生成贴图按钮，请用下方表格核对。";
+    return [];
+  }
+
+  const firstCenter = useTextAnchor ? textRows[0].center : (sorted[0].box.y1 + sorted[0].box.y2) / 2;
+  const centers = sorted.map((item) => (item.box.y1 + item.box.y2) / 2);
+  const gaps = centers.slice(1).map((center, index) => ({ index, gap: center - centers[index] })).filter((item) => item.gap > 0);
+  const largeBoundaryGap = gaps.find((item) => {
+    const pitch = item.gap / expectedRows;
+    return item.index <= 2 && pitch >= 8 && pitch <= 60;
+  });
+  const smallGaps = gaps.map((item) => item.gap).filter((gap) => gap >= 8 && gap <= 60).sort((a, b) => a - b);
+  const medianSmallGap = smallGaps.length ? smallGaps[Math.floor(smallGaps.length / 2)] : 0;
+  const pitch = useTextAnchor ? textPitch : smallGaps.length >= 3 ? medianSmallGap : largeBoundaryGap ? largeBoundaryGap.gap / expectedRows : medianSmallGap;
+  if (!Number.isFinite(pitch) || pitch < 8 || pitch > 60) return [];
+
+  const sourceWidth = Math.max(
+    0,
+    ...sorted.map((item) => Number(item.box.x2 || 0)).filter(Number.isFinite),
+    Number(analysis?.imageWidth || 0),
+  );
+  const rowHeight = Math.max(8, Math.min(42, pitch * 0.82));
+  const top = firstCenter - rowHeight / 2;
+  const bottom = firstCenter + (expectedRows - 1) * pitch + rowHeight / 2;
+  if (top < -imageHeight * 0.02 || bottom > imageHeight * 1.04) return [];
+
+  return table.rows.map((row, index) => {
+    const textRow = useTextAnchor ? textRows[index] : null;
+    const center = textRow ? textRow.center : firstCenter + index * pitch;
+    const effectiveHeight = textRow ? Math.max(8, Math.min(42, textRow.y2 - textRow.y1)) : rowHeight;
+    return {
+      source: analysis.source || "interpolated_row_geometry",
+      label: "",
+      rawLabel: "",
+      confidence: useTextAnchor ? 1 : largeBoundaryGap ? 0.82 : 0.72,
+      rowBox: {
+        y1: Math.max(0, center - effectiveHeight / 2),
+        y2: Math.min(imageHeight, center + effectiveHeight / 2),
+        x1: sorted[0]?.box?.x1 ?? 0,
+        x2: sourceWidth || null,
+      },
+      y1: Math.max(0, center - effectiveHeight / 2),
+      y2: Math.min(imageHeight, center + effectiveHeight / 2),
+      x1: sorted[0]?.box?.x1 ?? 0,
+      x2: sourceWidth || "",
+      height: effectiveHeight,
+      rowActionGeometry: true,
+      interpolatedRowActionGeometry: true,
+      textAnchoredRowActionGeometry: useTextAnchor,
+      sourceIndex: index,
+    };
+  });
+}
+
+function applyInterpolatedRowActionGeometryToTable(table, analysis) {
+  const rows = buildInterpolatedRowActionBoxes(table, analysis);
+  if (!rows.length || rows.length !== table.rows.length) return false;
+  table.rowColorSource = "quick_manual_interpolated_row_geometry";
+  table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
+  table.rowActionGeometryVersion = ROW_ACTION_GEOMETRY_VERSION;
+  table.rowColorImageWidth = Number(analysis.imageWidth || 0);
+  table.rowColorImageHeight = Number(analysis.imageHeight || 0);
+  table.rowColorRows = rows;
+  table.rowColorSourceIndexes = rows.map((_, index) => index);
+  table.rowColorMessage = rows.some((row) => row.textAnchoredRowActionGeometry === true)
+    ? "本地分割线未能逐行识别，已按文字中心生成原图贴行按钮；请按原图颜色人工勾叉。"
+    : "本地分割线未能逐行识别，已按 OCR 行数等距生成原图贴行按钮；请按原图颜色人工勾叉。";
+  return true;
+}
+
+function getTableSourcePayloadForRowActions(table) {
+  const source = normalizeUploadSourceReference(table?.originalImage || "");
+  if (source) return { sourceUrl: source };
+  const rawSource = String(table?.originalImage || "").split("#")[0];
+  if (rawSource.startsWith("uploads/")) return { sourceUrl: rawSource };
+  if (rawSource.startsWith("data:")) return { image: rawSource };
+  return null;
+}
+
+async function requestQuickManualRowActionGeometry(table) {
+  const sourcePayload = getTableSourcePayloadForRowActions(table);
+  if (!table || !sourcePayload) throw new Error("没有可读取的原始图片/PDF。");
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+  const response = await fetch("/api/tables/analyze-row-colors", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: controller.signal,
+    body: JSON.stringify({
+      ...sourcePayload,
+      sourcePage: table.sourcePage || 1,
+      expectedRows: getRowColorExpectedRowsForPendingTable(table),
+    }),
+  }).finally(() => window.clearTimeout(timeoutId));
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.message || result.error || "本地行定位失败。");
+  if (!result.rowColorAnalysis) throw new Error("本地行定位没有返回坐标。");
+  return result.rowColorAnalysis;
+}
+
+function queueQuickManualRowActionGeometry(table) {
+  const failedAt = Number(table?._quickRowActionGeometryFailedAt || 0);
+  if (
+    !table?.quickManualMode ||
+    table._quickRowActionGeometryQueued ||
+    table._quickRowActionGeometryRunning ||
+    (failedAt && Date.now() - failedAt < 15000) ||
+    (table.quickRowActionGeometryTried === true && Number(table.quickRowActionGeometryTriedVersion || 0) === ROW_ACTION_GEOMETRY_VERSION)
+  ) {
+    return false;
+  }
+  if (getSourceRowActionOverlays(table, { includeEstimated: false }).length) return false;
+  table.quickRowActionGeometryTried = true;
+  table.quickRowActionGeometryTriedVersion = ROW_ACTION_GEOMETRY_VERSION;
+  table._quickRowActionGeometryQueued = true;
+  window.setTimeout(async () => {
+    table._quickRowActionGeometryQueued = false;
+    if (!table?.quickManualMode || getSourceRowActionOverlays(table).length) return;
+    table._quickRowActionGeometryRunning = true;
+    table.rowColorMessage = "正在定位原图逐行按钮...";
+    try {
+      const analysis = await requestQuickManualRowActionGeometry(table);
+      if (!applyRowActionGeometryToTable(table, analysis)) {
+        throw new Error(table.rowColorMessage || "本地行定位未能一一对应票行。");
+      }
+      saveAndArchiveAppStep(`快速人工行按钮定位：${table.title || currentEvent.name}`, "校对", { silent: true });
+    } catch (error) {
+      table.rowActionGeometryVersion = 0;
+      table.rowColorRows = [];
+      table.rowColorImageWidth = 0;
+      table.rowColorImageHeight = 0;
+      table.quickRowActionGeometryTried = false;
+      table.quickRowActionGeometryTriedVersion = 0;
+      table._quickRowActionGeometryFailedAt = Date.now();
+      table.rowColorMessage = `${error.message || "原图逐行按钮定位失败"}；已保留右侧表格兜底。`;
+    } finally {
+      table._quickRowActionGeometryRunning = false;
+      renderReviewPanel(undefined, { normalize: false });
+      renderUploadRecords({ normalize: false });
+      scheduleAppStateSave(0);
+    }
+  }, 100);
+  return true;
+}
+
+function renderSourceRowActionOverlay(table, sourceImageUrl) {
+  if (!table?.quickManualMode) return "";
+  const overlays = getSourceRowActionOverlays(table);
+  if (!sourceImageUrl || !overlays.length) return "";
+  const controls = overlays
+    .map(
+      (item) => `
+        <div class="review-source-row-control ${item.shouldPublish ? "publish" : "skip"}" data-review-row-index="${item.rowIndex}" style="top:${item.topPct}%;height:${item.heightPct}%;left:${item.actionLeftCss || "calc(100% + 6px)"};">
+          <button class="upload ${item.selectedForPublish ? "active" : ""}" type="button" data-quick-row-publish="${item.rowIndex}" data-publish-value="true" title="上传第 ${item.rowIndex + 1} 行">✓</button>
+          <button class="skip ${!item.selectedForPublish ? "active" : ""}" type="button" data-quick-row-publish="${item.rowIndex}" data-publish-value="false" title="下架第 ${item.rowIndex + 1} 行">×</button>
+        </div>
+      `,
+    )
+    .join("");
+  return `
+    <div class="review-source-action-layer">
+      <div class="review-source-action-stage">
+        <img class="review-source-action-image" src="${escapeHtml(sourceImageUrl)}" alt="${escapeHtml(getTableSourceSummary(table))}" />
+        <div class="review-source-row-actions" aria-label="原图逐行上传下架">${controls}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderReviewSourceMedia(table, sourceUrl, { sourceMissing, sourceWaiting, isPdf, page }) {
+  const actionImageUrl = getReviewSourceImageUrlForRowActions(sourceUrl, isPdf, page);
+  const overlay = renderSourceRowActionOverlay(table, actionImageUrl);
+  if (sourceMissing) return renderReviewSourceMissing(table, sourceUrl);
+  if (sourceWaiting) return renderReviewSourceChecking(sourceUrl);
+  if (overlay) return overlay;
+  if (isPdf && actionImageUrl) {
+    return `<img class="review-source-image" src="${escapeHtml(actionImageUrl)}" alt="${escapeHtml(getTableSourceSummary(table))}" />`;
+  }
+  return isPdf
+    ? `<iframe class="review-source-frame" src="${sourceUrl}" title="${escapeHtml(getTableSourceSummary(table))}"></iframe>`
+    : `<img class="review-source-image" src="${sourceUrl}" alt="${escapeHtml(getTableSourceSummary(table))}" />`;
+}
+
 function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normalize = true } = {}) {
   if (normalize) normalizePendingTablesInMemory({ save: true });
   const table = getSelectedPendingTable();
   if (!table || table.eventId !== currentEvent.id) {
+    reviewLayout.classList.remove("quick-manual-review-layout");
+    reviewLayout.classList.remove("source-action-review-layout");
     reviewTitle.textContent = "选择一张待确认表";
     confirmReviewButton.disabled = true;
     reviewLayout.innerHTML = `<div class="empty-state">上传票源文件后，先在上方待确认列表中选择一张表进行校对。</div>`;
@@ -10149,18 +12564,15 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   if (table._columnRepairChanged) {
     table.reviewFlagsVersion = 0;
   }
-  if (shouldAutoRepairRowColors(table)) {
-    queuePendingTableRowColorRepair(table);
-    repairMisreadDataHeaderTable(table);
-    if (isPdfTableSource(table)) forceCanonicalOriginalDisplay(table);
-    table.reviewFlagsVersion = 0;
-  }
   ensurePendingTableReviewFlags(table);
   if (Number(table.publishDecisionLogicVersion || 0) !== PUBLISH_DECISION_LOGIC_VERSION) {
     const clearedStaleBlocks = clearStalePublishDecisionBlocks(table);
     table.publishDecisionLogicVersion = PUBLISH_DECISION_LOGIC_VERSION;
     if (clearedStaleBlocks > 0) scheduleAppStateSave(0);
   }
+  const colorDecisionApplied = applyOpenCvWhiteVsColoredAutoDecision(table);
+  if (colorDecisionApplied > 0) scheduleAppStateSave(0);
+  queuePendingTableRowColorRepair(table);
   if (table._columnRepairChanged) {
     delete table._columnRepairChanged;
     scheduleAppStateSave(0);
@@ -10177,6 +12589,13 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
       if (!isCustomerPublishableTicket(ticket)) table.publishRows[rowIndex] = false;
     }
   });
+  if (table.quickManualMode) {
+    renderQuickManualReviewPanel(table, navigation, navigationLabel);
+    focusReviewRow(focusRowIndex);
+    return;
+  }
+  reviewLayout.classList.remove("quick-manual-review-layout");
+  reviewLayout.classList.remove("source-action-review-layout");
   const skippedSoldRows = table.rows.filter((row, rowIndex) => isUnavailableTicket({ table, row, index: rowIndex })).length;
   const aiDecisions = Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions : [];
   const aiDecisionByRow = new Map(aiDecisions.map((item) => [Number(item.row), item]));
@@ -10188,8 +12607,8 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   ].join(" / ");
   const hasColorPreview = hasOpenCvRowColorPreview(table);
   const openCvConflict = hasColorPreview && hasAnyOpenCvWhiteAndColoredConflict(table);
-  const openCvLabels = hasColorPreview ? getOpenCvNonSoldColorLabels(table) : [];
-  const openCvColorState = hasColorPreview ? getOpenCvEffectiveColorState(table) : null;
+  const openCvLabels = hasColorPreview && table.rowColorReliable === true ? getOpenCvNonSoldColorLabels(table) : [];
+  const openCvColorState = hasColorPreview && table.rowColorReliable === true ? getOpenCvEffectiveColorState(table) : null;
   const rowColorEngineName = getRowColorEngineName(table);
   const rowColorStatusText =
     isVisualRowColorSource(table)
@@ -10203,6 +12622,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
             ? `${rowColorEngineName} 已识别 ${table.rowColorRows.length}/${table.rows.length} 行底色`
             : `${rowColorEngineName} 未识别到有效颜色参考`
       : "";
+  const ppStructureStatusText = table.ppStructureMessage || getPpStructureMatchSummary(table);
   const colorEngineHint = openCvConflict
     ? "同表混色时非白底行会自动设为不发布；你仍可手动改回发布。"
     : "颜色检测会先等待白底参照和可靠对齐，再参与发布判断。";
@@ -10266,6 +12686,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
       const missingPrice = !visibleSalePrice;
       const soldLike = isSoldTicket(ticket);
       const colorHeld = !soldLike && isColorHeldForReviewTicket(ticket);
+      const ppStructureMatchText = getPpStructureMatchText(table, rowIndex);
       const publishBlockReason = selectedForPublish && !publishEligible ? getPendingRowPublishBlockReason(ticket) : "";
       const decisionReason = getPendingRowDecisionReason(ticket, { selectedForPublish, publishEligible });
       const zoneUnmatched =
@@ -10314,6 +12735,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
           ${publishBlockReason ? `<div class="review-ticket-warning">已记录“发布到前台”，但暂不能发布：${escapeHtml(publishBlockReason)}</div>` : ""}
           ${!shouldPublish ? `<div class="review-ticket-warning">当前原因：${escapeHtml(decisionReason)}</div>` : ""}
           ${zoneUnmatched ? `<div class="review-ticket-warning">区域未匹配座位图热区：请检查“区域”是否识别错字，或到座位图热区里补这个区。</div>` : ""}
+          ${ppStructureMatchText ? `<div class="ai-suggestion publish"><strong>结构坐标</strong><span>${escapeHtml(ppStructureMatchText)}</span></div>` : ""}
           ${
             aiDecision
               ? `<div class="ai-suggestion ${aiDecision.action === "publish" ? "publish" : "skip"}">
@@ -10357,27 +12779,24 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   ensureReviewSourceAvailability(sourceUrl);
   const sourceMissing = isReviewSourceMissing(sourceUrl);
   const sourceWaiting = isReviewSourceWaiting(sourceUrl);
+  const hasSourceRowActions = table.quickManualMode && getSourceRowActionOverlays(table).length > 0;
+  reviewLayout.classList.toggle("source-action-review-layout", hasSourceRowActions);
   reviewLayout.innerHTML = `
     ${
       table.needsManualReview
         ? `<div class="manual-review-note"><strong>需人工确认</strong><span>${escapeHtml((table.reviewReasons || []).join(" / "))}</span></div>`
         : `<div class="manual-review-note ok"><strong>标准识别</strong><span>关键字段完整，仍建议发布前快速看一眼原始图。</span></div>`
     }
+    ${ppStructureStatusText ? `<div class="manual-review-note ok"><strong>结构复核</strong><span>${escapeHtml(ppStructureStatusText)}</span></div>` : ""}
     <div class="review-source-panel">
       <div class="review-source-head">
         <span>原始图片/PDF 页面</span>
         <button class="small-button ghost" type="button" data-review-source="${table.id}">放大查看</button>
       </div>
       <strong>${escapeHtml(getTableSourceSummary(table))}</strong>
-      ${
-        sourceMissing
-          ? renderReviewSourceMissing(table, sourceUrl)
-          : sourceWaiting
-          ? renderReviewSourceChecking(sourceUrl)
-          : isPdf
-          ? `<iframe class="review-source-frame" src="${sourceUrl}" title="${escapeHtml(getTableSourceSummary(table))}"></iframe>`
-          : `<img class="review-source-image" src="${sourceUrl}" alt="${escapeHtml(getTableSourceSummary(table))}" />`
-      }
+      <div class="review-source-with-actions">
+        ${renderReviewSourceMedia(table, sourceUrl, { sourceMissing, sourceWaiting, isPdf, page })}
+      </div>
     </div>
     <div class="review-ticket-list">
       <div class="review-ticket-list-head">
@@ -10399,6 +12818,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
         <span>${escapeHtml(navigationLabel)}</span>
         <button class="small-button ghost" type="button" data-review-table-nav="next" ${navigation.next ? "" : "disabled"}>下一页</button>
       </div>
+      ${hasSourceRowActions ? "" : renderQuickCheckTablePanel(table)}
       ${
         missingDateCount
           ? `<div class="review-quick-tools">
@@ -10601,7 +13021,7 @@ function handlePublishedTableAction(tableId) {
 
 async function getUploadImageRowColorAnalyses(parsedTables) {
   const isPdf = uploadedSource?.type === "application/pdf" || uploadedSource?.name?.toLowerCase().endsWith(".pdf");
-  if (isPdf) return null;
+  if (isPdf) return await getUploadPdfRowColorAnalyses(parsedTables);
   const isImage = String(uploadedSource?.type || "").startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(uploadedSource?.name || "");
   const hasImageSource = uploadedSource?.dataUrl?.startsWith("data:image/") || String(uploadedSource?.url || "").startsWith("uploads/");
   if (isImage && !hasImageSource) {
@@ -10636,6 +13056,106 @@ async function getUploadImageRowColorAnalyses(parsedTables) {
   return result.rowColorAnalysis ? { "1": result.rowColorAnalysis } : {};
 }
 
+function getUploadRowColorSourcePayload() {
+  const sourceUrl = String(uploadedSource?.url || "");
+  if (sourceUrl.startsWith("uploads/")) return { sourceUrl };
+  const dataUrl = String(uploadedSource?.dataUrl || "");
+  if (dataUrl.startsWith("data:")) return { image: dataUrl };
+  return null;
+}
+
+async function getUploadPdfRowColorAnalyses(parsedTables) {
+  const baseAnalyses = { ...(lastTicketOcrJobSnapshot?.rowColorAnalyses || {}) };
+  const sourcePayload = getUploadRowColorSourcePayload();
+  if (!sourcePayload) return baseAnalyses;
+  const uploadTables = mergeParsedTablesByPdfPage(parsedTables);
+  const shouldDeferAnchorForLargePdf = uploadTables.length > MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD;
+  if (shouldDeferAnchorForLargePdf) {
+    setUploadStatus(
+      `这份 PDF 有 ${uploadTables.length} 页，已跳过全量文字锚点；先生成待确认表，打开具体页面时再做行底色校对。`,
+      "loading",
+    );
+    return baseAnalyses;
+  }
+  const anchorBatchAnalyses = {};
+  const anchorBatchTables = [];
+  uploadTables.forEach((table) => {
+    const sourcePage = Number(table?.sourcePage || 0) || 1;
+    const pageKey = String(sourcePage);
+    const rowCount = Array.isArray(table?.rows) ? table.rows.length : 0;
+    const currentAnalysis = baseAnalyses[pageKey] || baseAnalyses[sourcePage] || null;
+    if (!rowCount || rowCount > 80) return;
+    if (
+      (currentAnalysis?.source === "ai_row_color" || currentAnalysis?.source === "ticket_row_anchor") &&
+      currentAnalysis?.rowColorLogicVersion === ROW_COLOR_LOGIC_VERSION
+    ) {
+      return;
+    }
+    anchorBatchTables.push(table);
+  });
+  if (anchorBatchTables.length > 1) {
+    try {
+      setUploadStatus(`正在批量用文字锚点定位 ${anchorBatchTables.length} 页行底色...`, "loading");
+      Object.assign(anchorBatchAnalyses, await requestAnchorRowColorAnalysesForTables(anchorBatchTables, sourcePayload));
+    } catch (error) {
+      console.warn("Batch anchor row-color analysis failed; falling back to per-page analysis.", error);
+    }
+  }
+  const repairAttempts = new Set();
+  for (const table of uploadTables) {
+    const sourcePage = Number(table?.sourcePage || 0) || 1;
+    const pageKey = String(sourcePage);
+    if (repairAttempts.has(pageKey)) continue;
+    const rowCount = Array.isArray(table?.rows) ? table.rows.length : 0;
+    if (!rowCount || rowCount > 80) continue;
+    const currentAnalysis = baseAnalyses[pageKey] || baseAnalyses[sourcePage] || null;
+    if (
+      (currentAnalysis?.source === "ai_row_color" || currentAnalysis?.source === "ticket_row_anchor") &&
+      currentAnalysis?.rowColorLogicVersion === ROW_COLOR_LOGIC_VERSION
+    ) {
+      continue;
+    }
+    repairAttempts.add(pageKey);
+    let anchorError = null;
+    try {
+      const anchorAnalysis = anchorBatchAnalyses[pageKey] || anchorBatchAnalyses[sourcePage];
+      if (!anchorAnalysis) setUploadStatus(`PDF 第 ${sourcePage} 页正在用文字锚点定位行底色...`, "loading");
+      const effectiveAnchorAnalysis = anchorAnalysis || (await requestAnchorRowColorAnalysisForTable(table, sourcePayload));
+      if (
+        effectiveAnchorAnalysis?.source === "ticket_row_anchor" &&
+        Array.isArray(effectiveAnchorAnalysis.rows) &&
+        effectiveAnchorAnalysis.rows.some((row) => row?.rowTextVerified === true && row?.rowGeometryVerified === true && row?.strong === true)
+      ) {
+        effectiveAnchorAnalysis.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
+        baseAnalyses[pageKey] = effectiveAnchorAnalysis;
+        if (lastTicketOcrJobSnapshot?.rowColorAnalyses) lastTicketOcrJobSnapshot.rowColorAnalyses[pageKey] = effectiveAnchorAnalysis;
+        continue;
+      }
+      if (effectiveAnchorAnalysis?.reliable === true && effectiveAnchorAnalysis?.exactRowAligned === true && effectiveAnchorAnalysis?.autoApplyAllowed === true) {
+        effectiveAnchorAnalysis.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
+        baseAnalyses[pageKey] = effectiveAnchorAnalysis;
+        if (lastTicketOcrJobSnapshot?.rowColorAnalyses) lastTicketOcrJobSnapshot.rowColorAnalyses[pageKey] = effectiveAnchorAnalysis;
+        continue;
+      }
+      anchorError = new Error(effectiveAnchorAnalysis?.error || "文字锚点未能一一匹配全部票行。");
+    } catch (error) {
+      anchorError = error;
+    }
+    const previous = currentAnalysis || { source: "opencv", rows: [], reliable: false, exactRowAligned: false };
+    baseAnalyses[pageKey] = {
+      ...previous,
+      reliable: false,
+      exactRowAligned: false,
+      autoApplyAllowed: false,
+      aiFallbackSkipped: true,
+      aiFallbackError: anchorError?.message || "文字锚点未能一一匹配全部票行。",
+      unreliableReasons: uniqueCleanValues([...(previous.unreliableReasons || []), "anchor_not_matched_ai_fallback_skipped"]),
+    };
+    if (lastTicketOcrJobSnapshot?.rowColorAnalyses) lastTicketOcrJobSnapshot.rowColorAnalyses[pageKey] = baseAnalyses[pageKey];
+  }
+  return baseAnalyses;
+}
+
 async function getUploadImageRowColorAnalysesSafely(parsedTables) {
   try {
     return await getUploadImageRowColorAnalyses(parsedTables);
@@ -10647,8 +13167,23 @@ async function getUploadImageRowColorAnalysesSafely(parsedTables) {
 }
 
 function setPublishUploadBusy(isBusy) {
+  uploadPendingGenerationBusy = isBusy;
   publishUploadButton.disabled = isBusy;
   publishUploadButton.textContent = isBusy ? "正在生成..." : "生成待确认表";
+  if (saveOcrTextButton) saveOcrTextButton.disabled = isBusy;
+  if (clearGeneratedPendingButton) clearGeneratedPendingButton.disabled = isBusy;
+  if (clearOcrTextButton) clearOcrTextButton.disabled = isBusy;
+}
+
+function setQuickManualUploadBusy(isBusy) {
+  quickManualGenerationBusy = isBusy;
+  if (quickManualUploadButton) {
+    quickManualUploadButton.disabled = isBusy;
+    quickManualUploadButton.textContent = isBusy ? "正在生成..." : "快速人工生成";
+  }
+  if (saveOcrTextButton) saveOcrTextButton.disabled = isBusy;
+  if (clearGeneratedPendingButton) clearGeneratedPendingButton.disabled = isBusy;
+  if (clearOcrTextButton) clearOcrTextButton.disabled = isBusy;
 }
 
 async function publishUpload() {
@@ -10709,8 +13244,104 @@ async function publishUploadInner() {
   }, 5000);
 }
 
+async function publishUploadQuickManual() {
+  if (quickManualGenerationBusy) return;
+  if (fieldMappingDraft) {
+    setUploadStatus("当前 CSV / Excel 正在字段映射预览，请先处理字段映射后再使用快速通道。", "error");
+    showToast("请先处理字段映射。", "error");
+    return;
+  }
+  const parsedTables = splitRecognizedTables(uploadTableText.value);
+  if (!uploadedSource) {
+    setUploadStatus("请先选择一张图片或 PDF。", "error");
+    showToast("快速生成失败：请先选择文件。", "error");
+    return;
+  }
+  if (!parsedTables.length) {
+    setUploadStatus("OCR 文本至少需要表头和一行票源。", "error");
+    showToast("快速生成失败：表格内容不完整。", "error");
+    return;
+  }
+  setQuickManualUploadBusy(true);
+  setUploadStatus("正在用快速人工通道生成待确认表...", "loading");
+  showToast("正在生成快速人工待确认表...", "loading");
+  try {
+    const sourceKey = String(uploadedSource?.url || uploadedSource?.name || "");
+    const existingPageKeys = new Set(
+      [...pendingTables, ...(currentEvent.tables || [])]
+        .filter((table) => table.eventId === currentEvent.id && String(table.originalImage || table.sourceFileName || "") === sourceKey)
+        .map((table) => `${sourceKey}::${Number(table.sourcePage || 0) || 1}`),
+    );
+    const tables = createUploadedTables(parsedTables, {}, { skipRowColor: true, quickManualMode: true })
+      .filter((table) => table.rows.length)
+      .filter((table) => !existingPageKeys.has(`${sourceKey}::${Number(table.sourcePage || 0) || 1}`));
+    if (!tables.length) {
+      setUploadStatus("当前 OCR 文本里的页都已经生成过了；等后面页文本继续出现后，再点快速人工生成即可追加。", "idle");
+      showToast("没有新的 OCR 页需要追加。", "error");
+      return;
+    }
+    pendingTables.unshift(...tables);
+    selectedPendingTableId = tables[0]?.id || selectedPendingTableId;
+    selectedDateId = null;
+    selectedZone = null;
+    searchTerm = "";
+    searchInput.value = "";
+    setUploadStatus(
+      activeTicketOcrJobId
+        ? `快速人工通道已生成 ${tables.length} 张待确认表。OCR 会继续读取后续页，后面页出现后可再追加生成。`
+        : `快速人工通道已生成 ${tables.length} 张待确认表。请按原图点上传/下架。`,
+      "success",
+    );
+    showToast(`已生成 ${tables.length} 张快速人工待确认表。`, "success");
+    renderUploadRecords({ save: false, normalize: false });
+    renderReviewPanel(0);
+    renderPublishedTables();
+    renderAdminEvent();
+    uploadRecords.scrollIntoView({ behavior: "smooth", block: "start" });
+    runWhenPageIdle(() => {
+      renderUploadRecords({ save: false, normalize: false });
+      saveAndArchiveAppStep(`快速人工生成：${uploadedSource?.name || uploadTableTitle.value || currentEvent.name}`, "生成待确认");
+    }, 1000);
+  } finally {
+    setQuickManualUploadBusy(false);
+    resumeTicketOcrPollingIfNeeded();
+  }
+}
+
 function hasAnyRowColorAnalysis(rowColorAnalyses) {
   return Boolean(rowColorAnalyses && typeof rowColorAnalyses === "object" && Object.keys(rowColorAnalyses).length > 0);
+}
+
+function getLastPpStructureAnalysisForPage(page) {
+  if (!page) return null;
+  const analyses = lastTicketOcrJobSnapshot?.ppStructureAnalyses || {};
+  return analyses[String(page)] || analyses[page] || null;
+}
+
+function getPpStructureMatchSummary(table) {
+  const matches = Array.isArray(table?.ppStructureTicketRowMatches) ? table.ppStructureTicketRowMatches : [];
+  if (!matches.length) return "";
+  const matched = matches.filter((item) => item?.matched);
+  const high = matched.filter((item) => item.confidence === "high").length;
+  const medium = matched.filter((item) => item.confidence === "medium").length;
+  const scores = matched.map((item) => Number(item.score || 0)).filter((score) => score > 0);
+  const minScore = scores.length ? Math.min(...scores).toFixed(2) : "0.00";
+  return `PP-Structure 已匹配 ${matched.length}/${matches.length} 条票行坐标，高置信 ${high} 条，中置信 ${medium} 条，最低分 ${minScore}`;
+}
+
+function getPpStructureMatchForTicket(table, rowIndex) {
+  const matches = Array.isArray(table?.ppStructureTicketRowMatches) ? table.ppStructureTicketRowMatches : [];
+  return matches.find((item) => Number(item?.ticketRowIndex) === Number(rowIndex)) || null;
+}
+
+function getPpStructureMatchText(table, rowIndex) {
+  const match = getPpStructureMatchForTicket(table, rowIndex);
+  if (!match) return "";
+  if (!match.matched) return `PP-Structure 未可靠匹配原图坐标${match.score ? `，最高分 ${Number(match.score).toFixed(2)}` : ""}`;
+  const color = normalizeRowColorLabel(match.color?.label || match.color?.rawLabel || "");
+  const score = Number(match.score || 0).toFixed(2);
+  const confidence = match.confidence === "high" ? "高置信" : match.confidence === "medium" ? "中置信" : "低置信";
+  return `PP-Structure ${confidence}匹配原图第 ${Number(match.ppRowIndex || 0) + 1} 行，分数 ${score}${color ? `，底色 ${color}` : ""}`;
 }
 
 function cloneParsedTableForPageMerge(table) {
@@ -10836,17 +13467,21 @@ function mergeParsedTablesByPdfPage(parsedTables = []) {
   return mergedTables;
 }
 
-function createUploadedTables(parsedTables, rowColorAnalyses = null) {
+function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {}) {
+  const skipRowColor = options.skipRowColor === true;
+  const quickManualMode = options.quickManualMode === true;
   const isPdf = uploadedSource.type === "application/pdf" || uploadedSource.name.toLowerCase().endsWith(".pdf");
   const uploadTables = isPdf ? mergeParsedTablesByPdfPage(parsedTables) : parsedTables;
   const count = uploadTables.length;
   const totalUploadRows = uploadTables.reduce((sum, table) => sum + (Array.isArray(table?.rows) ? table.rows.length : 0), 0);
   const useLightReviewFlags = totalUploadRows > 250 || count > 12;
-  const colorAnalyses = hasAnyRowColorAnalysis(rowColorAnalyses)
-    ? rowColorAnalyses
-    : isPdf
-      ? lastTicketOcrJobSnapshot?.rowColorAnalyses || {}
-      : {};
+  const colorAnalyses = skipRowColor
+    ? {}
+    : hasAnyRowColorAnalysis(rowColorAnalyses)
+      ? rowColorAnalyses
+      : isPdf
+        ? lastTicketOcrJobSnapshot?.rowColorAnalyses || {}
+        : {};
   return Array.from({ length: count }, (_, index) => {
     const parsedTable = uploadTables[index];
     const sourcePage = Number(parsedTable.sourcePage || 0) || index + 1;
@@ -10867,6 +13502,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
       originalColumns: Array.isArray(parsedTable.originalColumns) ? parsedTable.originalColumns : [...parsedTable.columns],
       originalRows: Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
       rows: parsedTable.rows,
+      quickManualMode,
       rowColorPageRowOffset: Math.max(0, Math.floor(Number(parsedTable.rowColorPageRowOffset || 0) || 0)),
       rowColorSourceIndexes: Array.isArray(parsedTable.rowColorSourceIndexes) ? [...parsedTable.rowColorSourceIndexes] : null,
     };
@@ -10874,9 +13510,40 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null) {
     ensurePendingTableSourceRowIndexes(table);
     if (isPdf) forceCanonicalOriginalDisplay(table);
     const colorAnalysis = colorAnalyses[String(sourcePage)] || colorAnalyses[sourcePage] || null;
-    if (colorAnalysis) {
+    const ppStructureAnalysis = skipRowColor ? null : getLastPpStructureAnalysisForPage(sourcePage);
+    let ppAlignedRowColorAnalysis = null;
+    if (ppStructureAnalysis) {
+      const matches = Array.isArray(ppStructureAnalysis.ticketRowMatches) ? ppStructureAnalysis.ticketRowMatches : [];
+      ppAlignedRowColorAnalysis = ppStructureAnalysis.ticketAlignedRowColorAnalysis || null;
+      table.ppStructureAnalysis = {
+        source: ppStructureAnalysis.source || "paddle_ppstructure",
+        tableCount: ppStructureAnalysis.tableCount || 0,
+        tables: Array.isArray(ppStructureAnalysis.tables) ? ppStructureAnalysis.tables : [],
+        rowColorAnalysis: ppStructureAnalysis.rowColorAnalysis || null,
+        ticketAlignedRowColorAnalysis: ppAlignedRowColorAnalysis,
+      };
+      table.ppStructureTicketRowMatches = matches;
+      table.ppStructureMessage = getPpStructureMatchSummary(table) || "PP-Structure 已返回表格坐标，等待票行匹配。";
+    }
+    const effectiveColorAnalysis =
+      colorAnalysis ||
+      (ppAlignedRowColorAnalysis?.reliable === true && ppAlignedRowColorAnalysis?.exactRowAligned === true ? ppAlignedRowColorAnalysis : null);
+    if (effectiveColorAnalysis) {
       const rowColorStart = Math.max(0, Math.floor(Number(table.rowColorPageRowOffset || 0) || 0));
-      applyOpenCvRowColorsToTable(table, colorAnalysis, rowColorStart);
+      applyOpenCvRowColorsToTable(table, effectiveColorAnalysis, rowColorStart);
+    }
+    if (quickManualMode) {
+      table.publishRows = {};
+      table.manualPublishRows = {};
+      table.manualSkipRows = {};
+      table.reviewReasons = ["快速人工通道：请按左侧原图逐行点上传/下架"];
+      table.needsManualReview = true;
+      table.quickManualReviewedRows = {};
+      table.rows.forEach((row, rowIndex) => {
+        const ticket = { table, row, index: rowIndex };
+        table.publishRows[rowIndex] = isCustomerPublishableTicket(ticket);
+      });
+      return markPendingTableReviewFlagsLightly(table);
     }
     if (useLightReviewFlags || (table.rows || []).length > 250) {
       return markPendingTableReviewFlagsLightly(table);
@@ -10904,8 +13571,6 @@ async function confirmSelectedPendingTable() {
     showToast("请先选择一张待确认表。", "error");
     return;
   }
-  if (table._rowColorRepairing) await waitForPendingTableRowColorRepair(table);
-  else if (shouldAutoRepairRowColors(table)) await repairPendingTableRowColors(table);
   const queueSnapshot = getCurrentPendingTables();
   const currentQueueIndex = queueSnapshot.findIndex((item) => item.id === table.id);
   const publishRows = [];
@@ -11123,6 +13788,58 @@ function clearCurrentPendingTables() {
   if (removed) saveAndArchiveAppStep(`清空待确认：${currentEvent.name}`, "清空待确认");
   renderUploadRecords();
   renderReviewPanel();
+}
+
+function clearGeneratedPendingTablesAndKeepOcr() {
+  const currentPendingCount = pendingTables.filter((table) => table.eventId === currentEvent.id).length;
+  if (!currentPendingCount) {
+    showToast("当前没有确认表需要清空，OCR 文本会继续保留。", "error");
+    return;
+  }
+  clearCurrentPendingTables();
+  const sourceName = uploadedSource?.name ? `，原文件 ${getSelectedFileDisplayName(uploadedSource.name)} 仍保留` : "";
+  setUploadStatus(`已清空 ${currentPendingCount} 张确认表；OCR 文本和上传原文件已保留${sourceName}，可以重新生成。`, "success");
+  saveAndArchiveAppStep(`清空确认表重来并保留 OCR：${currentEvent.name}`, "清空待确认");
+}
+
+function saveCurrentOcrTextManually() {
+  const text = String(uploadTableText.value || "");
+  if (!text.trim()) {
+    showToast("当前没有 OCR 文本可保存。", "error");
+    setUploadStatus("当前 OCR 文本为空；识别完成或粘贴文本后再保存。", "error");
+    return;
+  }
+  rememberCurrentOcrText({ status: lastTicketOcrJobSnapshot?.status || "manual_saved", manuallySaved: true });
+  saveAppState({ forceIndexedBackupReplace: true });
+  const count = text.length.toLocaleString("zh-CN");
+  setUploadStatus(`OCR 文本已保存 ${count} 字；刷新或下次打开后可继续生成确认表。`, "success");
+  updateLocalSaveStatus({ saved: true, backup: "已手动保存 OCR" });
+  showToast(`已保存 OCR 文本 ${count} 字。`, "success");
+}
+
+function clearSavedOcrText() {
+  const currentText = String(uploadTableText.value || "");
+  const snapshotText = String(lastTicketOcrJobSnapshot?.savedOcrText || lastTicketOcrJobSnapshot?.text || lastTicketOcrJobSnapshot?.partialText || "");
+  if (!currentText.trim() && !snapshotText.trim() && !activeTicketOcrJobId) {
+    showToast("当前没有 OCR 文本需要删除。", "error");
+    return;
+  }
+  const confirmed = window.confirm(
+    "确定删除 OCR 文本吗？\n\n上传的原文件和已经生成的确认表不会删除；删除后要重新识别 PDF 或手动粘贴 OCR 文本。",
+  );
+  if (!confirmed) return;
+  stopTicketOcrPolling();
+  autoPendingGenerationJobId = null;
+  uploadTableText.value = "";
+  lastTicketOcrJobSnapshot = null;
+  largeAppStateBackupRestorePending = false;
+  renderFailedOcrPanel(null);
+  pdfDetectionStatus.textContent = uploadedSource?.name
+    ? `OCR 文本已删除；原文件 ${getSelectedFileDisplayName(uploadedSource.name)} 仍保留，可重新识别或手动粘贴。`
+    : "OCR 文本已删除。";
+  setUploadStatus("已删除 OCR 文本；确认表和已发布票未改变。", "success");
+  saveAppState({ forceIndexedBackupReplace: true });
+  showToast("OCR 文本已删除。", "success");
 }
 
 function createQuickZones(labels) {
@@ -12643,6 +15360,9 @@ showManualReviewButton.addEventListener("click", () => {
   renderReviewPanel();
 });
 clearPendingButton.addEventListener("click", clearCurrentPendingTables);
+if (clearGeneratedPendingButton) clearGeneratedPendingButton.addEventListener("click", clearGeneratedPendingTablesAndKeepOcr);
+if (saveOcrTextButton) saveOcrTextButton.addEventListener("click", saveCurrentOcrTextManually);
+if (clearOcrTextButton) clearOcrTextButton.addEventListener("click", clearSavedOcrText);
 
 sourceFileInput.addEventListener("change", async () => {
   const file = sourceFileInput.files?.[0];
@@ -12656,6 +15376,10 @@ sourceFileInput.addEventListener("change", async () => {
     return;
   }
   stopTicketOcrPolling();
+  lastTicketOcrJobSnapshot = null;
+  autoPendingGenerationJobId = null;
+  largeAppStateBackupRestorePending = false;
+  renderFailedOcrPanel(null);
   const isSpreadsheet = isSpreadsheetFile(file);
   let dataUrl = isSpreadsheet ? await readFileAsDataUrl(file) : "";
   let stableUrl = "";
@@ -12700,6 +15424,8 @@ sourceFileInput.addEventListener("change", async () => {
       return;
     }
   }
+  const isPdf = uploadedSource.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  if (isPdf) uploadTableText.value = "";
   saveAndArchiveAppStep(`选择票源文件：${file.name}`, "上传文件");
   selectedSourceName.textContent = `已选择：${getSelectedFileDisplayName(file.name)}`;
   selectedSourceName.title = decodePossiblyEncodedFileName(file.name);
@@ -12707,8 +15433,6 @@ sourceFileInput.addEventListener("change", async () => {
   showToast("正在检测文件结构...", "loading");
   const detectedTables = await detectPdfPageCount(file);
   uploadedSource.detectedTables = detectedTables;
-  const isPdf = uploadedSource.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  if (isPdf) uploadTableText.value = "";
   pdfDetectionStatus.textContent =
     isPdf
       ? `已自动检测：PDF 约 ${detectedTables} 页，准备 OCR 识别票源表。`
@@ -12732,12 +15456,27 @@ ticketUploadForm.addEventListener("submit", (event) => {
   });
 });
 
+uploadTableTitle.addEventListener("input", () => scheduleAppStateSave(800));
+uploadTableText.addEventListener("input", () => {
+  rememberCurrentOcrText({ status: lastTicketOcrJobSnapshot?.status || "manual" });
+  scheduleAppStateSave(300);
+});
+
 publishUploadButton.addEventListener("click", () => {
   publishUpload().catch((error) => {
     setUploadStatus(error.message || "上传处理失败。", "error");
     showToast("上传处理失败。", "error");
   });
 });
+
+if (quickManualUploadButton) {
+  quickManualUploadButton.addEventListener("click", () => {
+    publishUploadQuickManual().catch((error) => {
+      setUploadStatus(error.message || "快速人工生成失败。", "error");
+      showToast("快速人工生成失败。", "error");
+    });
+  });
+}
 
 retryFailedOcrButton.addEventListener("click", async () => {
   const jobId = lastTicketOcrJobSnapshot?.id || activeTicketOcrJobId;
@@ -12839,6 +15578,52 @@ uploadRecords.addEventListener("keydown", (event) => {
 });
 
 reviewLayout.addEventListener("click", (event) => {
+  const quickPublishButton = event.target.closest("[data-quick-row-publish]");
+  if (quickPublishButton) {
+    const table = getSelectedPendingTable();
+    setQuickManualRowPublish(table, Number(quickPublishButton.dataset.quickRowPublish), quickPublishButton.dataset.publishValue === "true");
+    return;
+  }
+  const quickSubmitPageButton = event.target.closest("[data-quick-submit-page]");
+  if (quickSubmitPageButton) {
+    confirmQuickManualCurrentTable();
+    return;
+  }
+  const quickSubmitAllButton = event.target.closest("[data-quick-submit-all]");
+  if (quickSubmitAllButton) {
+    confirmAllQuickManualTables();
+    return;
+  }
+  const quickBulkSkipButton = event.target.closest("[data-quick-mark-all-skip]");
+  if (quickBulkSkipButton) {
+    markAllQuickManualRows(getSelectedPendingTable(), false);
+    return;
+  }
+  const quickBulkPublishButton = event.target.closest("[data-quick-mark-all-publish]");
+  if (quickBulkPublishButton) {
+    markAllQuickManualRows(getSelectedPendingTable(), true);
+    return;
+  }
+  const quickInvertButton = event.target.closest("[data-quick-invert-selection]");
+  if (quickInvertButton) {
+    invertQuickManualRows(getSelectedPendingTable());
+    return;
+  }
+  const cacheReviewPageNextButton = event.target.closest("[data-cache-review-page-next]");
+  if (cacheReviewPageNextButton) {
+    saveCurrentReviewChoices({ advance: true });
+    return;
+  }
+  const cacheReviewPageButton = event.target.closest("[data-cache-review-page]");
+  if (cacheReviewPageButton) {
+    saveCurrentReviewChoices();
+    return;
+  }
+  const cacheAllReviewChoicesButton = event.target.closest("[data-cache-all-review-choices]");
+  if (cacheAllReviewChoicesButton) {
+    saveAllReviewChoices();
+    return;
+  }
   const navButton = event.target.closest("[data-review-table-nav]");
   if (navButton) {
     selectAdjacentPendingTable(navButton.dataset.reviewTableNav === "prev" ? -1 : 1);
@@ -12846,7 +15631,19 @@ reviewLayout.addEventListener("click", (event) => {
   }
   const bulkSkipButton = event.target.closest("[data-mark-all-skip-draft]");
   if (bulkSkipButton) {
-    markAllReviewRowsSkipDraft(getSelectedPendingTable());
+    const table = getSelectedPendingTable();
+    markAllReviewRowsSkipDraft(table);
+    return;
+  }
+  const bulkPublishButton = event.target.closest("[data-mark-all-publish-draft]");
+  if (bulkPublishButton) {
+    const table = getSelectedPendingTable();
+    markAllReviewRowsPublishDraft(table);
+    return;
+  }
+  const toggleQuickCheckButton = event.target.closest("[data-toggle-quick-check-table]");
+  if (toggleQuickCheckButton) {
+    toggleQuickCheckTable(getSelectedPendingTable());
     return;
   }
   const toggleSkippedButton = event.target.closest("[data-toggle-skipped-review]");
@@ -12941,6 +15738,129 @@ reviewLayout.addEventListener("click", (event) => {
 
 confirmReviewButton.addEventListener("click", confirmSelectedPendingTable);
 
+if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
+  window.__ticketAppDebug = {
+    applyRowActionGeometryToTable,
+    getSourceRowActionOverlays,
+    getRowActionOverlayBox,
+    buildInterpolatedRowActionBoxes,
+  };
+  runWhenPageIdle(() => {
+    const table = {
+      quickManualMode: true,
+      rows: Array.from({ length: 34 }, () => ["11月6日", "内场普票", "are", "42x", "2700"]),
+      columns: ["日期", "票面", "区域", "排", "售价"],
+      publishRows: {},
+      manualPublishRows: {},
+      manualSkipRows: {},
+    };
+    const analysis = {
+      source: "opencv",
+      imageWidth: 1241,
+      imageHeight: 2008,
+      rows: [
+        { label: "红底", y1: 231, y2: 246, x1: 33, x2: 1206 },
+        { label: "白底", y1: 924, y2: 939, x1: 49, x2: 1191 },
+      ],
+    };
+    const applied = applyRowActionGeometryToTable(table, analysis);
+    const overlays = getSourceRowActionOverlays(table);
+    document.documentElement.dataset.rowActionSelfTest = JSON.stringify({
+      applied,
+      rows: table.rowColorRows?.length || 0,
+      overlays: overlays.length,
+      source: table.rowColorSource || "",
+      firstTop: overlays[0]?.topPct || 0,
+      lastTop: overlays[overlays.length - 1]?.topPct || 0,
+    });
+  }, 200);
+  runWhenPageIdle(() => {
+    const debugParams = new URLSearchParams(window.location.search);
+    if (!debugParams.has("debugQuickManualOverlay")) return;
+    if (debugParams.has("resetDebugState")) {
+      pendingTables.splice(0, pendingTables.length);
+    }
+    const sourceFileName = "EXO-09-10-13_17.pdf";
+    currentEvent = events.find((event) => event.id === "exo-encore") || currentEvent;
+    const rows = Array.from({ length: 34 }, (_, index) => {
+      const date = index < 22 ? "11月6日" : "11月8日";
+      const rowName = index < 2 ? "41x" : index < 22 ? "42x" : "44x";
+      const price = index < 22 ? "2700" : "2800";
+      return [date, "内场普票", "are", rowName, "", price];
+    });
+    const table = updatePendingTableReviewFlags({
+      id: `debug-quick-overlay-${Date.now()}`,
+      title: "EXO安可合集（标色已售）09-10 13_17.pdf · PDF 第 1 页",
+      originalImage: "uploads/1789284363740-5e1xd4-EXO-09-10-13_17.pdf",
+      originalType: "application/pdf",
+      sourceFileName,
+      sourceName: sourceFileName,
+      sourcePage: 1,
+      sourcePart: 1,
+      eventId: currentEvent.id,
+      columns: ["日期", "票面", "区域", "排", "备注", "售价"],
+      originalColumns: ["日期", "票面", "区域", "排", "备注", "售价"],
+      rows,
+      originalRows: cloneRows(rows),
+      quickManualMode: true,
+      publishRows: {},
+      manualPublishRows: {},
+      manualSkipRows: {},
+      quickManualReviewedRows: {},
+      needsManualReview: true,
+      publishDecisionLogicVersion: PUBLISH_DECISION_LOGIC_VERSION,
+      reviewFlagsVersion: REVIEW_FLAGS_VERSION,
+      _columnNormalizationVersion: 0,
+      rowActionGeometryVersion: 0,
+      quickRowActionGeometryTried: false,
+      quickRowActionGeometryTriedVersion: 0,
+    });
+    window.__ticketAppDebug.lastQuickOverlayFixture = {
+      id: table.id,
+      rows: table.rows.length,
+      columns: table.columns.length,
+      sourcePage: table.sourcePage,
+    };
+    const brokenColumnFixture = {
+      columns: ["日期", "票面", "区域", "座位号", "备注", "售价", "排"],
+      rows: [
+        ["11月6日", "内场普票", "are", "41x", "2700", "", ""],
+        ["11月6日", "内场普票", "are", "42x", "2700", "", ""],
+      ],
+      originalColumns: ["日期", "票面", "区域", "座位号", "备注", "售价", "排"],
+      originalRows: [
+        ["11月6日", "内场普票", "are", "41x", "2700", "", ""],
+        ["11月6日", "内场普票", "are", "42x", "2700", "", ""],
+      ],
+    };
+    normalizePendingTableColumns(brokenColumnFixture);
+    const displayColumns = getQuickManualDisplayColumns(brokenColumnFixture);
+    document.documentElement.dataset.columnLockSelfTest = JSON.stringify({
+      columns: brokenColumnFixture.columns,
+      firstRow: brokenColumnFixture.rows[0],
+      displayColumns,
+      displayFirstRow: getQuickManualDisplayRowCells(brokenColumnFixture, brokenColumnFixture.rows[0], 0, displayColumns),
+      priceIndex: findSalePriceColumnIndex(brokenColumnFixture.columns),
+      rowIndex: findSeatRowColumnIndexes(brokenColumnFixture.columns)[0] ?? -1,
+      quantityIndex: findQuantityColumnIndex(brokenColumnFixture.columns),
+      price: getTicketSalePriceValue({ table: brokenColumnFixture, row: brokenColumnFixture.rows[0], index: 0 }),
+      quantity: getTicketQuantityValue({ table: brokenColumnFixture, row: brokenColumnFixture.rows[0], index: 0 }),
+    });
+    pendingTables.unshift(table);
+    selectedPendingTableId = table.id;
+    manualReviewOnly = false;
+    render();
+    renderAdminEvent();
+    renderUploadRecords({ save: false, normalize: false });
+    renderReviewPanel(undefined, { normalize: false });
+    runWhenPageIdle(() => {
+      selectedPendingTableId = table.id;
+      renderUploadRecords({ save: false, normalize: false });
+      renderReviewPanel(undefined, { normalize: false });
+    }, 1000);
+  }, 500);
+}
+
 window.addEventListener("storage", (event) => {
   if (event.key === OPERATION_ARCHIVE_KEY) {
     loadOperationArchives();
@@ -12958,6 +15878,12 @@ window.addEventListener("storage", (event) => {
   renderUploadRecords();
   renderReviewPanel();
   renderPublishedTables();
+});
+
+window.addEventListener("pagehide", flushAppStateSaveNow);
+window.addEventListener("beforeunload", flushAppStateSaveNow);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushAppStateSaveNow();
 });
 
 renderRuntimeBanner();
@@ -12988,5 +15914,6 @@ window.setTimeout(() => runWhenDocumentVisible(() => {
   renderPublishedTables();
   renderOperationArchives();
   setMode(IS_ADMIN_PAGE ? "admin" : "customer");
+  resumeRestoredTicketOcrJobIfNeeded();
   runWhenPageIdle(() => renderReviewPanel());
 }), 0);

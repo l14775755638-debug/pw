@@ -514,10 +514,11 @@ def detect_text_row_intervals(image, expected_rows):
         window_gaps = [window_centers[index + 1] - window_centers[index] for index in range(len(window_centers) - 1)]
         large_gap_count = sum(1 for gap in window_gaps if gap > max_reasonable_gap)
         regularity = sum(abs(gap - median_gap) for gap in window_gaps)
-        # Prefer the earliest plausible data block after the header. The OCR
-        # text rows are in visual order, so this maps row 0 to the first real
-        # ticket row instead of a later matching-looking fragment.
-        score = large_gap_count * 10000 + regularity + start * median_gap * 0.25
+        # OCR rows do not include visual title/header text. When projection
+        # finds more text runs than OCR rows, the extra runs are normally before
+        # the ticket body, so prefer the deeper plausible window instead of
+        # mapping header text onto row 1.
+        score = large_gap_count * 10000 + regularity - start * median_gap * 0.25
         if best_score is None or score < best_score:
             best_score = score
             best_start = start
@@ -582,9 +583,91 @@ def detect_text_row_intervals(image, expected_rows):
             repaired_intervals.append(item)
         if split_count and len(repaired_intervals) >= expected_rows:
             intervals = repaired_intervals[:expected_rows]
-            selection_mode = "text_projection_split_exact"
+            selection_mode = "text_projection_split_review"
 
     return intervals, selection_mode
+
+
+def detect_row_action_text_rows(image, expected_rows):
+    """Return text-centered ticket row hints for manual overlay buttons.
+
+    This is intentionally more permissive than the color auto-decision path:
+    these rows are only used to place human review buttons beside the original
+    image, never to auto publish or downlist tickets.
+    """
+    if expected_rows <= 0:
+        return []
+    height, width = image.shape[:2]
+    if height < 80 or width < 120:
+        return []
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1].astype(np.int16)
+    value = hsv[:, :, 2].astype(np.int16)
+    dark = (value < 90) | ((value < 135) & (saturation < 110))
+    usable = np.zeros_like(dark, dtype=bool)
+    usable[:, int(width * 0.015) : int(width * 0.145)] = dark[:, int(width * 0.015) : int(width * 0.145)]
+    usable[:, int(width * 0.29) : int(width * 0.985)] = dark[:, int(width * 0.29) : int(width * 0.985)]
+
+    projection = np.count_nonzero(usable, axis=1)
+    threshold = max(8, int(width * 0.004))
+    ys = np.where(projection >= threshold)[0]
+    runs = []
+    for run in merge_runs(ys, gap=3):
+        y1, y2 = int(run[0]), int(run[1]) + 1
+        run_height = y2 - y1
+        if run_height < 6 or run_height > max(52, int(height * 0.075)):
+            continue
+        dark_count = int(np.sum(projection[y1:y2]))
+        if dark_count < max(35, int(width * 0.018)):
+            continue
+        center = int(round((y1 + y2 - 1) / 2))
+        if center <= height * 0.095:
+            continue
+        runs.append(
+            {
+                "y1": y1,
+                "y2": y2,
+                "height": run_height,
+                "textCenter": center,
+                "darkCount": dark_count,
+                "peak": int(np.max(projection[y1:y2])),
+            }
+        )
+    if not runs:
+        return []
+
+    # Drop obvious title/header text by taking the longest regular suffix.
+    centers = [item["textCenter"] for item in runs]
+    gaps = [centers[index + 1] - centers[index] for index in range(len(centers) - 1)]
+    usable_gaps = [gap for gap in gaps if 16 <= gap <= max(82, int(height * 0.048))]
+    median_gap = float(np.median(usable_gaps)) if usable_gaps else 0
+    if median_gap <= 0:
+        return []
+
+    best_start = 0
+    best_score = None
+    for start in range(len(runs)):
+        suffix = runs[start:]
+        if len(suffix) < max(4, min(expected_rows - 1, expected_rows)):
+            continue
+        suffix_centers = [item["textCenter"] for item in suffix]
+        suffix_gaps = [suffix_centers[index + 1] - suffix_centers[index] for index in range(len(suffix_centers) - 1)]
+        regular_gaps = [gap for gap in suffix_gaps if 16 <= gap <= max(82, int(height * 0.048))]
+        if len(regular_gaps) < max(3, len(suffix_gaps) - 1):
+            continue
+        regularity = sum(abs(gap - median_gap) for gap in regular_gaps) / max(1, len(regular_gaps))
+        count_delta = abs(len(suffix) - expected_rows)
+        score = count_delta * 120 + regularity - start * 1.8
+        if best_score is None or score < best_score:
+            best_score = score
+            best_start = start
+
+    selected = runs[best_start:]
+    if len(selected) > expected_rows:
+        selected = selected[:expected_rows]
+    return selected
 
 
 def detect_dense_grid_row_intervals(image, expected_rows):
@@ -884,7 +967,7 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
     nonwhite_cells = []
     unknown_cells = 0
     for result in cell_results:
-        label = result.get("label") or result.get("rawLabel") or ""
+        label = result.get("label") or ""
         colored_ratio = float(result.get("coloredRatio", 0) or 0)
         white_ratio = float(result.get("whiteRatio", 0) or 0)
         confidence = float(result.get("confidence", 0) or 0)
@@ -894,9 +977,6 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
             white_cells += 1
         elif label and label not in (COLOR_NAMES["gray"], COLOR_NAMES["black"]) and colored_ratio >= 0.22 and confidence >= 0.32:
             nonwhite_cells.append(label)
-        elif colored_ratio >= 0.26 and coverage_ratio >= 0.2 and colored_ratio >= white_ratio + 0.08:
-            raw = result.get("rawLabel") or label or "非白底"
-            nonwhite_cells.append(raw)
         else:
             unknown_cells += 1
 
@@ -1027,12 +1107,56 @@ def classify_interval(image, interval):
 
 
 def color_family(row):
-    label = row.get("label") or row.get("rawLabel") or ""
+    label = row.get("label") or ""
     if label == COLOR_NAMES["white"] or label == COLOR_NAMES["gray"]:
         return "neutral"
     if label:
         return label
     return "unknown"
+
+
+def is_non_ticket_separator_row(row, median_height):
+    label = row.get("label") or row.get("rawLabel") or ""
+    if label in ("", COLOR_NAMES["white"], COLOR_NAMES["gray"], COLOR_NAMES["black"]):
+        return False
+    height = int(row.get("height", 0) or 0)
+    dark_density = float(row.get("darkDensity", 0) or 0)
+    vertical_lines = int(row.get("verticalLines", 0) or 0)
+    cell_count = int(row.get("cellCount", 0) or 0)
+    colored_cells = int(row.get("coloredCellCount", 0) or 0)
+    # Some sheets use tall full-width colored separator bands between ticket
+    # rows. They can pass the row-count check, but they have almost no text or
+    # cell structure. Treat them as non-ticket rows so their color is never
+    # applied to the neighboring OCR ticket.
+    if (
+        dark_density < 0.012
+        and vertical_lines <= 3
+        and cell_count >= 3
+        and colored_cells >= max(3, int(cell_count * 0.8))
+    ):
+        return True
+    if height > max(16, int(median_height * 0.72)):
+        return False
+    if dark_density > 0.035:
+        return False
+    if vertical_lines > 4:
+        return False
+    return colored_cells >= max(3, int(cell_count * 0.8))
+
+
+def remove_non_ticket_separator_rows(rows, expected_rows):
+    if not rows or expected_rows <= 0:
+        return rows, []
+    heights = [int(row.get("height", 0) or 0) for row in rows if int(row.get("height", 0) or 0) > 0]
+    median_height = float(np.median(heights)) if heights else 18
+    removed = []
+    kept = []
+    for index, row in enumerate(rows):
+        if is_non_ticket_separator_row(row, median_height):
+            removed.append(index)
+        else:
+            kept.append(row)
+    return kept, removed
 
 
 def merge_classified_rows(rows):
@@ -1200,6 +1324,7 @@ def analyze(image_path, expected_rows=0):
     line_selected, line_selection_mode = choose_data_intervals(intervals, expected_rows)
     dense_selected, dense_selection_mode = detect_dense_grid_row_intervals(image, expected_rows)
     text_selected, text_selection_mode = detect_text_row_intervals(image, expected_rows)
+    row_action_text_rows = detect_row_action_text_rows(image, expected_rows)
     dense_exact = bool(dense_selected and expected_rows > 0 and len(dense_selected) == expected_rows)
     line_exact = bool(
         line_selected
@@ -1220,6 +1345,9 @@ def analyze(image_path, expected_rows=0):
         selected, selection_mode = line_selected, line_selection_mode
     selected = sorted(selected, key=lambda item: (int(item.get("y1", 0) or 0), int(item.get("y2", 0) or 0)))
     rows = [classify_interval(image, interval) for interval in selected]
+    rows, removed_separator_rows = remove_non_ticket_separator_rows(rows, expected_rows)
+    if removed_separator_rows and not selection_mode.endswith("_filtered"):
+        selection_mode = f"{selection_mode}_filtered"
     compact_selected, compact_mode = detect_compact_colored_table_intervals(image, expected_rows)
     if compact_selected:
         compact_rows = [classify_interval(image, interval) for interval in compact_selected]
@@ -1247,11 +1375,23 @@ def analyze(image_path, expected_rows=0):
         max_row_gap = int(max(gaps)) if gaps else 0
         contiguous = max_row_gap <= max(10, median_height * 1.65)
     exact_rows = expected_rows <= 0 or len(rows) == expected_rows
+    if (
+        selection_mode == "text_projection_prefix"
+        and expected_rows > 0
+        and exact_rows
+        and contiguous
+        and rows
+        and all(float(row.get("confidence", 0) or 0) >= 0.86 for row in rows)
+        and all((row.get("label") or row.get("rawLabel")) for row in rows)
+        and all(int(row.get("cellCount", 0) or 0) >= 3 for row in rows)
+    ):
+        selection_mode = "text_projection_confident_exact"
     exact_row_aligned = bool(
         exact_rows
         and (
             expected_rows <= 0
             or selection_mode.endswith("_exact")
+            or selection_mode.endswith("_exact_filtered")
             or selection_mode == "text_projection_exact"
         )
     )
@@ -1280,17 +1420,17 @@ def analyze(image_path, expected_rows=0):
         "global_header_1_filtered",
         "global_header_2_filtered",
         "text_projection_exact",
+        "text_projection_confident_exact",
         "first_group_drop_0",
         "first_group_drop_1",
         "first_group_drop_2",
         "first_group_drop_0_filtered",
         "first_group_drop_1_filtered",
         "first_group_drop_2_filtered",
-        "text_projection_split_exact",
         "compact_color_anchor_exact",
         "dense_grid_exact",
     }
-    if selection_mode.startswith("group_") and selection_mode.endswith("_exact"):
+    if selection_mode.startswith("group_") and (selection_mode.endswith("_exact") or selection_mode.endswith("_exact_filtered")):
         safe_selection_modes.add(selection_mode)
     low_confidence_rows = [
         index
@@ -1307,6 +1447,8 @@ def analyze(image_path, expected_rows=0):
     if low_confidence_rows:
         unreliable_reasons.append("low_confidence_rows")
     warning_reasons = []
+    if removed_separator_rows:
+        warning_reasons.append("non_ticket_separator_rows_removed")
     if not contiguous:
         warning_reasons.append("row_gap")
     reliable = bool(rows) and exact_row_aligned and selection_mode in safe_selection_modes and not low_confidence_rows
@@ -1314,6 +1456,8 @@ def analyze(image_path, expected_rows=0):
         row["index"] = index
     return {
         "source": "opencv",
+        "imageWidth": int(image.shape[1]),
+        "imageHeight": int(image.shape[0]),
         "expectedRows": int(expected_rows or 0),
         "detectedRows": len(rows),
         "selectionMode": selection_mode,
@@ -1324,7 +1468,9 @@ def analyze(image_path, expected_rows=0):
         "lowConfidenceRows": low_confidence_rows,
         "unreliableReasons": unreliable_reasons,
         "warningReasons": warning_reasons,
+        "removedSeparatorRows": removed_separator_rows,
         "labels": unique_labels,
+        "rowActionTextRows": row_action_text_rows,
         "rows": rows,
     }
 

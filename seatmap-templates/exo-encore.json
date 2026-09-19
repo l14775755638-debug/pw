@@ -1,0 +1,1514 @@
+{
+  "id": "builtin-exo-encore",
+  "name": "EXO 安可座位图模板",
+  "fileName": "exo-encore-seatmap.jpg",
+  "eventName": "EXO 安可",
+  "seatmapImage": "assets/exo-encore-seatmap.jpg",
+  "seatmapFileName": "exo-encore-seatmap.jpg",
+  "size": {
+    "width": 980,
+    "height": 854
+  },
+  "fingerprint": "exo-encore-980x854-v1",
+  "keywords": [
+    "exo",
+    "安可",
+    "encore",
+    "seatmap",
+    "座位图",
+    "vip",
+    "general"
+  ],
+  "zones": [
+    {
+      "id": "we-general",
+      "label": "we · General Seats",
+      "aliases": [
+        "we",
+        "we · General Seats",
+        "we-general",
+        "General Seats",
+        "GENERAL",
+        "we区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          263,
+          230
+        ],
+        [
+          416,
+          231
+        ],
+        [
+          433,
+          202
+        ],
+        [
+          271,
+          200
+        ]
+      ]
+    },
+    {
+      "id": "we-vip",
+      "label": "we · VIP Seats",
+      "aliases": [
+        "we",
+        "we · VIP Seats",
+        "we-vip",
+        "VIP Seats",
+        "VIP",
+        "we区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          273,
+          193
+        ],
+        [
+          431,
+          198
+        ],
+        [
+          443,
+          178
+        ],
+        [
+          430,
+          168
+        ],
+        [
+          286,
+          168
+        ]
+      ]
+    },
+    {
+      "id": "are-general",
+      "label": "are · General Seats",
+      "aliases": [
+        "are",
+        "are · General Seats",
+        "are-general",
+        "General Seats",
+        "GENERAL",
+        "are区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          709,
+          229
+        ],
+        [
+          699,
+          199
+        ],
+        [
+          538,
+          203
+        ],
+        [
+          555,
+          231
+        ]
+      ]
+    },
+    {
+      "id": "are-vip",
+      "label": "are · VIP Seats",
+      "aliases": [
+        "are",
+        "are · VIP Seats",
+        "are-vip",
+        "VIP Seats",
+        "VIP",
+        "are区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          527,
+          181
+        ],
+        [
+          539,
+          198
+        ],
+        [
+          697,
+          195
+        ],
+        [
+          687,
+          168
+        ],
+        [
+          542,
+          168
+        ]
+      ]
+    },
+    {
+      "id": "one-general",
+      "label": "one · General Seats",
+      "aliases": [
+        "one",
+        "one · General Seats",
+        "one-general",
+        "General Seats",
+        "GENERAL",
+        "one区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          451,
+          413
+        ],
+        [
+          449,
+          347
+        ],
+        [
+          313,
+          351
+        ],
+        [
+          362,
+          414
+        ]
+      ]
+    },
+    {
+      "id": "one-vip",
+      "label": "one · VIP Seats",
+      "aliases": [
+        "one",
+        "one · VIP Seats",
+        "one-vip",
+        "VIP Seats",
+        "VIP",
+        "one区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          297,
+          305
+        ],
+        [
+          313,
+          346
+        ],
+        [
+          447,
+          343
+        ],
+        [
+          417,
+          291
+        ],
+        [
+          310,
+          291
+        ]
+      ]
+    },
+    {
+      "id": "exo-general",
+      "label": "EXO · General Seats",
+      "aliases": [
+        "EXO",
+        "EXO · General Seats",
+        "exo-general",
+        "General Seats",
+        "GENERAL",
+        "EXO区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          520,
+          412
+        ],
+        [
+          610,
+          414
+        ],
+        [
+          659,
+          350
+        ],
+        [
+          574,
+          356
+        ],
+        [
+          570,
+          349
+        ],
+        [
+          522,
+          347
+        ]
+      ]
+    },
+    {
+      "id": "exo-vip",
+      "label": "EXO · VIP Seats",
+      "aliases": [
+        "EXO",
+        "EXO · VIP Seats",
+        "exo-vip",
+        "VIP Seats",
+        "VIP",
+        "EXO区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          524,
+          342
+        ],
+        [
+          655,
+          346
+        ],
+        [
+          675,
+          305
+        ],
+        [
+          662,
+          291
+        ],
+        [
+          560,
+          291
+        ]
+      ]
+    },
+    {
+      "id": "1-general",
+      "label": "1",
+      "aliases": [
+        "1",
+        "1-general",
+        "General Seats",
+        "GENERAL",
+        "1区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          793,
+          130
+        ],
+        [
+          719,
+          164
+        ],
+        [
+          735,
+          214
+        ],
+        [
+          815,
+          196
+        ]
+      ]
+    },
+    {
+      "id": "2-general",
+      "label": "2",
+      "aliases": [
+        "2",
+        "2-general",
+        "General Seats",
+        "GENERAL",
+        "2区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          819,
+          211
+        ],
+        [
+          740,
+          222
+        ],
+        [
+          739,
+          273
+        ],
+        [
+          822,
+          280
+        ]
+      ]
+    },
+    {
+      "id": "3-general",
+      "label": "3",
+      "aliases": [
+        "3",
+        "3-general",
+        "General Seats",
+        "GENERAL",
+        "3区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          740,
+          289
+        ],
+        [
+          731,
+          335
+        ],
+        [
+          735,
+          341
+        ],
+        [
+          797,
+          361
+        ],
+        [
+          813,
+          358
+        ],
+        [
+          823,
+          313
+        ],
+        [
+          821,
+          292
+        ]
+      ]
+    },
+    {
+      "id": "4-general",
+      "label": "4",
+      "aliases": [
+        "4",
+        "4-general",
+        "General Seats",
+        "GENERAL",
+        "4区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          727,
+          350
+        ],
+        [
+          709,
+          392
+        ],
+        [
+          783,
+          431
+        ],
+        [
+          806,
+          374
+        ]
+      ]
+    },
+    {
+      "id": "5-vip",
+      "label": "5",
+      "aliases": [
+        "5",
+        "5-vip",
+        "VIP Seats",
+        "VIP",
+        "5区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          672,
+          445
+        ],
+        [
+          640,
+          474
+        ],
+        [
+          681,
+          535
+        ],
+        [
+          690,
+          538
+        ],
+        [
+          730,
+          503
+        ],
+        [
+          730,
+          495
+        ]
+      ]
+    },
+    {
+      "id": "6-vip",
+      "label": "6",
+      "aliases": [
+        "6",
+        "6-vip",
+        "VIP Seats",
+        "VIP",
+        "6区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          631,
+          482
+        ],
+        [
+          587,
+          503
+        ],
+        [
+          612,
+          573
+        ],
+        [
+          619,
+          578
+        ],
+        [
+          674,
+          548
+        ]
+      ]
+    },
+    {
+      "id": "7-vip",
+      "label": "7",
+      "aliases": [
+        "7",
+        "7-vip",
+        "VIP Seats",
+        "VIP",
+        "7区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          574,
+          508
+        ],
+        [
+          525,
+          521
+        ],
+        [
+          538,
+          600
+        ],
+        [
+          602,
+          584
+        ]
+      ]
+    },
+    {
+      "id": "8-vip",
+      "label": "8",
+      "aliases": [
+        "8",
+        "8-vip",
+        "VIP Seats",
+        "VIP",
+        "8区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          463,
+          522
+        ],
+        [
+          452,
+          599
+        ],
+        [
+          482,
+          610
+        ],
+        [
+          450,
+          617
+        ],
+        [
+          487,
+          631
+        ],
+        [
+          520,
+          623
+        ],
+        [
+          521,
+          613
+        ],
+        [
+          492,
+          610
+        ],
+        [
+          522,
+          599
+        ],
+        [
+          513,
+          524
+        ]
+      ]
+    },
+    {
+      "id": "9-vip",
+      "label": "9",
+      "aliases": [
+        "9",
+        "9-vip",
+        "VIP Seats",
+        "VIP",
+        "9区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          402,
+          510
+        ],
+        [
+          374,
+          577
+        ],
+        [
+          401,
+          598
+        ],
+        [
+          374,
+          595
+        ],
+        [
+          369,
+          603
+        ],
+        [
+          398,
+          618
+        ],
+        [
+          433,
+          620
+        ],
+        [
+          434,
+          610
+        ],
+        [
+          409,
+          599
+        ],
+        [
+          441,
+          598
+        ],
+        [
+          450,
+          522
+        ]
+      ]
+    },
+    {
+      "id": "10-vip",
+      "label": "10",
+      "aliases": [
+        "10",
+        "10-vip",
+        "VIP Seats",
+        "VIP",
+        "10区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          345,
+          482
+        ],
+        [
+          303,
+          540
+        ],
+        [
+          303,
+          549
+        ],
+        [
+          360,
+          578
+        ],
+        [
+          389,
+          503
+        ]
+      ]
+    },
+    {
+      "id": "11-vip",
+      "label": "11",
+      "aliases": [
+        "11",
+        "11-vip",
+        "VIP Seats",
+        "VIP",
+        "11区"
+      ],
+      "tier": "VIP",
+      "polygon": [
+        [
+          302,
+          441
+        ],
+        [
+          241,
+          489
+        ],
+        [
+          246,
+          504
+        ],
+        [
+          286,
+          538
+        ],
+        [
+          295,
+          534
+        ],
+        [
+          335,
+          477
+        ]
+      ]
+    },
+    {
+      "id": "12-general",
+      "label": "12",
+      "aliases": [
+        "12",
+        "12-general",
+        "General Seats",
+        "GENERAL",
+        "12区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          249,
+          352
+        ],
+        [
+          170,
+          373
+        ],
+        [
+          175,
+          398
+        ],
+        [
+          194,
+          433
+        ],
+        [
+          265,
+          393
+        ]
+      ]
+    },
+    {
+      "id": "13-general",
+      "label": "13",
+      "aliases": [
+        "13",
+        "13-general",
+        "General Seats",
+        "GENERAL",
+        "13区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          234,
+          288
+        ],
+        [
+          153,
+          294
+        ],
+        [
+          166,
+          362
+        ],
+        [
+          243,
+          338
+        ]
+      ]
+    },
+    {
+      "id": "14-general",
+      "label": "14",
+      "aliases": [
+        "14",
+        "14-general",
+        "General Seats",
+        "GENERAL",
+        "14区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          156,
+          211
+        ],
+        [
+          154,
+          281
+        ],
+        [
+          235,
+          275
+        ],
+        [
+          239,
+          229
+        ],
+        [
+          234,
+          223
+        ]
+      ]
+    },
+    {
+      "id": "15-general",
+      "label": "15",
+      "aliases": [
+        "15",
+        "15-general",
+        "General Seats",
+        "GENERAL",
+        "15区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          182,
+          130
+        ],
+        [
+          160,
+          196
+        ],
+        [
+          240,
+          214
+        ],
+        [
+          256,
+          165
+        ]
+      ]
+    },
+    {
+      "id": "24-general",
+      "label": "24",
+      "aliases": [
+        "24",
+        "24-general",
+        "General Seats",
+        "GENERAL",
+        "24区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          926,
+          96
+        ],
+        [
+          830,
+          134
+        ],
+        [
+          846,
+          192
+        ],
+        [
+          948,
+          172
+        ]
+      ]
+    },
+    {
+      "id": "25-general",
+      "label": "25",
+      "aliases": [
+        "25",
+        "25-general",
+        "General Seats",
+        "GENERAL",
+        "25区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          951,
+          185
+        ],
+        [
+          850,
+          204
+        ],
+        [
+          855,
+          263
+        ],
+        [
+          957,
+          263
+        ]
+      ]
+    },
+    {
+      "id": "26-general",
+      "label": "26",
+      "aliases": [
+        "26",
+        "26-general",
+        "General Seats",
+        "GENERAL",
+        "26区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          854,
+          278
+        ],
+        [
+          850,
+          337
+        ],
+        [
+          952,
+          353
+        ],
+        [
+          961,
+          290
+        ],
+        [
+          956,
+          275
+        ]
+      ]
+    },
+    {
+      "id": "27-general",
+      "label": "27",
+      "aliases": [
+        "27",
+        "27-general",
+        "General Seats",
+        "GENERAL",
+        "27区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          847,
+          348
+        ],
+        [
+          830,
+          406
+        ],
+        [
+          926,
+          444
+        ],
+        [
+          948,
+          367
+        ]
+      ]
+    },
+    {
+      "id": "28-general",
+      "label": "28",
+      "aliases": [
+        "28",
+        "28-general",
+        "General Seats",
+        "GENERAL",
+        "28区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          824,
+          417
+        ],
+        [
+          798,
+          470
+        ],
+        [
+          883,
+          526
+        ],
+        [
+          919,
+          456
+        ]
+      ]
+    },
+    {
+      "id": "29-general",
+      "label": "29",
+      "aliases": [
+        "29",
+        "29-general",
+        "General Seats",
+        "GENERAL",
+        "29区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          789,
+          480
+        ],
+        [
+          755,
+          528
+        ],
+        [
+          828,
+          597
+        ],
+        [
+          875,
+          536
+        ]
+      ]
+    },
+    {
+      "id": "30-general",
+      "label": "30",
+      "aliases": [
+        "30",
+        "30-general",
+        "General Seats",
+        "GENERAL",
+        "30区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          742,
+          533
+        ],
+        [
+          699,
+          575
+        ],
+        [
+          752,
+          653
+        ],
+        [
+          761,
+          655
+        ],
+        [
+          818,
+          604
+        ]
+      ]
+    },
+    {
+      "id": "31-general",
+      "label": "31",
+      "aliases": [
+        "31",
+        "31-general",
+        "General Seats",
+        "GENERAL",
+        "31区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          689,
+          578
+        ],
+        [
+          635,
+          611
+        ],
+        [
+          677,
+          701
+        ],
+        [
+          745,
+          665
+        ]
+      ]
+    },
+    {
+      "id": "32-general",
+      "label": "32",
+      "aliases": [
+        "32",
+        "32-general",
+        "General Seats",
+        "GENERAL",
+        "32区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          624,
+          611
+        ],
+        [
+          565,
+          632
+        ],
+        [
+          586,
+          724
+        ],
+        [
+          617,
+          724
+        ],
+        [
+          664,
+          705
+        ]
+      ]
+    },
+    {
+      "id": "33-general",
+      "label": "33",
+      "aliases": [
+        "33",
+        "33-general",
+        "General Seats",
+        "GENERAL",
+        "33区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          553,
+          630
+        ],
+        [
+          496,
+          637
+        ],
+        [
+          495,
+          724
+        ],
+        [
+          575,
+          723
+        ]
+      ]
+    },
+    {
+      "id": "34-general",
+      "label": "34",
+      "aliases": [
+        "34",
+        "34-general",
+        "General Seats",
+        "GENERAL",
+        "34区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          428,
+          630
+        ],
+        [
+          405,
+          723
+        ],
+        [
+          484,
+          724
+        ],
+        [
+          485,
+          639
+        ]
+      ]
+    },
+    {
+      "id": "35-general",
+      "label": "35",
+      "aliases": [
+        "35",
+        "35-general",
+        "General Seats",
+        "GENERAL",
+        "35区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          356,
+          612
+        ],
+        [
+          317,
+          709
+        ],
+        [
+          360,
+          724
+        ],
+        [
+          395,
+          724
+        ],
+        [
+          413,
+          630
+        ]
+      ]
+    },
+    {
+      "id": "36-general",
+      "label": "36",
+      "aliases": [
+        "36",
+        "36-general",
+        "General Seats",
+        "GENERAL",
+        "36区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          293,
+          553
+        ],
+        [
+          288,
+          563
+        ],
+        [
+          312,
+          586
+        ],
+        [
+          288,
+          581
+        ],
+        [
+          234,
+          664
+        ],
+        [
+          304,
+          703
+        ],
+        [
+          343,
+          613
+        ],
+        [
+          317,
+          591
+        ],
+        [
+          354,
+          598
+        ],
+        [
+          357,
+          588
+        ]
+      ]
+    },
+    {
+      "id": "37-general",
+      "label": "37",
+      "aliases": [
+        "37",
+        "37-general",
+        "General Seats",
+        "GENERAL",
+        "37区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          236,
+          535
+        ],
+        [
+          162,
+          605
+        ],
+        [
+          219,
+          657
+        ],
+        [
+          280,
+          576
+        ]
+      ]
+    },
+    {
+      "id": "38-general",
+      "label": "38",
+      "aliases": [
+        "38",
+        "38-general",
+        "General Seats",
+        "GENERAL",
+        "38区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          188,
+          481
+        ],
+        [
+          104,
+          535
+        ],
+        [
+          151,
+          598
+        ],
+        [
+          224,
+          527
+        ]
+      ]
+    },
+    {
+      "id": "39-general",
+      "label": "39",
+      "aliases": [
+        "39",
+        "39-general",
+        "General Seats",
+        "GENERAL",
+        "39区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          154,
+          418
+        ],
+        [
+          58,
+          456
+        ],
+        [
+          93,
+          526
+        ],
+        [
+          180,
+          472
+        ]
+      ]
+    },
+    {
+      "id": "40-general",
+      "label": "40",
+      "aliases": [
+        "40",
+        "40-general",
+        "General Seats",
+        "GENERAL",
+        "40区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          131,
+          349
+        ],
+        [
+          29,
+          369
+        ],
+        [
+          52,
+          445
+        ],
+        [
+          147,
+          406
+        ]
+      ]
+    },
+    {
+      "id": "41-general",
+      "label": "41",
+      "aliases": [
+        "41",
+        "41-general",
+        "General Seats",
+        "GENERAL",
+        "41区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          17,
+          279
+        ],
+        [
+          26,
+          356
+        ],
+        [
+          127,
+          337
+        ],
+        [
+          123,
+          278
+        ]
+      ]
+    },
+    {
+      "id": "42-general",
+      "label": "42",
+      "aliases": [
+        "42",
+        "42-general",
+        "General Seats",
+        "GENERAL",
+        "42区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          26,
+          186
+        ],
+        [
+          20,
+          263
+        ],
+        [
+          124,
+          262
+        ],
+        [
+          128,
+          203
+        ]
+      ]
+    },
+    {
+      "id": "43-general",
+      "label": "43",
+      "aliases": [
+        "43",
+        "43-general",
+        "General Seats",
+        "GENERAL",
+        "43区",
+        "General"
+      ],
+      "tier": "GENERAL",
+      "polygon": [
+        [
+          52,
+          95
+        ],
+        [
+          29,
+          171
+        ],
+        [
+          129,
+          192
+        ],
+        [
+          146,
+          132
+        ]
+      ]
+    }
+  ]
+}

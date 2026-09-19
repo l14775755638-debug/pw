@@ -6,5 +6,7 @@ build/
 coverage/
 *.log
 uploads/
+output/
+tmp/
 tmp/pdfs/
 tools/__pycache__/

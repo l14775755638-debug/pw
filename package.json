@@ -1,0 +1,13 @@
+{
+  "name": "ticket-admin",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check script.js"
+  },
+  "dependencies": {
+    "sharp": "^0.33.5"
+  }
+}
