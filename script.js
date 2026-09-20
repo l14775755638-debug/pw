@@ -5487,14 +5487,15 @@ function getAutoOpenCvRowColorLabel(table, rowIndex) {
 
 function hasActionableOpenCvColorSource(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
+  if (hasCountMatchedMixedRowColorAutoSkipSource(table)) return true;
   if (
     Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
     typeof table.rowColorActionableConflict === "boolean"
   ) {
-    return table.rowColorActionableConflict || hasCountMatchedMixedRowColorAutoSkipSource(table);
+    return table.rowColorActionableConflict;
   }
   if (hasVerifiedWhiteAndNonWhiteRowColorHold(table)) return true;
-  if (!hasOpenCvColorDecisionAlignment(table) && !hasCountMatchedMixedRowColorAutoSkipSource(table)) return false;
+  if (!hasOpenCvColorDecisionAlignment(table)) return false;
   return hasConfirmedOpenCvWhiteAndColoredConflict(table);
 }
 
@@ -7012,6 +7013,31 @@ function makeCompactPendingTable(table) {
     rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
     rowColorSourceIndexMode: table.rowColorSourceIndexMode || "",
     rowActionGeometryVersion: Number(table.rowActionGeometryVersion || 0),
+    rowActionImageWidth: Number(table.rowActionImageWidth || 0),
+    rowActionImageHeight: Number(table.rowActionImageHeight || 0),
+    rowActionMessage: table.rowActionMessage || "",
+    quickRowActionGeometryTried: Boolean(table.quickRowActionGeometryTried),
+    quickRowActionGeometryTriedVersion: Number(table.quickRowActionGeometryTriedVersion || 0),
+    rowActionRows: Array.isArray(table.rowActionRows)
+      ? table.rowActionRows.map((item) => ({
+          source: item?.source || "",
+          label: item?.label || "",
+          rawLabel: item?.rawLabel || "",
+          confidence: Number(item?.confidence || 0),
+          rowBox: item?.rowBox || null,
+          bbox: item?.bbox || null,
+          sampleBox: item?.sampleBox || null,
+          y1: item?.y1 ?? "",
+          y2: item?.y2 ?? "",
+          x1: item?.x1 ?? "",
+          x2: item?.x2 ?? "",
+          height: item?.height ?? "",
+          rowActionGeometry: item?.rowActionGeometry === true,
+          textAnchoredRowActionGeometry: item?.textAnchoredRowActionGeometry === true,
+          interpolatedRowActionGeometry: item?.interpolatedRowActionGeometry === true,
+          sourceIndex: item?.sourceIndex ?? "",
+        }))
+      : [],
     rowColorImageWidth: Number(table.rowColorImageWidth || 0),
     rowColorImageHeight: Number(table.rowColorImageHeight || 0),
     rowColorPartialSequenceAligned: Boolean(table.rowColorPartialSequenceAligned),
@@ -7603,10 +7629,44 @@ function normalizeLoadedPendingTable(table) {
     manualSkipRows: { ...(table.manualSkipRows || {}) },
     reviewedRows: { ...(table.reviewedRows || {}) },
     userEditedRows: { ...(table.userEditedRows || {}) },
+    rowActionRows: Array.isArray(table.rowActionRows) ? table.rowActionRows.map((item) => ({ ...item })) : [],
+    rowActionImageWidth: Number(table.rowActionImageWidth || 0),
+    rowActionImageHeight: Number(table.rowActionImageHeight || 0),
+    rowActionGeometryVersion: Number(table.rowActionGeometryVersion || 0),
+    rowActionMessage: table.rowActionMessage || "",
+    quickRowActionGeometryTried: Boolean(table.quickRowActionGeometryTried),
+    quickRowActionGeometryTriedVersion: Number(table.quickRowActionGeometryTriedVersion || 0),
     ppStructureAnalysis: compactPpStructureAnalysis(table.ppStructureAnalysis),
     ppStructureTicketRowMatches: clonePpStructureMatches(table.ppStructureTicketRowMatches),
     ppStructureMessage: table.ppStructureMessage || "",
   };
+  const legacyRowActionRows =
+    Array.isArray(normalizedTable.rowColorRows) && normalizedTable.rowColorRows.some((item) => item?.rowActionGeometry === true)
+      ? normalizedTable.rowColorRows.map((item) => ({ ...item }))
+      : [];
+  if (!normalizedTable.rowActionRows.length && legacyRowActionRows.length) {
+    normalizedTable.rowActionRows = legacyRowActionRows;
+    normalizedTable.rowActionImageWidth = Number(normalizedTable.rowColorImageWidth || 0);
+    normalizedTable.rowActionImageHeight = Number(normalizedTable.rowColorImageHeight || 0);
+    normalizedTable.rowActionMessage = normalizedTable.rowActionMessage || "已从旧版贴图坐标恢复逐行按钮。";
+  }
+  if (String(normalizedTable.rowColorSource || "").startsWith("quick_manual_") || legacyRowActionRows.length) {
+    normalizedTable.rowColorSource = "";
+    normalizedTable.rowColorReliable = false;
+    normalizedTable.rowColorConfirmed = false;
+    normalizedTable.rowColorExactRowAligned = false;
+    normalizedTable.rowColorActionableConflict = false;
+    normalizedTable.rowColorAutoApplied = false;
+    normalizedTable.rowColorAutoSkipCount = 0;
+    normalizedTable.aiRowColorAutoRows = [];
+    normalizedTable.rowColorRows = [];
+    normalizedTable.rowColorImageWidth = 0;
+    normalizedTable.rowColorImageHeight = 0;
+    normalizedTable.rowColorMessage = "旧版贴图坐标已和颜色识别拆分，打开本页会重新检测底色。";
+    normalizedTable._rowColorRepairing = false;
+    normalizedTable._rowColorRepairDone = false;
+    normalizedTable._rowColorRepairTried = false;
+  }
   if (hasStaleRowColorLogic) {
     normalizedTable._rowColorRepairing = false;
     normalizedTable._rowColorRepairDone = false;
@@ -7635,18 +7695,17 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable._rowColorRepairTried = false;
   }
   if (
-    normalizedTable.quickManualMode === true &&
-    Array.isArray(normalizedTable.rowColorRows) &&
-    normalizedTable.rowColorRows.length &&
+    Array.isArray(normalizedTable.rowActionRows) &&
+    normalizedTable.rowActionRows.length &&
     Number(normalizedTable.rowActionGeometryVersion || 0) !== ROW_ACTION_GEOMETRY_VERSION
   ) {
-    normalizedTable.rowColorRows = [];
-    normalizedTable.rowColorImageWidth = 0;
-    normalizedTable.rowColorImageHeight = 0;
+    normalizedTable.rowActionRows = [];
+    normalizedTable.rowActionImageWidth = 0;
+    normalizedTable.rowActionImageHeight = 0;
     normalizedTable.rowActionGeometryVersion = 0;
     normalizedTable.quickRowActionGeometryTried = false;
     normalizedTable.quickRowActionGeometryTriedVersion = 0;
-    normalizedTable.rowColorMessage = "旧版原图贴行按钮坐标已作废，已切回稳定表格核对。";
+    normalizedTable.rowActionMessage = "旧版原图贴行按钮坐标已作废，已切回稳定表格核对。";
   }
   normalizedTable.rowColorLogicVersion = Number(normalizedTable.rowColorLogicVersion || 0);
   repairMisreadDataHeaderTable(normalizedTable);
@@ -10836,6 +10895,13 @@ function cloneReviewState(table) {
     rowColorAutoSkipCount: Number(table.rowColorAutoSkipCount || 0),
     rowColorMessage: table.rowColorMessage || "",
     rowColorSelectionMode: table.rowColorSelectionMode || "",
+    rowActionGeometryVersion: Number(table.rowActionGeometryVersion || 0),
+    rowActionImageWidth: Number(table.rowActionImageWidth || 0),
+    rowActionImageHeight: Number(table.rowActionImageHeight || 0),
+    rowActionMessage: table.rowActionMessage || "",
+    quickRowActionGeometryTried: Boolean(table.quickRowActionGeometryTried),
+    quickRowActionGeometryTriedVersion: Number(table.quickRowActionGeometryTriedVersion || 0),
+    rowActionRows: Array.isArray(table.rowActionRows) ? table.rowActionRows.map((item) => ({ ...item })) : [],
     rowColorContiguous: Boolean(table.rowColorContiguous),
     rowColorMaxGap: Number(table.rowColorMaxGap || 0),
     rowColorSourceIndexes: Array.isArray(table.rowColorSourceIndexes) ? [...table.rowColorSourceIndexes] : null,
@@ -10903,6 +10969,13 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.rowColorAutoSkipCount = Number(state.rowColorAutoSkipCount || 0);
   table.rowColorMessage = state.rowColorMessage || "";
   table.rowColorSelectionMode = state.rowColorSelectionMode || "";
+  table.rowActionGeometryVersion = Number(state.rowActionGeometryVersion || 0);
+  table.rowActionImageWidth = Number(state.rowActionImageWidth || 0);
+  table.rowActionImageHeight = Number(state.rowActionImageHeight || 0);
+  table.rowActionMessage = state.rowActionMessage || "";
+  table.quickRowActionGeometryTried = Boolean(state.quickRowActionGeometryTried);
+  table.quickRowActionGeometryTriedVersion = Number(state.quickRowActionGeometryTriedVersion || 0);
+  table.rowActionRows = Array.isArray(state.rowActionRows) ? state.rowActionRows.map((item) => ({ ...item })) : [];
   table.rowColorImageWidth = Number(state.rowColorImageWidth || 0);
   table.rowColorImageHeight = Number(state.rowColorImageHeight || 0);
   table.rowColorContiguous = Boolean(state.rowColorContiguous);
@@ -12033,10 +12106,9 @@ function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
   const rowActionFallbackReason = getRowActionFallbackReason(table, { sourceMissing, sourceWaiting, waitingForSource: false });
   const sourceActionStatusText = hasSourceRowActions
     ? "已在原图旁生成逐行按钮；请直接对照原图颜色勾叉。"
-    : rowActionFallbackReason || table.rowColorMessage || "";
+    : rowActionFallbackReason || table.rowActionMessage || table.rowColorMessage || "";
   if (!hasSourceRowActions && !sourceMissing && !sourceWaiting) queueQuickManualRowActionGeometry(table);
   const waitingForSourceRowActions =
-    table.quickManualMode &&
     !hasSourceRowActions &&
     !sourceMissing &&
     !sourceWaiting &&
@@ -12091,7 +12163,7 @@ function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
       <strong>${escapeHtml(getTableSourceSummary(table))}</strong>
       ${sourceActionStatusText ? `<p class="review-source-action-status">${escapeHtml(sourceActionStatusText)}</p>` : ""}
       <div class="review-source-with-actions">
-        ${renderReviewSourceMedia(table, sourceUrl, { sourceMissing, sourceWaiting, isPdf, page })}
+        ${renderReviewSourceMedia(table, sourceUrl, { sourceMissing, sourceWaiting, isPdf, page, allowRowActions: true })}
       </div>
     </div>
     <div class="review-ticket-list quick-manual-list">
@@ -12242,15 +12314,56 @@ function getRowActionOverlayBox(item) {
   };
 }
 
+function getRowActionGeometryRows(table) {
+  if (Array.isArray(table?.rowActionRows) && table.rowActionRows.length) return table.rowActionRows;
+  const legacyRows = Array.isArray(table?.rowColorRows) ? table.rowColorRows : [];
+  return legacyRows.some((item) => item?.rowActionGeometry === true) ? legacyRows : [];
+}
+
+function getRowActionImageSize(table) {
+  const useActionSize = Array.isArray(table?.rowActionRows) && table.rowActionRows.length;
+  return {
+    width: Number((useActionSize ? table.rowActionImageWidth : table?.rowColorImageWidth) || 0),
+    height: Number((useActionSize ? table.rowActionImageHeight : table?.rowColorImageHeight) || 0),
+  };
+}
+
+function assignRowActionGeometryRows(table, rows, analysis, source = "row_geometry") {
+  if (!table || !Array.isArray(table.rows) || !Array.isArray(rows) || rows.length !== table.rows.length) return false;
+  table.rowActionRows = rows.map((row, index) => ({
+    source: row?.source || analysis?.source || source,
+    label: row?.label || "",
+    rawLabel: row?.rawLabel || "",
+    confidence: Number(row?.confidence || 0),
+    rowBox: row?.rowBox || row?.row_box || row?.bbox || null,
+    bbox: row?.bbox || row?.rowBox || row?.row_box || null,
+    sampleBox: row?.sampleBox || null,
+    y1: row?.y1 ?? row?.top ?? "",
+    y2: row?.y2 ?? row?.bottom ?? "",
+    x1: row?.x1 ?? row?.left ?? "",
+    x2: row?.x2 ?? row?.right ?? "",
+    height: row?.height ?? "",
+    rowActionGeometry: true,
+    textAnchoredRowActionGeometry: row?.textAnchoredRowActionGeometry === true,
+    interpolatedRowActionGeometry: row?.interpolatedRowActionGeometry === true,
+    sourceIndex: row?.sourceIndex ?? row?.index ?? index,
+  }));
+  table.rowActionGeometryVersion = ROW_ACTION_GEOMETRY_VERSION;
+  table.rowActionImageWidth = Number(analysis?.imageWidth || 0);
+  table.rowActionImageHeight = Number(analysis?.imageHeight || 0);
+  table.quickRowActionGeometryTried = true;
+  table.quickRowActionGeometryTriedVersion = ROW_ACTION_GEOMETRY_VERSION;
+  return table.rowActionRows.every((item) => getRowActionOverlayBox(item));
+}
+
 function getRowActionFallbackReason(table, { sourceMissing = false, sourceWaiting = false } = {}) {
   if (sourceMissing) return "原图文件暂时不可用，无法生成贴图按钮；请用完整表格核对。";
   if (sourceWaiting) return "正在检查原图文件，暂时先保留完整表格核对。";
-  if (!table?.quickManualMode) return "";
   const expected = Array.isArray(table.rows) ? table.rows.length : 0;
-  const sourceRows = Array.isArray(table.rowColorRows) ? table.rowColorRows : [];
+  const sourceRows = getRowActionGeometryRows(table);
   if (!expected) return "这张表没有有效票行。";
   if (!sourceRows.length) {
-    return table.rowColorMessage || "本页还没有可靠的原图行坐标；已改为完整表格核对。";
+    return table.rowActionMessage || table.rowColorMessage || "本页还没有可靠的原图行坐标；已改为完整表格核对。";
   }
   if (Number(table.rowActionGeometryVersion || 0) !== ROW_ACTION_GEOMETRY_VERSION) {
     return "旧版贴图坐标已作废，正在重新定位；定位前先用完整表格核对。";
@@ -12262,7 +12375,7 @@ function getRowActionFallbackReason(table, { sourceMissing = false, sourceWaitin
   if (geometryRows.length !== expected) {
     return `原图只有 ${geometryRows.length}/${expected} 行拿到可靠坐标；已改为完整表格核对。`;
   }
-  return table.rowColorMessage || "本页未能稳定一对一贴图；已改为完整表格核对。";
+  return table.rowActionMessage || table.rowColorMessage || "本页未能稳定一对一贴图；已改为完整表格核对。";
 }
 
 function getEstimatedQuickManualRowActionOverlays(table) {
@@ -12294,16 +12407,17 @@ function getEstimatedQuickManualRowActionOverlays(table) {
 
 function getSourceRowActionOverlays(table, { includeEstimated = false } = {}) {
   if (!table || !Array.isArray(table.rows)) return [];
-  if (!Array.isArray(table.rowColorRows)) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
-  if (table.quickManualMode && Number(table.rowActionGeometryVersion || 0) !== ROW_ACTION_GEOMETRY_VERSION) {
+  const sourceRows = getRowActionGeometryRows(table);
+  if (!sourceRows.length) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
+  if (Number(table.rowActionGeometryVersion || 0) !== ROW_ACTION_GEOMETRY_VERSION) {
     return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
   }
-  const sourceRows = table.rowColorRows;
   if (sourceRows.length < table.rows.length) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
-  if (table.quickManualMode && !sourceRows.slice(0, table.rows.length).every((item) => item?.rowActionGeometry === true)) {
+  if (!sourceRows.slice(0, table.rows.length).every((item) => item?.rowActionGeometry === true)) {
     return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
   }
-  let imageHeight = Number(table.rowColorImageHeight || 0);
+  const imageSize = getRowActionImageSize(table);
+  let imageHeight = imageSize.height;
   if (!imageHeight) {
     const maxY = Math.max(
       0,
@@ -12322,7 +12436,7 @@ function getSourceRowActionOverlays(table, { includeEstimated = false } = {}) {
       if (!box) return null;
       const topPct = Math.max(0, Math.min(100, (box.y1 / imageHeight) * 100));
       const heightPct = Math.max(0.8, Math.min(7, ((box.y2 - box.y1) / imageHeight) * 100));
-      const imageWidth = Math.max(1, Number(table.rowColorImageWidth || 0) || Number(box.x2 || 0) || 1);
+      const imageWidth = Math.max(1, imageSize.width || Number(box.x2 || 0) || 1);
       const rowRightPct = Number.isFinite(box.x2) ? ((box.x2 || 0) / imageWidth) * 100 : NaN;
       const selectedForPublish = isPendingRowSelectedForPublish(table, rowIndex);
       const ticket = { table, row, index: rowIndex };
@@ -12368,30 +12482,14 @@ function applyRowActionGeometryToTable(table, analysis) {
   if (!aligned.rows?.length || aligned.rows.length !== table.rows.length) {
     return applyInterpolatedRowActionGeometryToTable(table, analysis);
   }
-  table.rowColorSource = "quick_manual_row_geometry";
-  table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
-  table.rowActionGeometryVersion = ROW_ACTION_GEOMETRY_VERSION;
-  table.rowColorImageWidth = Number(analysis.imageWidth || 0);
-  table.rowColorImageHeight = Number(analysis.imageHeight || 0);
-  table.rowColorRows = aligned.rows.map((row, index) => ({
-    source: analysis.source || "row_geometry",
-    label: row?.label || "",
-    rawLabel: row?.rawLabel || "",
-    confidence: row?.confidence || 0,
-    rowBox: row?.rowBox || row?.row_box || row?.bbox || null,
-    bbox: row?.bbox || row?.rowBox || row?.row_box || null,
-    sampleBox: row?.sampleBox || null,
-    y1: row?.y1 ?? row?.top ?? "",
-    y2: row?.y2 ?? row?.bottom ?? "",
-    x1: row?.x1 ?? row?.left ?? "",
-    x2: row?.x2 ?? row?.right ?? "",
-    height: row?.height ?? "",
+  const rows = aligned.rows.map((row, index) => ({
+    ...row,
     rowActionGeometry: true,
     sourceIndex: aligned.sourceIndexes?.[index] ?? row?.index ?? index,
   }));
-  table.rowColorSourceIndexes = Array.isArray(aligned.sourceIndexes) ? aligned.sourceIndexes : table.rowColorSourceIndexes;
-  table.rowColorMessage = "已生成原图逐行操作按钮。";
-  return table.rowColorRows.every((item) => getRowActionOverlayBox(item));
+  const applied = assignRowActionGeometryRows(table, rows, analysis, analysis.source || "row_geometry");
+  if (applied) table.rowActionMessage = "已生成原图逐行操作按钮。";
+  return applied;
 }
 
 function normalizeRowActionTextRows(analysis) {
@@ -12414,7 +12512,7 @@ function applyTextAnchoredRowActionGeometryToTable(table, analysis) {
   const expectedRows = Array.isArray(table?.rows) ? table.rows.length : 0;
   const imageHeight = Number(analysis?.imageHeight || 0);
   const imageWidth = Number(analysis?.imageWidth || 0);
-  if (!table?.quickManualMode || !expectedRows || !imageHeight) return false;
+  if (!expectedRows || !imageHeight) return false;
   const textRows = normalizeRowActionTextRows(analysis);
   if (textRows.length !== expectedRows) return false;
   const gaps = textRows
@@ -12450,15 +12548,9 @@ function applyTextAnchoredRowActionGeometryToTable(table, analysis) {
     };
   });
   if (!rows.every((item) => getRowActionOverlayBox(item))) return false;
-  table.rowColorSource = "quick_manual_text_row_geometry";
-  table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
-  table.rowActionGeometryVersion = ROW_ACTION_GEOMETRY_VERSION;
-  table.rowColorImageWidth = imageWidth;
-  table.rowColorImageHeight = imageHeight;
-  table.rowColorRows = rows;
-  table.rowColorSourceIndexes = rows.map((_, index) => index);
-  table.rowColorMessage = "已按 OCR 文字中心生成原图贴行按钮；请直接对照原图颜色勾叉。";
-  return true;
+  const applied = assignRowActionGeometryRows(table, rows, analysis, "text_row_geometry");
+  if (applied) table.rowActionMessage = "已按 OCR 文字中心生成原图贴行按钮；请直接对照原图颜色勾叉。";
+  return applied;
 }
 
 function getSortedRowActionBoxes(rows = []) {
@@ -12472,7 +12564,7 @@ function buildInterpolatedRowActionBoxes(table, analysis) {
   const expectedRows = Array.isArray(table?.rows) ? table.rows.length : 0;
   const imageHeight = Number(analysis?.imageHeight || 0);
   const sorted = getSortedRowActionBoxes(analysis?.rows || []);
-  if (!table?.quickManualMode || expectedRows < 5 || !imageHeight) return [];
+  if (expectedRows < 5 || !imageHeight) return [];
 
   const textRows = normalizeRowActionTextRows(analysis);
   const textGaps = textRows
@@ -12545,14 +12637,9 @@ function buildInterpolatedRowActionBoxes(table, analysis) {
 function applyInterpolatedRowActionGeometryToTable(table, analysis) {
   const rows = buildInterpolatedRowActionBoxes(table, analysis);
   if (!rows.length || rows.length !== table.rows.length) return false;
-  table.rowColorSource = "quick_manual_interpolated_row_geometry";
-  table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
-  table.rowActionGeometryVersion = ROW_ACTION_GEOMETRY_VERSION;
-  table.rowColorImageWidth = Number(analysis.imageWidth || 0);
-  table.rowColorImageHeight = Number(analysis.imageHeight || 0);
-  table.rowColorRows = rows;
-  table.rowColorSourceIndexes = rows.map((_, index) => index);
-  table.rowColorMessage = rows.some((row) => row.textAnchoredRowActionGeometry === true)
+  const applied = assignRowActionGeometryRows(table, rows, analysis, "interpolated_row_geometry");
+  if (!applied) return false;
+  table.rowActionMessage = rows.some((row) => row.textAnchoredRowActionGeometry === true)
     ? "本地分割线未能逐行识别，已按文字中心生成原图贴行按钮；请按原图颜色人工勾叉。"
     : "本地分割线未能逐行识别，未生成原图贴行按钮；请用下方表格核对。";
   return true;
@@ -12591,7 +12678,7 @@ async function requestQuickManualRowActionGeometry(table) {
 function queueQuickManualRowActionGeometry(table) {
   const failedAt = Number(table?._quickRowActionGeometryFailedAt || 0);
   if (
-    !table?.quickManualMode ||
+    !table ||
     table._quickRowActionGeometryQueued ||
     table._quickRowActionGeometryRunning ||
     (failedAt && Date.now() - failedAt < 15000) ||
@@ -12605,24 +12692,24 @@ function queueQuickManualRowActionGeometry(table) {
   table._quickRowActionGeometryQueued = true;
   window.setTimeout(async () => {
     table._quickRowActionGeometryQueued = false;
-    if (!table?.quickManualMode || getSourceRowActionOverlays(table).length) return;
+    if (!table || getSourceRowActionOverlays(table).length) return;
     table._quickRowActionGeometryRunning = true;
-    table.rowColorMessage = "正在定位原图逐行按钮...";
+    table.rowActionMessage = "正在定位原图逐行按钮...";
     try {
       const analysis = await requestQuickManualRowActionGeometry(table);
       if (!applyRowActionGeometryToTable(table, analysis)) {
-        throw new Error(table.rowColorMessage || "本地行定位未能一一对应票行。");
+        throw new Error(table.rowActionMessage || table.rowColorMessage || "本地行定位未能一一对应票行。");
       }
       saveAndArchiveAppStep(`快速人工行按钮定位：${table.title || currentEvent.name}`, "校对", { silent: true });
     } catch (error) {
       table.rowActionGeometryVersion = 0;
-      table.rowColorRows = [];
-      table.rowColorImageWidth = 0;
-      table.rowColorImageHeight = 0;
+      table.rowActionRows = [];
+      table.rowActionImageWidth = 0;
+      table.rowActionImageHeight = 0;
       table.quickRowActionGeometryTried = false;
       table.quickRowActionGeometryTriedVersion = 0;
       table._quickRowActionGeometryFailedAt = Date.now();
-      table.rowColorMessage = `${error.message || "原图逐行按钮定位失败"}；已改为完整表格核对。`;
+      table.rowActionMessage = `${error.message || "原图逐行按钮定位失败"}；已改为完整表格核对。`;
     } finally {
       table._quickRowActionGeometryRunning = false;
       renderReviewPanel(undefined, { normalize: false });
@@ -12634,7 +12721,6 @@ function queueQuickManualRowActionGeometry(table) {
 }
 
 function renderSourceRowActionOverlay(table, sourceImageUrl) {
-  if (!table?.quickManualMode) return "";
   const overlays = getSourceRowActionOverlays(table, { includeEstimated: false });
   if (!sourceImageUrl || !overlays.length) return "";
   const controls = overlays
@@ -12657,9 +12743,9 @@ function renderSourceRowActionOverlay(table, sourceImageUrl) {
   `;
 }
 
-function renderReviewSourceMedia(table, sourceUrl, { sourceMissing, sourceWaiting, isPdf, page }) {
+function renderReviewSourceMedia(table, sourceUrl, { sourceMissing, sourceWaiting, isPdf, page, allowRowActions = false }) {
   const actionImageUrl = getReviewSourceImageUrlForRowActions(sourceUrl, isPdf, page);
-  const overlay = renderSourceRowActionOverlay(table, actionImageUrl);
+  const overlay = allowRowActions ? renderSourceRowActionOverlay(table, actionImageUrl) : "";
   if (sourceMissing) return renderReviewSourceMissing(table, sourceUrl);
   if (sourceWaiting) return renderReviewSourceChecking(sourceUrl);
   if (overlay) return overlay;
@@ -12908,8 +12994,8 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   ensureReviewSourceAvailability(sourceUrl);
   const sourceMissing = isReviewSourceMissing(sourceUrl);
   const sourceWaiting = isReviewSourceWaiting(sourceUrl);
-  const hasSourceRowActions = table.quickManualMode && getSourceRowActionOverlays(table).length > 0;
-  reviewLayout.classList.toggle("source-action-review-layout", hasSourceRowActions);
+  const sourceActionStatusText = "";
+  reviewLayout.classList.remove("source-action-review-layout");
   reviewLayout.innerHTML = `
     ${
       table.needsManualReview
@@ -12923,6 +13009,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
         <button class="small-button ghost" type="button" data-review-source="${table.id}">放大查看</button>
       </div>
       <strong>${escapeHtml(getTableSourceSummary(table))}</strong>
+      ${sourceActionStatusText ? `<p class="review-source-action-status">${escapeHtml(sourceActionStatusText)}</p>` : ""}
       <div class="review-source-with-actions">
         ${renderReviewSourceMedia(table, sourceUrl, { sourceMissing, sourceWaiting, isPdf, page })}
       </div>
