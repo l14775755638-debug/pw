@@ -1,7 +1,7 @@
 const REVIEW_FLAGS_VERSION = 35;
 const ROW_COLOR_LOGIC_VERSION = 78;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
-const ROW_ACTION_GEOMETRY_VERSION = 9;
+const ROW_ACTION_GEOMETRY_VERSION = 10;
 const COLUMN_NORMALIZATION_VERSION = 4;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
@@ -12208,9 +12208,10 @@ function getEstimatedQuickManualRowActionOverlays(table) {
     const selectedForPublish = isPendingRowSelectedForPublish(table, rowIndex);
     const ticket = { table, row, index: rowIndex };
     const shouldPublish = selectedForPublish && isCustomerPublishableTicket(ticket);
+    const centerPct = Math.max(0, Math.min(100, startPct + pitch * (rowIndex + 0.5)));
     return {
       rowIndex,
-      topPct: Math.max(0, Math.min(100, startPct + pitch * (rowIndex + 0.5))),
+      topPct: Math.max(0, Math.min(100, centerPct - heightPct / 2)),
       heightPct,
       selectedForPublish,
       shouldPublish,
@@ -12249,7 +12250,7 @@ function getSourceRowActionOverlays(table, { includeEstimated = true } = {}) {
       const item = sourceRows[rowIndex] || {};
       const box = getRowActionOverlayBox(item);
       if (!box) return null;
-      const centerPct = Math.max(0, Math.min(100, (((box.y1 + box.y2) / 2) / imageHeight) * 100));
+      const topPct = Math.max(0, Math.min(100, (box.y1 / imageHeight) * 100));
       const heightPct = Math.max(0.8, Math.min(7, ((box.y2 - box.y1) / imageHeight) * 100));
       const imageWidth = Math.max(1, Number(table.rowColorImageWidth || 0) || Number(box.x2 || 0) || 1);
       const rowRightPct = Number.isFinite(box.x2) ? ((box.x2 || 0) / imageWidth) * 100 : NaN;
@@ -12258,7 +12259,7 @@ function getSourceRowActionOverlays(table, { includeEstimated = true } = {}) {
       const shouldPublish = selectedForPublish && isCustomerPublishableTicket(ticket);
       return {
         rowIndex,
-        topPct: centerPct,
+        topPct,
         heightPct,
         selectedForPublish,
         shouldPublish,

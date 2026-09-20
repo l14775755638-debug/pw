@@ -2278,7 +2278,6 @@ tr.hit-row td {
   background: transparent;
   box-shadow: none;
   pointer-events: auto;
-  transform: translateY(-50%);
 }
 
 .review-source-row-control.skip {
