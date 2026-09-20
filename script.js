@@ -1,7 +1,7 @@
 const REVIEW_FLAGS_VERSION = 35;
 const ROW_COLOR_LOGIC_VERSION = 78;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
-const ROW_ACTION_GEOMETRY_VERSION = 11;
+const ROW_ACTION_GEOMETRY_VERSION = 12;
 const COLUMN_NORMALIZATION_VERSION = 4;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
@@ -12240,9 +12240,7 @@ function getSourceRowActionOverlays(table, { includeEstimated = false } = {}) {
     imageHeight = maxY > 0 ? maxY * 1.04 : 0;
   }
   if (!imageHeight) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
-  if (table.rows.length > MAX_REVIEW_ROWS_RENDERED) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
   const overlays = table.rows
-    .slice(0, MAX_REVIEW_ROWS_RENDERED)
     .map((row, rowIndex) => {
       const item = sourceRows[rowIndex] || {};
       const box = getRowActionOverlayBox(item);
