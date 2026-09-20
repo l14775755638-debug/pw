@@ -1,7 +1,7 @@
 const REVIEW_FLAGS_VERSION = 35;
 const ROW_COLOR_LOGIC_VERSION = 78;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
-const ROW_ACTION_GEOMETRY_VERSION = 10;
+const ROW_ACTION_GEOMETRY_VERSION = 11;
 const COLUMN_NORMALIZATION_VERSION = 4;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
@@ -11974,17 +11974,13 @@ function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
   ensureReviewSourceAvailability(sourceUrl);
   const sourceMissing = isReviewSourceMissing(sourceUrl);
   const sourceWaiting = isReviewSourceWaiting(sourceUrl);
-  const sourceRowActionOverlays = getSourceRowActionOverlays(table);
+  const sourceRowActionOverlays = getSourceRowActionOverlays(table, { includeEstimated: false });
   const hasSourceRowActions = sourceRowActionOverlays.length > 0;
-  const hasEstimatedSourceRowActions = sourceRowActionOverlays.some((item) => item.estimated === true);
-  const hasMeasuredSourceRowActions = getSourceRowActionOverlays(table, { includeEstimated: false }).length > 0;
   reviewLayout.classList.toggle("source-action-review-layout", hasSourceRowActions);
   const sourceActionStatusText = hasSourceRowActions
-    ? hasEstimatedSourceRowActions
-      ? "已在原图旁按 OCR 行数贴上逐行按钮；请直接对照原图颜色勾叉。"
-      : "已在原图旁生成逐行按钮；请直接对照原图颜色勾叉。"
+    ? "已在原图旁生成逐行按钮；请直接对照原图颜色勾叉。"
     : table.rowColorMessage || "";
-  if (!hasMeasuredSourceRowActions && !sourceMissing && !sourceWaiting) queueQuickManualRowActionGeometry(table);
+  if (!hasSourceRowActions && !sourceMissing && !sourceWaiting) queueQuickManualRowActionGeometry(table);
   const waitingForSourceRowActions =
     table.quickManualMode &&
     !hasSourceRowActions &&
@@ -12066,11 +12062,11 @@ function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
       </div>
       ${
         hasSourceRowActions
-          ? `<div class="review-ticket-limit-note">${hasEstimatedSourceRowActions ? "本页已先按 OCR 行数生成原图贴行按钮；请对照原图颜色快速勾叉。" : "本页已启用原图贴行按钮；下方表格已隐藏，减少来回对齐。"}</div>`
+          ? `<div class="review-ticket-limit-note">本页已启用原图贴行按钮；下方表格已隐藏，减少来回对齐。</div>`
           : waitingForSourceRowActions
             ? `<div class="review-ticket-limit-note">正在定位原图逐行按钮；定位完成后会直接贴在原图右侧。</div>`
           : hiddenRowCount
-            ? `<div class="review-ticket-limit-note">正在尝试生成原图贴行按钮；本页先显示前 ${MAX_REVIEW_ROWS_RENDERED} 条，剩余 ${hiddenRowCount} 条仍保留在待确认表里。</div>`
+            ? `<div class="review-ticket-limit-note">本页未能稳定一对一贴图；先显示前 ${MAX_REVIEW_ROWS_RENDERED} 条，剩余 ${hiddenRowCount} 条仍保留在待确认表里。</div>`
             : ""
       }
       ${
@@ -12221,7 +12217,7 @@ function getEstimatedQuickManualRowActionOverlays(table) {
   });
 }
 
-function getSourceRowActionOverlays(table, { includeEstimated = true } = {}) {
+function getSourceRowActionOverlays(table, { includeEstimated = false } = {}) {
   if (!table || !Array.isArray(table.rows)) return [];
   if (!Array.isArray(table.rowColorRows)) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
   if (table.quickManualMode && Number(table.rowActionGeometryVersion || 0) !== ROW_ACTION_GEOMETRY_VERSION) {
@@ -12244,6 +12240,7 @@ function getSourceRowActionOverlays(table, { includeEstimated = true } = {}) {
     imageHeight = maxY > 0 ? maxY * 1.04 : 0;
   }
   if (!imageHeight) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
+  if (table.rows.length > MAX_REVIEW_ROWS_RENDERED) return includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
   const overlays = table.rows
     .slice(0, MAX_REVIEW_ROWS_RENDERED)
     .map((row, rowIndex) => {
@@ -12267,7 +12264,7 @@ function getSourceRowActionOverlays(table, { includeEstimated = true } = {}) {
       };
     })
     .filter(Boolean);
-  return overlays.length ? overlays : includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
+  return overlays.length === table.rows.length ? overlays : includeEstimated ? getEstimatedQuickManualRowActionOverlays(table) : [];
 }
 
 function getReviewSourceImageUrlForRowActions(sourceUrl, isPdf, page) {
@@ -12428,7 +12425,7 @@ function applyInterpolatedRowActionGeometryToTable(table, analysis) {
   table.rowColorSourceIndexes = rows.map((_, index) => index);
   table.rowColorMessage = rows.some((row) => row.textAnchoredRowActionGeometry === true)
     ? "本地分割线未能逐行识别，已按文字中心生成原图贴行按钮；请按原图颜色人工勾叉。"
-    : "本地分割线未能逐行识别，已按 OCR 行数等距生成原图贴行按钮；请按原图颜色人工勾叉。";
+    : "本地分割线未能逐行识别，未生成原图贴行按钮；请用下方表格核对。";
   return true;
 }
 
@@ -12509,7 +12506,7 @@ function queueQuickManualRowActionGeometry(table) {
 
 function renderSourceRowActionOverlay(table, sourceImageUrl) {
   if (!table?.quickManualMode) return "";
-  const overlays = getSourceRowActionOverlays(table);
+  const overlays = getSourceRowActionOverlays(table, { includeEstimated: false });
   if (!sourceImageUrl || !overlays.length) return "";
   const controls = overlays
     .map(
