@@ -5165,6 +5165,7 @@ function shouldAutoSkipForRowColor(table, rowIndex) {
   if (isPendingRowManuallyPublished(table, rowIndex)) return false;
   if (table.rowColorSource === "ai_row_color") return isTrustedAiRowSkipDecision(table, rowIndex);
   if (hasVerifiedWhiteAndNonWhiteRowColorHold(table) && hasVerifiedNonWhiteRowColorHold(table, rowIndex)) return true;
+  if (hasCountMatchedMixedRowColorAutoSkipSource(table) && isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex)) return true;
   if (
     (table.rowColorSource === "opencv" ||
       table.rowColorSource === "pdf_vector" ||
@@ -5490,10 +5491,10 @@ function hasActionableOpenCvColorSource(table) {
     Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
     typeof table.rowColorActionableConflict === "boolean"
   ) {
-    return table.rowColorActionableConflict;
+    return table.rowColorActionableConflict || hasCountMatchedMixedRowColorAutoSkipSource(table);
   }
   if (hasVerifiedWhiteAndNonWhiteRowColorHold(table)) return true;
-  if (!hasOpenCvColorDecisionAlignment(table)) return false;
+  if (!hasOpenCvColorDecisionAlignment(table) && !hasCountMatchedMixedRowColorAutoSkipSource(table)) return false;
   return hasConfirmedOpenCvWhiteAndColoredConflict(table);
 }
 
@@ -5580,6 +5581,54 @@ function hasExactMixedRawRowColorConflict(table) {
   );
 }
 
+function getCountMatchedMixedRowColorState(table) {
+  const state = {
+    hasWhite: false,
+    hasStrongNonWhite: false,
+    whiteCount: 0,
+    nonWhiteCount: 0,
+    labels: [],
+  };
+  if (
+    !hasOpenCvRowColorPreview(table) ||
+    table?.rowColorSource === "ai_row_color" ||
+    table?.rowColorPartialSequenceAligned === true ||
+    !Array.isArray(table.rows) ||
+    !Array.isArray(table.rowColorRows) ||
+    !table.rows.length ||
+    table.rowColorRows.length !== table.rows.length
+  ) {
+    return state;
+  }
+
+  table.rows.forEach((row, index) => {
+    const ticket = { table, row, index };
+    if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
+    const item = table.rowColorRows[index];
+    if (!item || item.userCleared) return;
+    const strictLabel = getStrictRowLocalOpenCvColorLabel(item);
+    if (strictLabel && isAvailableRowColorLabel(strictLabel)) {
+      state.hasWhite = true;
+      state.whiteCount += 1;
+      state.labels.push("白底");
+      return;
+    }
+    if ((strictLabel && !isAvailableRowColorLabel(strictLabel)) || isRawNonWhiteColorStrongEnoughForMixedTable(item)) {
+      state.hasStrongNonWhite = true;
+      state.nonWhiteCount += 1;
+      state.labels.push(strictLabel || getOpenCvItemRawColorLabel(item) || "非白底");
+    }
+  });
+
+  state.labels = uniqueCleanValues(state.labels);
+  return state;
+}
+
+function hasCountMatchedMixedRowColorAutoSkipSource(table) {
+  const state = getCountMatchedMixedRowColorState(table);
+  return state.hasWhite && state.hasStrongNonWhite;
+}
+
 function isRawNonWhiteColorStrongEnoughForMixedTable(item) {
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel) || item?.userCleared) return false;
@@ -5601,7 +5650,7 @@ function isRawNonWhiteColorStrongEnoughForMixedTable(item) {
 }
 
 function isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex) {
-  if (!hasExactMixedRawRowColorConflict(table)) return false;
+  if (!hasExactMixedRawRowColorConflict(table) && !hasCountMatchedMixedRowColorAutoSkipSource(table)) return false;
   const ticket = { table, row: table?.rows?.[rowIndex], index: rowIndex };
   if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return false;
   return isRawNonWhiteColorStrongEnoughForMixedTable(table?.rowColorRows?.[rowIndex]);
@@ -5631,7 +5680,7 @@ function getOpenCvEffectiveColorState(table) {
     nonWhiteCount: 0,
     labels: [],
   };
-  if (!hasOpenCvColorDecisionAlignment(table) || !Array.isArray(table.rows)) return state;
+  if ((!hasOpenCvColorDecisionAlignment(table) && !hasCountMatchedMixedRowColorAutoSkipSource(table)) || !Array.isArray(table.rows)) return state;
 
   table.rows.forEach((row, index) => {
     const ticket = { table, row, index };
@@ -6189,8 +6238,11 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
         labels: [],
       };
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
+  const hasCountMatchedMixedColorConflict = hasCountMatchedMixedRowColorAutoSkipSource(table);
   const hasVerifiedRowColorConflict = hasVerifiedWhiteAndNonWhiteRowColorHold(table);
-  table.rowColorActionableConflict = Boolean((table.rowColorReliable && hasColorConflict) || hasVerifiedRowColorConflict);
+  table.rowColorActionableConflict = Boolean(
+    (table.rowColorReliable && hasColorConflict) || hasVerifiedRowColorConflict || hasCountMatchedMixedColorConflict,
+  );
   applyOpenCvWhiteVsColoredAutoDecision(table);
   const actionableColorState = table.rowColorActionableConflict ? getOpenCvEffectiveColorState(table) : colorState;
   const hasActionableColorConflict = actionableColorState.hasWhite && actionableColorState.hasNonWhite;
@@ -6198,7 +6250,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
     !table.rowColorReliable &&
     ((analysis.source === "opencv" || analysis.source === "pdf_vector" || analysis.source === "paddle_ppstructure") &&
       (!table.rowColorExactBackendAligned || !table.rowColorExactRowAligned || table.rowColorPartialSequenceAligned));
-  if (untrustedColorMapping) clearUntrustedRowColorPublishHolds(table);
+  if (untrustedColorMapping && !hasCountMatchedMixedColorConflict) clearUntrustedRowColorPublishHolds(table);
   if (
     analysis.source !== "ai_row_color" &&
     !table.rowColorReliable &&
@@ -8774,7 +8826,7 @@ function getStandardTicketFields(ticket) {
 function getQuickManualDisplayColumns(table) {
   const preferredOrder = ["日期", "票面", "区域", "排", "座位号", "备注", "售价", "数量"];
   const labels = new Set();
-  (table?.rows || []).slice(0, MAX_REVIEW_ROWS_RENDERED).forEach((row, index) => {
+  (table?.rows || []).forEach((row, index) => {
     getStandardTicketFields({ table, row, index }).forEach((field) => labels.add(field.label));
   });
   return preferredOrder.filter((label) => labels.has(label));
@@ -12684,15 +12736,15 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   ].join(" / ");
   const hasColorPreview = hasOpenCvRowColorPreview(table);
   const openCvConflict = hasColorPreview && hasAnyOpenCvWhiteAndColoredConflict(table);
-  const openCvLabels = hasColorPreview && table.rowColorReliable === true ? getOpenCvNonSoldColorLabels(table) : [];
-  const openCvColorState = hasColorPreview && table.rowColorReliable === true ? getOpenCvEffectiveColorState(table) : null;
+  const openCvLabels = hasColorPreview && (table.rowColorReliable === true || openCvConflict) ? getOpenCvNonSoldColorLabels(table) : [];
+  const openCvColorState = hasColorPreview ? getOpenCvEffectiveColorState(table) : null;
   const rowColorEngineName = getRowColorEngineName(table);
   const rowColorStatusText =
     isVisualRowColorSource(table)
-      ? table.rowColorReliable
+      ? openCvConflict
         ? table.rowColorMessage || getOpenCvColorReferenceMessage(table)
-        : openCvConflict
-          ? table.rowColorMessage || `${rowColorEngineName} 检测到颜色差异，未可靠对齐前不会自动改发布状态`
+        : table.rowColorReliable
+        ? table.rowColorMessage || getOpenCvColorReferenceMessage(table)
           : openCvColorState?.hasNonWhite && !openCvColorState?.hasWhite
             ? table.rowColorMessage || `${rowColorEngineName} 检测到非白底有效票，未找到白底参照，先保留人工确认。`
           : openCvLabels.length
@@ -12747,8 +12799,8 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   const reviewRows = table.rows
     .map((row, rowIndex) => ({ row, rowIndex }))
     .filter(({ row, rowIndex }) => table.showSoldInReview || !isUnavailableTicket({ table, row, index: rowIndex }));
-  const renderedReviewRows = reviewRows.slice(0, MAX_REVIEW_ROWS_RENDERED);
-  const hiddenReviewRowCount = Math.max(0, reviewRows.length - renderedReviewRows.length);
+  const renderedReviewRows = reviewRows;
+  const hiddenReviewRowCount = 0;
   const reviewZoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
   const rows = renderedReviewRows
     .map(({ row, rowIndex }) => {
