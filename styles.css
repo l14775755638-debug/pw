@@ -2052,6 +2052,10 @@ tr.hit-row td {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.review-layout.quick-manual-fallback-review-layout {
+  grid-template-columns: minmax(520px, 0.95fr) minmax(560px, 1.05fr);
+}
+
 .quick-manual-review-layout .review-source-panel,
 .quick-manual-review-layout .review-ticket-list,
 .source-action-review-layout .review-source-panel,
@@ -2059,9 +2063,19 @@ tr.hit-row td {
   grid-column: 1 / -1;
 }
 
+.quick-manual-fallback-review-layout .review-source-panel,
+.quick-manual-fallback-review-layout .review-ticket-list {
+  grid-column: auto;
+}
+
 .quick-manual-review-layout .review-source-panel,
 .source-action-review-layout .review-source-panel {
   position: static;
+}
+
+.quick-manual-fallback-review-layout .review-source-panel {
+  position: sticky;
+  top: 86px;
 }
 
 .quick-manual-review-layout .review-ticket-list-head {
@@ -2228,6 +2242,20 @@ tr.hit-row td {
 .source-action-review-layout .review-source-action-stage,
 .quick-manual-review-layout .review-source-action-stage {
   width: calc(100% - 88px);
+}
+
+.quick-manual-fallback-review-layout .review-source-with-actions {
+  max-width: none;
+  max-height: calc(100vh - 210px);
+}
+
+.quick-manual-fallback-review-layout .review-source-image,
+.quick-manual-fallback-review-layout .review-source-frame {
+  max-height: calc(100vh - 230px);
+}
+
+.quick-manual-fallback-review-layout .quick-table-wrap {
+  max-height: calc(100vh - 330px);
 }
 
 .review-source-action-layer {

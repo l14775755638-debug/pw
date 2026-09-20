@@ -1,7 +1,7 @@
 const REVIEW_FLAGS_VERSION = 35;
 const ROW_COLOR_LOGIC_VERSION = 78;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
-const ROW_ACTION_GEOMETRY_VERSION = 12;
+const ROW_ACTION_GEOMETRY_VERSION = 13;
 const COLUMN_NORMALIZATION_VERSION = 4;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
@@ -11977,9 +11977,11 @@ function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
   const sourceRowActionOverlays = getSourceRowActionOverlays(table, { includeEstimated: false });
   const hasSourceRowActions = sourceRowActionOverlays.length > 0;
   reviewLayout.classList.toggle("source-action-review-layout", hasSourceRowActions);
+  reviewLayout.classList.toggle("quick-manual-fallback-review-layout", !hasSourceRowActions);
+  const rowActionFallbackReason = getRowActionFallbackReason(table, { sourceMissing, sourceWaiting, waitingForSource: false });
   const sourceActionStatusText = hasSourceRowActions
     ? "已在原图旁生成逐行按钮；请直接对照原图颜色勾叉。"
-    : table.rowColorMessage || "";
+    : rowActionFallbackReason || table.rowColorMessage || "";
   if (!hasSourceRowActions && !sourceMissing && !sourceWaiting) queueQuickManualRowActionGeometry(table);
   const waitingForSourceRowActions =
     table.quickManualMode &&
@@ -12064,13 +12066,11 @@ function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
         hasSourceRowActions
           ? `<div class="review-ticket-limit-note">本页已启用原图贴行按钮；下方表格已隐藏，减少来回对齐。</div>`
           : waitingForSourceRowActions
-            ? `<div class="review-ticket-limit-note">正在定位原图逐行按钮；定位完成后会直接贴在原图右侧。</div>`
-          : hiddenRowCount
-            ? `<div class="review-ticket-limit-note">本页未能稳定一对一贴图；已改为完整表格核对，不再生成半套或错位贴图按钮。</div>`
-            : ""
+            ? `<div class="review-ticket-limit-note">正在尝试定位原图逐行按钮；当前先显示完整表格，可直接核对，不用空等。</div>`
+            : `<div class="review-ticket-limit-note">${escapeHtml(rowActionFallbackReason || "本页未能稳定一对一贴图；已改为完整表格核对，不再生成半套或错位贴图按钮。")}</div>`
       }
       ${
-        !hasSourceRowActions && !waitingForSourceRowActions && rows
+        !hasSourceRowActions && rows
           ? `<div class="quick-table-wrap">
               <table class="quick-decision-table">
                 <thead>
@@ -12083,7 +12083,7 @@ function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
                 <tbody>${rows}</tbody>
               </table>
             </div>`
-          : !hasSourceRowActions && !waitingForSourceRowActions
+          : !hasSourceRowActions
             ? `<div class="empty-state">这张表没有识别到票源行。</div>`
             : ""
       }
@@ -12190,6 +12190,29 @@ function getRowActionOverlayBox(item) {
   };
 }
 
+function getRowActionFallbackReason(table, { sourceMissing = false, sourceWaiting = false } = {}) {
+  if (sourceMissing) return "原图文件暂时不可用，无法生成贴图按钮；请用完整表格核对。";
+  if (sourceWaiting) return "正在检查原图文件，暂时先保留完整表格核对。";
+  if (!table?.quickManualMode) return "";
+  const expected = Array.isArray(table.rows) ? table.rows.length : 0;
+  const sourceRows = Array.isArray(table.rowColorRows) ? table.rowColorRows : [];
+  if (!expected) return "这张表没有有效票行。";
+  if (!sourceRows.length) {
+    return table.rowColorMessage || "本页还没有可靠的原图行坐标；已改为完整表格核对。";
+  }
+  if (Number(table.rowActionGeometryVersion || 0) !== ROW_ACTION_GEOMETRY_VERSION) {
+    return "旧版贴图坐标已作废，正在重新定位；定位前先用完整表格核对。";
+  }
+  const geometryRows = sourceRows.filter((item) => item?.rowActionGeometry === true && getRowActionOverlayBox(item));
+  if (sourceRows.length !== expected) {
+    return `原图检测到 ${sourceRows.length} 行，OCR 票行是 ${expected} 行，不能证明一一对应；已改为完整表格核对。`;
+  }
+  if (geometryRows.length !== expected) {
+    return `原图只有 ${geometryRows.length}/${expected} 行拿到可靠坐标；已改为完整表格核对。`;
+  }
+  return table.rowColorMessage || "本页未能稳定一对一贴图；已改为完整表格核对。";
+}
+
 function getEstimatedQuickManualRowActionOverlays(table) {
   if (!table?.quickManualMode || !Array.isArray(table.rows) || !table.rows.length) return [];
   const count = Math.min(table.rows.length, MAX_REVIEW_ROWS_RENDERED);
@@ -12288,6 +12311,7 @@ function normalizeUploadSourceReference(value) {
 
 function applyRowActionGeometryToTable(table, analysis) {
   if (!table || !Array.isArray(table.rows) || !analysis || !Array.isArray(analysis.rows)) return false;
+  if (applyTextAnchoredRowActionGeometryToTable(table, analysis)) return true;
   const aligned = getAlignedOpenCvRowsForTable(table, analysis.rows, 0);
   if (!aligned.rows?.length || aligned.rows.length !== table.rows.length) {
     return applyInterpolatedRowActionGeometryToTable(table, analysis);
@@ -12318,6 +12342,73 @@ function applyRowActionGeometryToTable(table, analysis) {
   return table.rowColorRows.every((item) => getRowActionOverlayBox(item));
 }
 
+function normalizeRowActionTextRows(analysis) {
+  return Array.isArray(analysis?.rowActionTextRows)
+    ? analysis.rowActionTextRows
+        .map((item) => {
+          const center = Number(item?.textCenter ?? ((Number(item?.y1) + Number(item?.y2)) / 2));
+          const y1 = Number(item?.y1);
+          const y2 = Number(item?.y2);
+          return Number.isFinite(center) && Number.isFinite(y1) && Number.isFinite(y2) && y2 > y1
+            ? { center, y1, y2 }
+            : null;
+        })
+        .filter(Boolean)
+        .sort((left, right) => left.center - right.center)
+    : [];
+}
+
+function applyTextAnchoredRowActionGeometryToTable(table, analysis) {
+  const expectedRows = Array.isArray(table?.rows) ? table.rows.length : 0;
+  const imageHeight = Number(analysis?.imageHeight || 0);
+  const imageWidth = Number(analysis?.imageWidth || 0);
+  if (!table?.quickManualMode || !expectedRows || !imageHeight) return false;
+  const textRows = normalizeRowActionTextRows(analysis);
+  if (textRows.length !== expectedRows) return false;
+  const gaps = textRows
+    .slice(1)
+    .map((item, index) => item.center - textRows[index].center)
+    .filter((gap) => gap > 0)
+    .sort((a, b) => a - b);
+  const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+  const maxGap = gaps.length ? Math.max(...gaps) : 0;
+  if (expectedRows > 1 && (!Number.isFinite(medianGap) || medianGap < 8 || maxGap > medianGap * 2.9)) {
+    table.rowColorMessage = "原图文字行间距异常，不能证明按钮能逐行贴准；已改为完整表格核对。";
+    return false;
+  }
+  const rowHeight = expectedRows > 1 ? Math.max(8, Math.min(48, medianGap * 0.82)) : Math.max(12, textRows[0].y2 - textRows[0].y1);
+  const rows = textRows.map((item, index) => {
+    const effectiveHeight = Math.max(8, Math.min(56, Math.max(rowHeight, item.y2 - item.y1)));
+    const y1 = Math.max(0, item.center - effectiveHeight / 2);
+    const y2 = Math.min(imageHeight, item.center + effectiveHeight / 2);
+    return {
+      source: analysis.source || "text_row_geometry",
+      label: "",
+      rawLabel: "",
+      confidence: 1,
+      rowBox: { y1, y2, x1: 0, x2: imageWidth || null },
+      y1,
+      y2,
+      x1: 0,
+      x2: imageWidth || "",
+      height: y2 - y1,
+      rowActionGeometry: true,
+      textAnchoredRowActionGeometry: true,
+      sourceIndex: index,
+    };
+  });
+  if (!rows.every((item) => getRowActionOverlayBox(item))) return false;
+  table.rowColorSource = "quick_manual_text_row_geometry";
+  table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
+  table.rowActionGeometryVersion = ROW_ACTION_GEOMETRY_VERSION;
+  table.rowColorImageWidth = imageWidth;
+  table.rowColorImageHeight = imageHeight;
+  table.rowColorRows = rows;
+  table.rowColorSourceIndexes = rows.map((_, index) => index);
+  table.rowColorMessage = "已按 OCR 文字中心生成原图贴行按钮；请直接对照原图颜色勾叉。";
+  return true;
+}
+
 function getSortedRowActionBoxes(rows = []) {
   return rows
     .map((row, index) => ({ box: getRowActionOverlayBox(row), row, index }))
@@ -12331,19 +12422,7 @@ function buildInterpolatedRowActionBoxes(table, analysis) {
   const sorted = getSortedRowActionBoxes(analysis?.rows || []);
   if (!table?.quickManualMode || expectedRows < 5 || !imageHeight) return [];
 
-  const textRows = Array.isArray(analysis?.rowActionTextRows)
-    ? analysis.rowActionTextRows
-        .map((item) => {
-          const center = Number(item?.textCenter ?? ((Number(item?.y1) + Number(item?.y2)) / 2));
-          const y1 = Number(item?.y1);
-          const y2 = Number(item?.y2);
-          return Number.isFinite(center) && Number.isFinite(y1) && Number.isFinite(y2) && y2 > y1
-            ? { center, y1, y2 }
-            : null;
-        })
-        .filter(Boolean)
-        .sort((left, right) => left.center - right.center)
-    : [];
+  const textRows = normalizeRowActionTextRows(analysis);
   const textGaps = textRows
     .slice(1)
     .map((item, index) => item.center - textRows[index].center)
@@ -12491,7 +12570,7 @@ function queueQuickManualRowActionGeometry(table) {
       table.quickRowActionGeometryTried = false;
       table.quickRowActionGeometryTriedVersion = 0;
       table._quickRowActionGeometryFailedAt = Date.now();
-      table.rowColorMessage = `${error.message || "原图逐行按钮定位失败"}；已保留右侧表格兜底。`;
+      table.rowColorMessage = `${error.message || "原图逐行按钮定位失败"}；已改为完整表格核对。`;
     } finally {
       table._quickRowActionGeometryRunning = false;
       renderReviewPanel(undefined, { normalize: false });
@@ -12546,6 +12625,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   if (!table || table.eventId !== currentEvent.id) {
     reviewLayout.classList.remove("quick-manual-review-layout");
     reviewLayout.classList.remove("source-action-review-layout");
+    reviewLayout.classList.remove("quick-manual-fallback-review-layout");
     reviewTitle.textContent = "选择一张待确认表";
     confirmReviewButton.disabled = true;
     reviewLayout.innerHTML = `<div class="empty-state">上传票源文件后，先在上方待确认列表中选择一张表进行校对。</div>`;
@@ -12592,6 +12672,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   }
   reviewLayout.classList.remove("quick-manual-review-layout");
   reviewLayout.classList.remove("source-action-review-layout");
+  reviewLayout.classList.remove("quick-manual-fallback-review-layout");
   const skippedSoldRows = table.rows.filter((row, rowIndex) => isUnavailableTicket({ table, row, index: rowIndex })).length;
   const aiDecisions = Array.isArray(table.aiReviewDecisions) ? table.aiReviewDecisions : [];
   const aiDecisionByRow = new Map(aiDecisions.map((item) => [Number(item.row), item]));
