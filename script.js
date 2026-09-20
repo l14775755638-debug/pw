@@ -11993,8 +11993,8 @@ function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
   const skipCount = table.rows.length - publishCount;
   const visibleColumns = getQuickManualDisplayColumns(table);
   const headerCells = visibleColumns.map((column) => `<th>${escapeHtml(column)}</th>`).join("");
-  const renderedRows = table.rows.slice(0, MAX_REVIEW_ROWS_RENDERED);
-  const hiddenRowCount = Math.max(0, table.rows.length - renderedRows.length);
+  const renderedRows = table.rows;
+  const hiddenRowCount = 0;
   const rows = renderedRows
     .map((row, rowIndex) => {
       const ticket = { table, row, index: rowIndex };
@@ -12066,7 +12066,7 @@ function renderQuickManualReviewPanel(table, navigation, navigationLabel) {
           : waitingForSourceRowActions
             ? `<div class="review-ticket-limit-note">正在定位原图逐行按钮；定位完成后会直接贴在原图右侧。</div>`
           : hiddenRowCount
-            ? `<div class="review-ticket-limit-note">本页未能稳定一对一贴图；先显示前 ${MAX_REVIEW_ROWS_RENDERED} 条，剩余 ${hiddenRowCount} 条仍保留在待确认表里。</div>`
+            ? `<div class="review-ticket-limit-note">本页未能稳定一对一贴图；已改为完整表格核对，不再生成半套或错位贴图按钮。</div>`
             : ""
       }
       ${
@@ -12105,8 +12105,8 @@ function renderQuickCheckTablePanel(table) {
   const skipCount = table.rows.length - publishCount;
   const visibleColumns = getQuickManualDisplayColumns(table);
   const headerCells = visibleColumns.map((column) => `<th>${escapeHtml(column)}</th>`).join("");
-  const renderedRows = table.rows.slice(0, MAX_REVIEW_ROWS_RENDERED);
-  const hiddenRowCount = Math.max(0, table.rows.length - renderedRows.length);
+  const renderedRows = table.rows;
+  const hiddenRowCount = 0;
   const rows = renderedRows
     .map((row, rowIndex) => {
       const ticket = { table, row, index: rowIndex };
@@ -12148,7 +12148,7 @@ function renderQuickCheckTablePanel(table) {
           <button class="small-button ghost" type="button" data-quick-invert-selection>反选</button>
         </div>
       </div>
-      ${hiddenRowCount ? `<div class="review-ticket-limit-note">本页先显示前 ${MAX_REVIEW_ROWS_RENDERED} 条，剩余 ${hiddenRowCount} 条仍保留在待确认表里。</div>` : ""}
+      ${hiddenRowCount ? `<div class="review-ticket-limit-note">本页表格已完整显示。</div>` : ""}
       ${
         rows
           ? `<div class="quick-table-wrap">
