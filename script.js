@@ -10787,8 +10787,30 @@ function selectPendingTable(tableId, { scroll = false } = {}) {
   selectedPendingTableId = table.id;
   ensurePendingTableReviewFlags(table);
   pendingReviewFocusRowIndex = getReviewableRowIndexes(table)[0] ?? getVisibleReviewRowIndexes(table)[0] ?? null;
-  renderReviewPanel(pendingReviewFocusRowIndex, { normalize: false });
-  window.requestAnimationFrame(() => renderUploadRecords({ normalize: false }));
+  reviewTitle.textContent = shortenFileName(table.title || "新上传票源", 36);
+  confirmReviewButton.disabled = true;
+  reviewLayout.classList.remove("quick-manual-review-layout");
+  reviewLayout.classList.remove("source-action-review-layout");
+  reviewLayout.classList.remove("quick-manual-fallback-review-layout");
+  reviewLayout.innerHTML = `<div class="empty-state">正在打开这张确认表...</div>`;
+  window.requestAnimationFrame(() => {
+    try {
+      renderReviewPanel(pendingReviewFocusRowIndex, { normalize: false });
+      renderUploadRecords({ normalize: false });
+      if (scroll) document.querySelector("#reviewPanel")?.scrollIntoView({ behavior: "auto", block: "start" });
+    } catch (error) {
+      console.error("Failed to render pending review table", error, table);
+      confirmReviewButton.disabled = true;
+      reviewLayout.innerHTML = `
+        <div class="manual-review-note danger">
+          <strong>这张确认表打开失败</strong>
+          <span>${escapeHtml(error?.message || "渲染确认表时发生错误。")}</span>
+        </div>
+        <div class="empty-state">请先不要发布这一页；刷新或重新生成后仍失败，把这条错误发给我继续定位。</div>
+      `;
+      showToast("确认表打开失败，已把错误显示在校对区域。", "error");
+    }
+  });
   if (scroll) document.querySelector("#reviewPanel")?.scrollIntoView({ behavior: "auto", block: "start" });
   return true;
 }
@@ -13113,6 +13135,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   const sourceMissing = isReviewSourceMissing(sourceUrl);
   const sourceWaiting = isReviewSourceWaiting(sourceUrl);
   const sourceActionStatusText = "";
+  const hasSourceRowActions = false;
   reviewLayout.classList.remove("source-action-review-layout");
   reviewLayout.innerHTML = `
     ${
