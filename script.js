@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 80;
+const ROW_COLOR_LOGIC_VERSION = 81;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
@@ -5200,6 +5200,7 @@ function shouldAutoSkipForRowColor(table, rowIndex) {
   if (table.rowColorSource === "ai_row_color") return isTrustedAiRowSkipDecision(table, rowIndex);
   if (hasVerifiedWhiteAndNonWhiteRowColorHold(table) && hasVerifiedNonWhiteRowColorHold(table, rowIndex)) return true;
   if (hasCountMatchedMixedRowColorAutoSkipSource(table) && isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex)) return true;
+  if (hasRowLevelMixedOpenCvColorConflict(table) && isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex)) return true;
   if (
     (table.rowColorSource === "opencv" ||
       table.rowColorSource === "pdf_vector" ||
@@ -5527,6 +5528,7 @@ function getAutoOpenCvRowColorLabel(table, rowIndex) {
 function hasActionableOpenCvColorSource(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
   if (hasCountMatchedMixedRowColorAutoSkipSource(table)) return true;
+  if (hasRowLevelMixedOpenCvColorConflict(table)) return true;
   if (
     Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
     table.rowColorActionableConflict === true
@@ -5681,6 +5683,67 @@ function hasCountMatchedMixedRowColorAutoSkipSource(table) {
   return state.hasWhite && state.hasStrongNonWhite;
 }
 
+function hasRowLevelOpenCvColorBinding(table) {
+  if (
+    !hasOpenCvRowColorPreview(table) ||
+    table?.rowColorSource === "ai_row_color" ||
+    !Array.isArray(table.rows) ||
+    !Array.isArray(table.rowColorRows) ||
+    !table.rows.length ||
+    table.rowColorRows.length !== table.rows.length
+  ) {
+    return false;
+  }
+  if (table.rowColorExactRowAligned === true || table.rowColorExactBackendAligned === true) return true;
+  if (table.rowColorPartialSequenceAligned === true) return hasSafePartialSequenceRowColorAlignment(table);
+  if (table.rowColorSource === "ticket_row_anchor") {
+    return table.rowColorRows.some((item) => item?.rowTextVerified === true && item?.rowGeometryVerified === true);
+  }
+  const sourceIndexes = Array.isArray(table.rowColorSourceIndexes) ? table.rowColorSourceIndexes.map((value) => Number(value)) : [];
+  if (sourceIndexes.length === table.rows.length && sourceIndexes.every((value) => Number.isInteger(value) && value >= 0)) return true;
+  return table.rowColorRows.every((item, index) => Number(item?.sourceIndex ?? index) === index);
+}
+
+function getRowLevelMixedOpenCvColorState(table) {
+  const state = {
+    hasWhite: false,
+    hasStrongNonWhite: false,
+    whiteCount: 0,
+    nonWhiteCount: 0,
+    labels: [],
+  };
+  if (!hasRowLevelOpenCvColorBinding(table)) return state;
+  table.rows.forEach((row, index) => {
+    const ticket = { table, row, index };
+    if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
+    const item = table.rowColorRows[index];
+    if (!item || item.userCleared) return;
+    const strictLabel = getStrictRowLocalOpenCvColorLabel(item);
+    const conflictLabel = getOpenCvItemConflictActionLabel(item);
+    if (isAvailableRowColorLabel(strictLabel) || isAvailableRowColorLabel(conflictLabel)) {
+      state.hasWhite = true;
+      state.whiteCount += 1;
+      state.labels.push("白底");
+    }
+    if (
+      (strictLabel && !isAvailableRowColorLabel(strictLabel)) ||
+      (conflictLabel && !isAvailableRowColorLabel(conflictLabel)) ||
+      isRawNonWhiteColorStrongEnoughForMixedTable(item)
+    ) {
+      state.hasStrongNonWhite = true;
+      state.nonWhiteCount += 1;
+      state.labels.push(strictLabel || conflictLabel || getOpenCvItemRawColorLabel(item) || "非白底");
+    }
+  });
+  state.labels = uniqueCleanValues(state.labels);
+  return state;
+}
+
+function hasRowLevelMixedOpenCvColorConflict(table) {
+  const state = getRowLevelMixedOpenCvColorState(table);
+  return state.hasWhite && state.hasStrongNonWhite;
+}
+
 function isRawNonWhiteColorStrongEnoughForMixedTable(item) {
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel) || item?.userCleared) return false;
@@ -5713,7 +5776,12 @@ function isRawNonWhiteColorStrongEnoughForMixedTable(item) {
 }
 
 function isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex) {
-  if (!hasExactMixedRawRowColorConflict(table) && !hasCountMatchedMixedRowColorAutoSkipSource(table)) return false;
+  if (
+    !hasExactMixedRawRowColorConflict(table) &&
+    !hasCountMatchedMixedRowColorAutoSkipSource(table) &&
+    !hasRowLevelMixedOpenCvColorConflict(table)
+  )
+    return false;
   const ticket = { table, row: table?.rows?.[rowIndex], index: rowIndex };
   if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return false;
   return isRawNonWhiteColorStrongEnoughForMixedTable(table?.rowColorRows?.[rowIndex]);
@@ -5743,7 +5811,13 @@ function getOpenCvEffectiveColorState(table) {
     nonWhiteCount: 0,
     labels: [],
   };
-  if ((!hasOpenCvColorDecisionAlignment(table) && !hasCountMatchedMixedRowColorAutoSkipSource(table)) || !Array.isArray(table.rows)) return state;
+  if (
+    (!hasOpenCvColorDecisionAlignment(table) &&
+      !hasCountMatchedMixedRowColorAutoSkipSource(table) &&
+      !hasRowLevelMixedOpenCvColorConflict(table)) ||
+    !Array.isArray(table.rows)
+  )
+    return state;
 
   table.rows.forEach((row, index) => {
     const ticket = { table, row, index };
@@ -6306,9 +6380,13 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
       };
   const hasColorConflict = colorState.hasWhite && colorState.hasNonWhite;
   const hasCountMatchedMixedColorConflict = hasCountMatchedMixedRowColorAutoSkipSource(table);
+  const hasRowLevelMixedColorConflict = hasRowLevelMixedOpenCvColorConflict(table);
   const hasVerifiedRowColorConflict = hasVerifiedWhiteAndNonWhiteRowColorHold(table);
   table.rowColorActionableConflict = Boolean(
-    (table.rowColorReliable && hasColorConflict) || hasVerifiedRowColorConflict || hasCountMatchedMixedColorConflict,
+    (table.rowColorReliable && hasColorConflict) ||
+      hasVerifiedRowColorConflict ||
+      hasCountMatchedMixedColorConflict ||
+      hasRowLevelMixedColorConflict,
   );
   applyOpenCvWhiteVsColoredAutoDecision(table);
   const actionableColorState = table.rowColorActionableConflict ? getOpenCvEffectiveColorState(table) : colorState;
@@ -6317,7 +6395,9 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
     !table.rowColorReliable &&
     ((analysis.source === "opencv" || analysis.source === "pdf_vector" || analysis.source === "paddle_ppstructure") &&
       (!table.rowColorExactBackendAligned || !table.rowColorExactRowAligned || table.rowColorPartialSequenceAligned));
-  if (untrustedColorMapping && !hasCountMatchedMixedColorConflict) clearUntrustedRowColorPublishHolds(table);
+  if (untrustedColorMapping && !hasCountMatchedMixedColorConflict && !hasRowLevelMixedColorConflict) {
+    clearUntrustedRowColorPublishHolds(table);
+  }
   if (
     analysis.source !== "ai_row_color" &&
     !table.rowColorReliable &&
