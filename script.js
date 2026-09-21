@@ -1,7 +1,7 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 78;
+const ROW_COLOR_LOGIC_VERSION = 79;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
-const ROW_ACTION_GEOMETRY_VERSION = 13;
+const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
@@ -5582,6 +5582,18 @@ function hasExactMixedRawRowColorConflict(table) {
   );
 }
 
+function hasSafePartialSequenceRowColorAlignment(table) {
+  if (!table || table.rowColorPartialSequenceAligned !== true) return true;
+  if (table.rowColorSourceIndexMode !== "sequence") return false;
+  const rowCount = Array.isArray(table.rows) ? table.rows.length : 0;
+  if (!rowCount || !Array.isArray(table.rowColorRows) || table.rowColorRows.length !== rowCount) return false;
+  const sequenceNumbers = getVisibleSourceSequenceNumbers(table);
+  if (sequenceNumbers.length !== rowCount) return false;
+  const sourceIndexes = Array.isArray(table.rowColorSourceIndexes) ? table.rowColorSourceIndexes.map((value) => Number(value)) : [];
+  if (sourceIndexes.length !== rowCount) return false;
+  return sourceIndexes.every((value) => Number.isInteger(value) && value >= 0);
+}
+
 function getCountMatchedMixedRowColorState(table) {
   const state = {
     hasWhite: false,
@@ -5593,7 +5605,7 @@ function getCountMatchedMixedRowColorState(table) {
   if (
     !hasOpenCvRowColorPreview(table) ||
     table?.rowColorSource === "ai_row_color" ||
-    table?.rowColorPartialSequenceAligned === true ||
+    !hasSafePartialSequenceRowColorAlignment(table) ||
     !Array.isArray(table.rows) ||
     !Array.isArray(table.rowColorRows) ||
     !table.rows.length ||
@@ -5825,20 +5837,24 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
   table.publishRows = table.publishRows || {};
   let skipCount = 0;
   let releasedCount = 0;
+  const autoSkipRows = [];
   table.rows.forEach((row, rowIndex) => {
     const ticket = { table, row, index: rowIndex };
     if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
     if (shouldAutoSkipForRowColor(table, rowIndex)) {
       table.publishRows[rowIndex] = false;
+      autoSkipRows.push(rowIndex);
       skipCount += 1;
     } else if (table.publishRows[rowIndex] === false && table.manualSkipRows?.[rowIndex] !== true && isCustomerPublishableTicket(ticket)) {
       delete table.publishRows[rowIndex];
       releasedCount += 1;
     }
   });
+  table.rowColorAutoSkipRows = autoSkipRows;
   table.rowColorConfirmed = skipCount > 0;
   table.rowColorAutoApplied = skipCount > 0;
   table.rowColorAutoSkipCount = skipCount;
+  if (skipCount > 0) table.rowColorMessage = `已按同表白底参照自动下架 ${skipCount} 条非白底票；表头、表尾、分割线不参与判断。`;
   return skipCount + releasedCount;
 }
 
@@ -12475,8 +12491,109 @@ function normalizeUploadSourceReference(value) {
   }
 }
 
-function applyRowActionGeometryToTable(table, analysis) {
+function buildFullWidthRowActionBoxFromAnchor(anchorRows, rowIndex, imageWidth, imageHeight) {
+  const row = anchorRows[rowIndex];
+  const box = getRowActionOverlayBox(row);
+  if (!box || !imageHeight) return null;
+  const centers = anchorRows
+    .map((item) => {
+      const itemBox = getRowActionOverlayBox(item);
+      return itemBox ? (itemBox.y1 + itemBox.y2) / 2 : NaN;
+    })
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right);
+  const center = (box.y1 + box.y2) / 2;
+  const currentCenterIndex = centers.findIndex((value) => Math.abs(value - center) < 0.01);
+  const prevCenter = currentCenterIndex > 0 ? centers[currentCenterIndex - 1] : NaN;
+  const nextCenter = currentCenterIndex >= 0 && currentCenterIndex < centers.length - 1 ? centers[currentCenterIndex + 1] : NaN;
+  const gaps = centers
+    .slice(1)
+    .map((value, index) => value - centers[index])
+    .filter((gap) => Number.isFinite(gap) && gap > 0)
+    .sort((left, right) => left - right);
+  const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+  const boxHeight = Math.max(1, box.y2 - box.y1);
+  const fallbackPad = Math.max(3, Math.min(18, medianGap ? medianGap * 0.18 : boxHeight * 0.35));
+  const upperBoundary = Number.isFinite(prevCenter) ? (prevCenter + center) / 2 : Math.max(0, box.y1 - fallbackPad);
+  const lowerBoundary = Number.isFinite(nextCenter) ? (center + nextCenter) / 2 : Math.min(imageHeight, box.y2 + fallbackPad);
+  const minHeight = Math.max(8, Math.min(24, boxHeight * 1.05));
+  let y1 = Math.max(0, upperBoundary);
+  let y2 = Math.min(imageHeight, lowerBoundary);
+  if (y2 - y1 < minHeight) {
+    y1 = Math.max(0, center - minHeight / 2);
+    y2 = Math.min(imageHeight, center + minHeight / 2);
+  }
+  return {
+    y1,
+    y2,
+    x1: 0,
+    x2: imageWidth || box.x2 || null,
+  };
+}
+
+function applyAnchorMatchedRowActionGeometryToTable(table, analysis) {
+  const expectedRows = Array.isArray(table?.rows) ? table.rows.length : 0;
+  const imageHeight = Number(analysis?.imageHeight || 0);
+  const imageWidth = Number(analysis?.imageWidth || 0);
+  if (
+    analysis?.source !== "ticket_row_anchor" ||
+    !expectedRows ||
+    !imageHeight ||
+    analysis.reliable !== true ||
+    analysis.exactRowAligned !== true ||
+    analysis.autoApplyAllowed !== true ||
+    !Array.isArray(analysis.rows) ||
+    analysis.rows.length !== expectedRows
+  ) {
+    return false;
+  }
+  const rowsByIndex = new Map(
+    analysis.rows.map((row, fallbackIndex) => [Number.isInteger(Number(row?.index)) ? Number(row.index) : fallbackIndex, row]),
+  );
+  const anchorRows = table.rows.map((_, index) => rowsByIndex.get(index) || null);
+  const complete = anchorRows.every((row) => {
+    const confidence = Number(row?.matchConfidence === "high" ? 1 : row?.confidence || 0);
+    return (
+      row &&
+      row.matched !== false &&
+      row.rowTextVerified === true &&
+      row.rowGeometryVerified === true &&
+      (row.matchConfidence === "high" || confidence >= 0.82) &&
+      getRowActionOverlayBox(row)
+    );
+  });
+  if (!complete) {
+    table.rowActionMessage = "文字锚点没有逐行高置信匹配，未生成贴图按钮；请用完整表格核对。";
+    return false;
+  }
+  const rows = anchorRows.map((row, index) => {
+    const rowBox = buildFullWidthRowActionBoxFromAnchor(anchorRows, index, imageWidth, imageHeight);
+    return {
+      ...row,
+      source: "ticket_row_anchor",
+      confidence: 1,
+      rowBox,
+      y1: rowBox?.y1 ?? row?.y1 ?? "",
+      y2: rowBox?.y2 ?? row?.y2 ?? "",
+      x1: 0,
+      x2: imageWidth || rowBox?.x2 || "",
+      height: rowBox ? rowBox.y2 - rowBox.y1 : "",
+      rowActionGeometry: true,
+      textAnchoredRowActionGeometry: true,
+      interpolatedRowActionGeometry: false,
+      sourceIndex: row?.index ?? index,
+    };
+  });
+  if (!rows.every((item) => getRowActionOverlayBox(item))) return false;
+  const applied = assignRowActionGeometryRows(table, rows, analysis, "ticket_row_anchor");
+  if (applied) table.rowActionMessage = "已按文字锚点一一匹配原图票行，按钮已贴在对应票行旁。";
+  return applied;
+}
+
+function applyRowActionGeometryToTable(table, analysis, options = {}) {
   if (!table || !Array.isArray(table.rows) || !analysis || !Array.isArray(analysis.rows)) return false;
+  if (applyAnchorMatchedRowActionGeometryToTable(table, analysis)) return true;
+  if (options.allowFallback === false) return false;
   if (applyTextAnchoredRowActionGeometryToTable(table, analysis)) return true;
   const aligned = getAlignedOpenCvRowsForTable(table, analysis.rows, 0);
   if (!aligned.rows?.length || aligned.rows.length !== table.rows.length) {
@@ -12658,19 +12775,20 @@ async function requestQuickManualRowActionGeometry(table) {
   const sourcePayload = getTableSourcePayloadForRowActions(table);
   if (!table || !sourcePayload) throw new Error("没有可读取的原始图片/PDF。");
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
-  const response = await fetch("/api/tables/analyze-row-colors", {
+  const timeoutId = window.setTimeout(() => controller.abort(), 45000);
+  const response = await fetch("/api/tables/analyze-row-colors-anchor", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal: controller.signal,
     body: JSON.stringify({
       ...sourcePayload,
       sourcePage: table.sourcePage || 1,
-      expectedRows: getRowColorExpectedRowsForPendingTable(table),
+      rows: table.rows,
+      columns: table.columns || [],
     }),
   }).finally(() => window.clearTimeout(timeoutId));
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.message || result.error || "本地行定位失败。");
+  if (!response.ok) throw new Error(result.message || result.error || "文字锚点贴图定位失败。");
   if (!result.rowColorAnalysis) throw new Error("本地行定位没有返回坐标。");
   return result.rowColorAnalysis;
 }
@@ -12697,7 +12815,7 @@ function queueQuickManualRowActionGeometry(table) {
     table.rowActionMessage = "正在定位原图逐行按钮...";
     try {
       const analysis = await requestQuickManualRowActionGeometry(table);
-      if (!applyRowActionGeometryToTable(table, analysis)) {
+      if (!applyRowActionGeometryToTable(table, analysis, { allowFallback: false })) {
         throw new Error(table.rowActionMessage || table.rowColorMessage || "本地行定位未能一一对应票行。");
       }
       saveAndArchiveAppStep(`快速人工行按钮定位：${table.title || currentEvent.name}`, "校对", { silent: true });
