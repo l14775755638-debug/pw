@@ -61,7 +61,8 @@ const aiRequestTimeoutSeconds = Math.max(25, readPositiveIntegerEnv("AI_REQUEST_
 const ocrCompletenessCheckEnabled = process.env.TICKET_OCR_COMPLETENESS_CHECK === "1";
 const ocrRowColorDuringScanEnabled = process.env.TICKET_OCR_ROW_COLOR_DURING_SCAN === "1";
 const ocrPpStructureDuringScanEnabled = process.env.TICKET_OCR_PPSTRUCTURE_DURING_SCAN === "1";
-const rowColorLogicVersion = 81;
+const rowColorLogicVersion = 83;
+const maxAnchorRowsPerTable = Math.max(40, readPositiveIntegerEnv("TICKET_ANCHOR_MAX_ROWS_PER_TABLE", 260));
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const defaultProxy = "http://127.0.0.1:7897";
@@ -1331,7 +1332,7 @@ async function analyzeTicketAnchorRowColorsBatch(payload, tables = []) {
     for (const table of tables) {
       const page = Math.max(1, Math.floor(Number(table?.sourcePage || 1)));
       const rows = Array.isArray(table?.rows) ? table.rows : [];
-      if (!rows.length || rows.length > 80) continue;
+      if (!rows.length || rows.length > maxAnchorRowsPerTable) continue;
       const image = await resolveRowColorSourceImage({ ...payload, sourcePage: page });
       const { mimeType, buffer } = dataUrlToBuffer(image);
       const imagePath = path.join(tempDir, `page-${page}${getExtensionForMime(mimeType, ".jpg")}`);

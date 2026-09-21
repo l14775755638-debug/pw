@@ -1,15 +1,16 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 81;
+const ROW_COLOR_LOGIC_VERSION = 83;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
-const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 30;
+const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 180;
+const MAX_ANCHOR_ROWS_PER_TABLE = 260;
 const MAX_REVIEW_ROWS_RENDERED = 240;
 const MAX_UPLOAD_RECORDS_RENDERED = 36;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
-const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
+const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = true;
 const DATE_COLUMN_NAMES = ["日期", "演出日期", "门票时间", "票期", "场次日期", "date", "day", "일자"];
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
@@ -4996,7 +4997,9 @@ function getStrictRowLocalOpenCvColorLabel(item) {
   if (!item || item.userCleared || item.source === "ai_row_color") return "";
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (item.source === "paddle_ppstructure" || item.source === "ticket_row_anchor") {
-    return item.rowTextVerified === true && item.rowGeometryVerified === true && Number(item.confidence || 0) >= 0.82 ? rawLabel : "";
+    if (item.rowTextVerified !== true || item.rowGeometryVerified !== true || Number(item.confidence || 0) < 0.82) return "";
+    if (isAvailableRowColorLabel(rawLabel)) return rawLabel;
+    return item.strong === true ? rawLabel : "";
   }
   const { cellCount, coloredCellCount, whiteCellCount, coloredCellRatio, whiteCellRatio } = getOpenCvCellStats(item);
   const coloredRatio = Number(item.coloredRatio || 0);
@@ -12071,7 +12074,7 @@ async function requestAnchorRowColorAnalysesForTables(tables, sourcePayload) {
       columns: table.columns || [],
       rows: table.rows || [],
     }))
-    .filter((table) => Array.isArray(table.rows) && table.rows.length > 0 && table.rows.length <= 80);
+    .filter((table) => Array.isArray(table.rows) && table.rows.length > 0 && table.rows.length <= MAX_ANCHOR_ROWS_PER_TABLE);
   if (!payloadTables.length) return {};
   const response = await fetch("/api/tables/analyze-row-colors-anchor-batch", {
     method: "POST",
@@ -12084,6 +12087,45 @@ async function requestAnchorRowColorAnalysesForTables(tables, sourcePayload) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.message || result.error || "批量文字锚点取色失败。");
   return result.rowColorAnalyses && typeof result.rowColorAnalyses === "object" ? result.rowColorAnalyses : {};
+}
+
+function isAutoApplicableAnchorRowColorAnalysis(analysis, rowCount = 0) {
+  if (!analysis || analysis.source !== "ticket_row_anchor") return false;
+  if (analysis.reliable !== true || analysis.exactRowAligned !== true || analysis.autoApplyAllowed !== true) return false;
+  if (!Array.isArray(analysis.rows) || !analysis.rows.length) return false;
+  if (rowCount > 0 && analysis.rows.length !== rowCount) return false;
+  return analysis.rows.every((row, index) => {
+    const rowIndex = Number(row?.index);
+    return (
+      Number.isInteger(rowIndex) &&
+      rowIndex === index &&
+      row.rowTextVerified === true &&
+      row.rowGeometryVerified === true &&
+      row.matched === true &&
+      Boolean(row.label || row.rawLabel)
+    );
+  });
+}
+
+function getVerifiedAnchorRowColorLabel(row) {
+  if (!row || row.rowTextVerified !== true || row.rowGeometryVerified !== true || row.matched === false) return "";
+  if (Number(row.confidence || 0) < 0.82) return "";
+  const label = normalizeRowColorLabel(row.label) || normalizeRowColorLabel(row.rawLabel);
+  if (!label) return "";
+  if (isAvailableRowColorLabel(label)) return label;
+  return row.strong === true ? label : "";
+}
+
+function hasUsableAnchorRowColorConflict(analysis, rowCount = 0) {
+  if (!analysis || analysis.source !== "ticket_row_anchor") return false;
+  if (!Array.isArray(analysis.rows) || !analysis.rows.length) return false;
+  if (rowCount > 0 && analysis.rows.length !== rowCount) return false;
+  const labels = analysis.rows.map(getVerifiedAnchorRowColorLabel).filter(Boolean);
+  return labels.some(isAvailableRowColorLabel) && labels.some((label) => label && !isAvailableRowColorLabel(label));
+}
+
+function isReusableAnchorRowColorAnalysis(analysis, rowCount = 0) {
+  return isAutoApplicableAnchorRowColorAnalysis(analysis, rowCount) || hasUsableAnchorRowColorConflict(analysis, rowCount);
 }
 
 function queuePendingTableRowColorRepair(table) {
@@ -13558,7 +13600,7 @@ async function getUploadPdfRowColorAnalyses(parsedTables) {
   const shouldDeferAnchorForLargePdf = uploadTables.length > MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD;
   if (shouldDeferAnchorForLargePdf) {
     setUploadStatus(
-      `这份 PDF 有 ${uploadTables.length} 页，已跳过全量文字锚点；先生成待确认表，打开具体页面时再做行底色校对。`,
+      `这份 PDF 有 ${uploadTables.length} 页，页数太多；先生成确认表，打开具体页面时再做文字锚点行底色校对。`,
       "loading",
     );
     return baseAnalyses;
@@ -13570,11 +13612,8 @@ async function getUploadPdfRowColorAnalyses(parsedTables) {
     const pageKey = String(sourcePage);
     const rowCount = Array.isArray(table?.rows) ? table.rows.length : 0;
     const currentAnalysis = baseAnalyses[pageKey] || baseAnalyses[sourcePage] || null;
-    if (!rowCount || rowCount > 80) return;
-    if (
-      (currentAnalysis?.source === "ai_row_color" || currentAnalysis?.source === "ticket_row_anchor") &&
-      currentAnalysis?.rowColorLogicVersion === ROW_COLOR_LOGIC_VERSION
-    ) {
+    if (!rowCount || rowCount > MAX_ANCHOR_ROWS_PER_TABLE) return;
+    if (currentAnalysis?.rowColorLogicVersion === ROW_COLOR_LOGIC_VERSION && isReusableAnchorRowColorAnalysis(currentAnalysis, rowCount)) {
       return;
     }
     anchorBatchTables.push(table);
@@ -13593,12 +13632,9 @@ async function getUploadPdfRowColorAnalyses(parsedTables) {
     const pageKey = String(sourcePage);
     if (repairAttempts.has(pageKey)) continue;
     const rowCount = Array.isArray(table?.rows) ? table.rows.length : 0;
-    if (!rowCount || rowCount > 80) continue;
+    if (!rowCount || rowCount > MAX_ANCHOR_ROWS_PER_TABLE) continue;
     const currentAnalysis = baseAnalyses[pageKey] || baseAnalyses[sourcePage] || null;
-    if (
-      (currentAnalysis?.source === "ai_row_color" || currentAnalysis?.source === "ticket_row_anchor") &&
-      currentAnalysis?.rowColorLogicVersion === ROW_COLOR_LOGIC_VERSION
-    ) {
+    if (currentAnalysis?.rowColorLogicVersion === ROW_COLOR_LOGIC_VERSION && isReusableAnchorRowColorAnalysis(currentAnalysis, rowCount)) {
       continue;
     }
     repairAttempts.add(pageKey);
@@ -13607,17 +13643,7 @@ async function getUploadPdfRowColorAnalyses(parsedTables) {
       const anchorAnalysis = anchorBatchAnalyses[pageKey] || anchorBatchAnalyses[sourcePage];
       if (!anchorAnalysis) setUploadStatus(`PDF 第 ${sourcePage} 页正在用文字锚点定位行底色...`, "loading");
       const effectiveAnchorAnalysis = anchorAnalysis || (await requestAnchorRowColorAnalysisForTable(table, sourcePayload));
-      if (
-        effectiveAnchorAnalysis?.source === "ticket_row_anchor" &&
-        Array.isArray(effectiveAnchorAnalysis.rows) &&
-        effectiveAnchorAnalysis.rows.some((row) => row?.rowTextVerified === true && row?.rowGeometryVerified === true && row?.strong === true)
-      ) {
-        effectiveAnchorAnalysis.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
-        baseAnalyses[pageKey] = effectiveAnchorAnalysis;
-        if (lastTicketOcrJobSnapshot?.rowColorAnalyses) lastTicketOcrJobSnapshot.rowColorAnalyses[pageKey] = effectiveAnchorAnalysis;
-        continue;
-      }
-      if (effectiveAnchorAnalysis?.reliable === true && effectiveAnchorAnalysis?.exactRowAligned === true && effectiveAnchorAnalysis?.autoApplyAllowed === true) {
+      if (isReusableAnchorRowColorAnalysis(effectiveAnchorAnalysis, rowCount)) {
         effectiveAnchorAnalysis.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
         baseAnalyses[pageKey] = effectiveAnchorAnalysis;
         if (lastTicketOcrJobSnapshot?.rowColorAnalyses) lastTicketOcrJobSnapshot.rowColorAnalyses[pageKey] = effectiveAnchorAnalysis;
