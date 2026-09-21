@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 79;
+const ROW_COLOR_LOGIC_VERSION = 80;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
@@ -4889,9 +4889,10 @@ function normalizeRowColorLabel(value) {
   if (!raw || /^[￥¥$,\d.]+$/.test(raw)) return "";
   const text = raw
     .replace(/\s+/g, "")
-    .replace(/底色|背景色|行色|色/g, "")
+    .replace(/底色|背景色|行色/g, "")
     .replace(/浅|淡|深|亮|明显/g, "");
   if (!text || /^(无|空|默认|透明|unknown|不确定|无法判断|看不清|na|n\/a|-|\/)$/.test(text)) return "";
+  if (/非白|有色|彩色|colored|colour/.test(text)) return "非白底";
   if (/white|白|灰白|米白/.test(text)) return "白底";
   if (/pink|粉/.test(text)) return "粉底";
   if (/red|红/.test(text)) return "红底";
@@ -4903,7 +4904,6 @@ function normalizeRowColorLabel(value) {
   if (/purple|violet|紫/.test(text)) return "紫底";
   if (/black|黑/.test(text)) return "黑底";
   if (/cyan|青|湖蓝|天蓝/.test(text)) return "青底";
-  if (/非白|有色|彩色|colored|colour/.test(text)) return "非白底";
   return "";
 }
 
@@ -6398,7 +6398,7 @@ function isAvailableRowColorLabel(label) {
 }
 
 function isDefaultAutoSkipColorLabel(label) {
-  return /^(红底|橙底)$/.test(String(label || ""));
+  return Boolean(label && !isAvailableRowColorLabel(label));
 }
 
 function hasContextualAnchorNonWhiteRowColorSignal(table, rowIndex) {
@@ -6407,7 +6407,7 @@ function hasContextualAnchorNonWhiteRowColorSignal(table, rowIndex) {
   if (!item || item.userCleared || item.source !== "ticket_row_anchor") return false;
   if (item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
   const rawLabel = getOpenCvItemRawColorLabel(item);
-  if (!rawLabel || isAvailableRowColorLabel(rawLabel) || !/^(红底|橙底|绿底)$/.test(rawLabel)) return false;
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return false;
   const coloredRatio = Number(item.coloredRatio || 0);
   const whiteRatio = Number(item.whiteRatio || 0);
   const coverageRatio = Number(item.coverageRatio || 0);
