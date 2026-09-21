@@ -6,7 +6,7 @@ const COLUMN_NORMALIZATION_VERSION = 4;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 30;
-const MAX_REVIEW_ROWS_RENDERED = 40;
+const MAX_REVIEW_ROWS_RENDERED = 240;
 const MAX_UPLOAD_RECORDS_RENDERED = 36;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
@@ -4928,6 +4928,30 @@ function hasOpenCvWhitePriceSideCell(item) {
   return rightWhiteRatio >= 0.3 && rightColoredRatio <= Math.max(0.34, rightWhiteRatio * 1.2);
 }
 
+function hasOpenCvNonWhiteTicketCellEvidence(item) {
+  if (!item || item.userCleared || item.source === "ai_row_color") return false;
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return false;
+  const { cellCount, coloredCellCount, whiteCellCount, coloredCellRatio } = getOpenCvCellStats(item);
+  const confidence = Number(item.confidence || 0);
+  const coloredRatio = Math.max(Number(item.coloredRatio || 0), Number(item.localPixelColoredRatio || 0));
+  const coverageRatio = Number(item.coverageRatio || 0);
+  if (cellCount < 3) {
+    return Boolean(item.strong) && confidence >= 0.55 && coloredRatio >= 0.22 && coverageRatio >= 0.2;
+  }
+  if (coloredCellCount < 2) return false;
+  const enoughColoredCells =
+    coloredCellCount >= Math.max(2, Math.ceil(cellCount * 0.25)) &&
+    coloredCellRatio >= 0.22 &&
+    confidence >= 0.28;
+  const coloredCellsDominate =
+    coloredCellCount >= Math.max(2, Math.ceil(cellCount * 0.33)) &&
+    coloredCellCount >= whiteCellCount &&
+    coloredCellRatio >= 0.3;
+  const strongPixelBand = Boolean(item.strong) && confidence >= 0.45 && coloredRatio >= 0.16 && coverageRatio >= 0.18;
+  return enoughColoredCells || coloredCellsDominate || strongPixelBand;
+}
+
 function isOpenCvCellMajorityWhite(item) {
   const { cellCount, coloredCellCount, whiteCellCount, whiteCellRatio } = getOpenCvCellStats(item);
   if (cellCount < 3) return false;
@@ -4944,10 +4968,11 @@ function isOpenCvCellMajorityNonWhite(item) {
 
 function isOpenCvCellNonWhiteTicketSignal(item) {
   if (!item || item.userCleared || item.source === "ai_row_color") return false;
-  if (isOpenCvCellMajorityWhite(item)) return false;
-  if (isOpenCvCellMajorityNonWhite(item)) return true;
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return false;
+  if (hasOpenCvNonWhiteTicketCellEvidence(item)) return true;
+  if (isOpenCvCellMajorityWhite(item)) return false;
+  if (isOpenCvCellMajorityNonWhite(item)) return true;
   const { cellCount, coloredCellCount, whiteCellCount, coloredCellRatio } = getOpenCvCellStats(item);
   if (cellCount < 3) return false;
   // Judge by independent data cells, not by one full-row stripe. A sold row can
@@ -4978,6 +5003,7 @@ function getStrictRowLocalOpenCvColorLabel(item) {
   const whiteRatio = Number(item.whiteRatio || 0);
   const coverageRatio = Number(item.coverageRatio || 0);
 
+  if (rawLabel && !isAvailableRowColorLabel(rawLabel) && hasOpenCvNonWhiteTicketCellEvidence(item)) return rawLabel;
   if (isOpenCvCellMajorityWhite(item)) return "白底";
   if (rawLabel && isAvailableRowColorLabel(rawLabel)) {
     const enoughWhiteCells = cellCount >= 3 && whiteCellCount >= Math.max(2, coloredCellCount + 1) && whiteCellRatio >= 0.42;
@@ -5304,7 +5330,11 @@ function getOpenCvRawRowColorLabel(table, rowIndex) {
 }
 
 function getOpenCvItemRawColorLabel(item) {
-  return normalizeRowColorLabel(item?.label) || normalizeRowColorLabel(item?.rawLabel);
+  const label = normalizeRowColorLabel(item?.label);
+  const rawLabel = normalizeRowColorLabel(item?.rawLabel);
+  if (label && !isAvailableRowColorLabel(label)) return label;
+  if (rawLabel && !isAvailableRowColorLabel(rawLabel)) return rawLabel;
+  return label || rawLabel;
 }
 
 function getOpenCvItemDecisionColorLabel(item) {
@@ -5412,9 +5442,10 @@ function getOpenCvItemConflictActionLabel(item) {
     const label = getStrictRowLocalOpenCvColorLabel(item);
     return label && !isAvailableRowColorLabel(label) && item.strong === true ? label : "";
   }
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (rawLabel && !isAvailableRowColorLabel(rawLabel) && hasOpenCvNonWhiteTicketCellEvidence(item)) return rawLabel;
   if (isOpenCvCellMajorityWhite(item)) return "白底";
   if (hasOpenCvWhitePriceSideCell(item)) return "白底";
-  const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return "";
   if (item.strong === true && isOpenCvCellNonWhiteTicketSignal(item)) return rawLabel;
   return isOpenCvCellNonWhiteTicketSignal(item) ? rawLabel : "";
@@ -5498,9 +5529,9 @@ function hasActionableOpenCvColorSource(table) {
   if (hasCountMatchedMixedRowColorAutoSkipSource(table)) return true;
   if (
     Number(table.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION &&
-    typeof table.rowColorActionableConflict === "boolean"
+    table.rowColorActionableConflict === true
   ) {
-    return table.rowColorActionableConflict;
+    return true;
   }
   if (hasVerifiedWhiteAndNonWhiteRowColorHold(table)) return true;
   if (!hasOpenCvColorDecisionAlignment(table)) return false;
@@ -5654,6 +5685,7 @@ function isRawNonWhiteColorStrongEnoughForMixedTable(item) {
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel) || item?.userCleared) return false;
   if (item?.source === "ai_row_color") return false;
+  if (hasOpenCvNonWhiteTicketCellEvidence(item)) return true;
   if (isOpenCvCellMajorityWhite(item)) return false;
   const confidence = Number(item?.confidence || 0);
   const coloredRatio = Math.max(Number(item?.coloredRatio || 0), Number(item?.localPixelColoredRatio || 0));
@@ -13193,7 +13225,6 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
         <span>${escapeHtml(navigationLabel)}</span>
         <button class="small-button ghost" type="button" data-review-table-nav="next" ${navigation.next ? "" : "disabled"}>下一页</button>
       </div>
-      ${hasSourceRowActions ? "" : renderQuickCheckTablePanel(table)}
       ${
         missingDateCount
           ? `<div class="review-quick-tools">
