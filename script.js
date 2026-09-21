@@ -4945,7 +4945,6 @@ function isOpenCvCellMajorityNonWhite(item) {
 function isOpenCvCellNonWhiteTicketSignal(item) {
   if (!item || item.userCleared || item.source === "ai_row_color") return false;
   if (isOpenCvCellMajorityWhite(item)) return false;
-  if (hasOpenCvWhitePriceSideCell(item)) return false;
   if (isOpenCvCellMajorityNonWhite(item)) return true;
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return false;
@@ -4963,7 +4962,9 @@ function isOpenCvCellNonWhiteTicketSignal(item) {
     Number(item.confidence || 0) >= 0.5 &&
     Number(item.coverageRatio || 0) >= 0.38 &&
     Number(item.coloredRatio || 0) >= Math.max(0.42, Number(item.whiteRatio || 0) + 0.18);
-  return clearColoredMajority || onlyColoredDataCells || dominantColoredPixels;
+  if (clearColoredMajority || dominantColoredPixels) return true;
+  if (hasOpenCvWhitePriceSideCell(item)) return false;
+  return onlyColoredDataCells;
 }
 
 function getStrictRowLocalOpenCvColorLabel(item) {
@@ -4984,8 +4985,6 @@ function getStrictRowLocalOpenCvColorLabel(item) {
     return enoughWhiteCells || weakColorBleed ? "白底" : "";
   }
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return "";
-  if (hasOpenCvWhitePriceSideCell(item)) return "白底";
-
   // Only auto-drop when this exact row's own cells are clearly non-white.
   // Pixel-level labels alone can bleed from separators or adjacent sold rows.
   const strongCellColor =
@@ -4994,6 +4993,15 @@ function getStrictRowLocalOpenCvColorLabel(item) {
     coloredCellRatio >= 0.55 &&
     coloredCellCount >= whiteCellCount + 2;
   if (strongCellColor) return rawLabel;
+
+  const clearMixedTableColor =
+    cellCount >= 3 &&
+    coloredCellCount >= Math.max(2, Math.ceil(cellCount * 0.42)) &&
+    coloredCellCount >= whiteCellCount + 1 &&
+    coloredRatio >= Math.max(0.18, whiteRatio + 0.05);
+  if (clearMixedTableColor) return rawLabel;
+
+  if (hasOpenCvWhitePriceSideCell(item)) return "白底";
 
   return "";
 }
@@ -5646,17 +5654,27 @@ function isRawNonWhiteColorStrongEnoughForMixedTable(item) {
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel) || item?.userCleared) return false;
   if (item?.source === "ai_row_color") return false;
-  if (isOpenCvCellMajorityWhite(item) || hasOpenCvWhitePriceSideCell(item)) return false;
+  if (isOpenCvCellMajorityWhite(item)) return false;
   const confidence = Number(item?.confidence || 0);
   const coloredRatio = Math.max(Number(item?.coloredRatio || 0), Number(item?.localPixelColoredRatio || 0));
   const whiteRatio = Math.max(Number(item?.whiteRatio || 0), Number(item?.localPixelWhiteRatio || 0));
   const coverageRatio = Number(item?.coverageRatio || 0);
+  const cellCount = Number(item?.cellCount || 0);
   const coloredCells = Number(item?.coloredCellCount || 0);
+  const whiteCells = Number(item?.whiteCellCount || 0);
+  const clearColoredCells =
+    cellCount >= 3 &&
+    coloredCells >= Math.max(2, Math.ceil(cellCount * 0.42)) &&
+    coloredCells >= whiteCells + 1;
+  const dominantColoredPixels = confidence >= 0.48 && coloredRatio >= 0.22 && coloredRatio >= whiteRatio + 0.08;
+  if (hasOpenCvWhitePriceSideCell(item) && !clearColoredCells && !dominantColoredPixels) return false;
   if (item?.source === "ticket_row_anchor" && (item.rowTextVerified !== true || item.rowGeometryVerified !== true)) return false;
   return (
     item?.strong === true ||
+    clearColoredCells ||
     isOpenCvCellNonWhiteTicketSignal(item) ||
     coloredCells >= 1 ||
+    dominantColoredPixels ||
     (confidence >= 0.45 && coloredRatio >= 0.18 && coloredRatio >= whiteRatio + 0.05) ||
     (confidence >= 0.6 && coverageRatio >= 0.2 && coloredRatio >= 0.14)
   );
