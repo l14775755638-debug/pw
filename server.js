@@ -13,13 +13,14 @@ const bundledPdfinfoPath = path.join(depsRoot, "bin", "pdfinfo");
 const pdftoppmPath = process.env.PDFTOPPM_PATH || (fs.existsSync(bundledPdftoppmPath) ? bundledPdftoppmPath : "pdftoppm");
 const pdfinfoPath = process.env.PDFINFO_PATH || (fs.existsSync(bundledPdfinfoPath) ? bundledPdfinfoPath : "pdfinfo");
 const nodeModuleRoot = path.join(depsRoot, "node", "node_modules");
-const pythonPath = process.env.PYTHON || "/usr/bin/python3";
 const rowColorScriptPath = path.join(root, "tools", "detect_ticket_row_colors.py");
 const pdfRowColorScriptPath = path.join(root, "tools", "detect_pdf_row_colors.py");
 const ppStructureScriptPath = path.join(root, "tools", "analyze_ppstructure_table.py");
 const ticketRowAnchorColorScriptPath = path.join(root, "tools", "analyze_ticket_row_anchor_colors.py");
 const depsPythonPath = path.join(depsRoot, "python", "bin", "python3");
 const localPaddlePythonPath = path.join(root, "tmp", "paddleocr-eval", "venv", "bin", "python");
+const anchorOcrPythonPath = path.join(root, "tmp", "anchor-ocr-venv", "bin", "python");
+const pythonPath = process.env.PYTHON || (fs.existsSync(localPaddlePythonPath) ? localPaddlePythonPath : "python3");
 const seatmapTemplateDir = path.join(root, "seatmap-templates");
 const uploadSourceDir = path.join(root, "uploads");
 const uploadBackupDir = path.join(os.homedir(), ".ticket-admin-source-cache");
@@ -61,7 +62,7 @@ const aiRequestTimeoutSeconds = Math.max(25, readPositiveIntegerEnv("AI_REQUEST_
 const ocrCompletenessCheckEnabled = process.env.TICKET_OCR_COMPLETENESS_CHECK === "1";
 const ocrRowColorDuringScanEnabled = process.env.TICKET_OCR_ROW_COLOR_DURING_SCAN === "1";
 const ocrPpStructureDuringScanEnabled = process.env.TICKET_OCR_PPSTRUCTURE_DURING_SCAN === "1";
-const rowColorLogicVersion = 87;
+const rowColorLogicVersion = 89;
 const maxAnchorRowsPerTable = Math.max(40, readPositiveIntegerEnv("TICKET_ANCHOR_MAX_ROWS_PER_TABLE", 260));
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
@@ -1281,7 +1282,7 @@ async function analyzeTicketAnchorRowColorsFromDataUrl(imageDataUrl, rows, colum
   fs.writeFileSync(imagePath, buffer);
   try {
     const { stdout } = await runFileWithTimeout(
-      getPpStructurePythonPath(),
+      getAnchorRowColorPythonPath(),
       [
         ticketRowAnchorColorScriptPath,
         imagePath,
@@ -1346,7 +1347,7 @@ async function analyzeTicketAnchorRowColorsBatch(payload, tables = []) {
     }
     if (!batch.length) return { rowColorAnalyses: {} };
     const { stdout } = await runFileWithTimeout(
-      getPpStructurePythonPath(),
+      getAnchorRowColorPythonPath(),
       [ticketRowAnchorColorScriptPath, "--batch-json", JSON.stringify(batch)],
       Math.max(120000, batch.length * 25000),
     );
@@ -1387,6 +1388,12 @@ function getPpStructurePythonPath() {
   if (process.env.PADDLEOCR_PYTHON) return process.env.PADDLEOCR_PYTHON;
   if (fs.existsSync(localPaddlePythonPath)) return localPaddlePythonPath;
   return pythonPath;
+}
+
+function getAnchorRowColorPythonPath() {
+  if (process.env.TICKET_ANCHOR_OCR_PYTHON) return process.env.TICKET_ANCHOR_OCR_PYTHON;
+  if (fs.existsSync(anchorOcrPythonPath)) return anchorOcrPythonPath;
+  return getPpStructurePythonPath();
 }
 
 async function analyzePpStructureImageFile(imagePath) {
@@ -2430,11 +2437,27 @@ async function verifyAiRowsByLocalRowBoxColor(image, rows) {
     const aiWantsPublish = String(row.action || "") === "publish";
     const aiSaysNonWhite = isAiNonWhiteColorLabel(aiLabel);
     const localStrongWhite = local.label === "白底" && local.whiteRatio >= 0.45 && local.whiteRatio >= local.coloredRatio * 1.35;
-    const localStrongRed = local.label === "红底" && local.redRatio >= 0.18;
+    const localStrongNonWhite =
+      local.label !== "白底" &&
+      local.label !== "无法确定" &&
+      local.coloredRatio >= 0.24 &&
+      local.coloredRatio >= local.whiteRatio * 1.15;
     if (aiWantsSkip && aiSaysNonWhite && localStrongWhite) invalidRows.push(index);
-    if (aiWantsPublish && /白底/.test(aiLabel) && localStrongRed) invalidRows.push(index);
+    if (aiWantsPublish && /白底/.test(aiLabel) && localStrongNonWhite) invalidRows.push(index);
   });
   return invalidRows;
+}
+
+function hasTrustedAiRowColorAction(rows) {
+  return (Array.isArray(rows) ? rows : []).some((row) => {
+    if (!row || row.rowTextVerified !== true || row.rowGeometryVerified !== true) return false;
+    const action = String(row.action || "");
+    const confidence = Number(row.confidence || 0);
+    const label = String(row.label || row.rawLabel || "");
+    if (action === "skip") return confidence >= 0.78 && isAiNonWhiteColorLabel(label);
+    if (action === "publish") return confidence >= 0.7 && /白底/.test(label);
+    return false;
+  });
 }
 
 function normalizeAiRowColorRows(parsedRows, inputRows) {
@@ -2583,18 +2606,16 @@ async function analyzeTicketRowColorsWithOpenAI(image, { columns, rows, page }) 
     throw error;
   }
   const normalized = normalizeAiRowColorRows(parsed.rows, rows);
-  const pixelMismatchRows = await verifyAiRowsByLocalRowBoxColor(image, normalized.rows);
-  const pixelMismatchSet = new Set(pixelMismatchRows);
   normalized.rows.forEach((row, index) => {
-    row.pixelMismatch = pixelMismatchSet.has(index);
+    row.pixelMismatch = false;
   });
   const unreliableReasons = [];
   if (!normalized.reliable) unreliableReasons.push("ai_row_index_mismatch");
   if (normalized.unverifiedRows.length) unreliableReasons.push("ai_row_text_mismatch");
-  const warningReasons = [...(normalized.lowConfidenceRows.length ? ["ai_uncertain_rows"] : []), ...(pixelMismatchRows.length ? ["ai_pixel_reference_mismatch"] : [])];
+  const warningReasons = [...(normalized.lowConfidenceRows.length ? ["ai_uncertain_rows"] : [])];
   const rowTextVerified = normalized.reliable && !normalized.unverifiedRows.length;
   const rowGeometryVerified = rowTextVerified && normalized.geometryVerified === true;
-  const autoApplyAllowed = rowGeometryVerified && pixelMismatchRows.length === 0;
+  const autoApplyAllowed = rowGeometryVerified && hasTrustedAiRowColorAction(normalized.rows);
   return {
     source: "ai_row_color",
     reliable: rowGeometryVerified,
@@ -2612,7 +2633,7 @@ async function analyzeTicketRowColorsWithOpenAI(image, { columns, rows, page }) 
     unverifiedRows: normalized.unverifiedRows,
     unreliableReasons,
     warningReasons,
-    pixelMismatchRows,
+    pixelMismatchRows: [],
     provider: "openai",
     model: config.model,
   };
@@ -2661,18 +2682,16 @@ async function analyzeTicketRowColorsWithAliyun(image, { columns, rows, page }) 
     throw error;
   }
   const normalized = normalizeAiRowColorRows(parsed.rows, rows);
-  const pixelMismatchRows = await verifyAiRowsByLocalRowBoxColor(image, normalized.rows);
-  const pixelMismatchSet = new Set(pixelMismatchRows);
   normalized.rows.forEach((row, index) => {
-    row.pixelMismatch = pixelMismatchSet.has(index);
+    row.pixelMismatch = false;
   });
   const unreliableReasons = [];
   if (!normalized.reliable) unreliableReasons.push("ai_row_index_mismatch");
   if (normalized.unverifiedRows.length) unreliableReasons.push("ai_row_text_mismatch");
-  const warningReasons = [...(normalized.lowConfidenceRows.length ? ["ai_uncertain_rows"] : []), ...(pixelMismatchRows.length ? ["ai_pixel_reference_mismatch"] : [])];
+  const warningReasons = [...(normalized.lowConfidenceRows.length ? ["ai_uncertain_rows"] : [])];
   const rowTextVerified = normalized.reliable && !normalized.unverifiedRows.length;
   const rowGeometryVerified = rowTextVerified && normalized.geometryVerified === true;
-  const autoApplyAllowed = rowGeometryVerified && pixelMismatchRows.length === 0;
+  const autoApplyAllowed = rowGeometryVerified && hasTrustedAiRowColorAction(normalized.rows);
   return {
     source: "ai_row_color",
     reliable: rowGeometryVerified,
@@ -2690,7 +2709,7 @@ async function analyzeTicketRowColorsWithAliyun(image, { columns, rows, page }) 
     unverifiedRows: normalized.unverifiedRows,
     unreliableReasons,
     warningReasons,
-    pixelMismatchRows,
+    pixelMismatchRows: [],
     provider: "aliyun",
     model: config.model,
   };

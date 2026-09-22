@@ -260,6 +260,7 @@ def create_paddle_ocr():
 
     for kwargs in (
         {"use_angle_cls": False, "lang": "ch", "show_log": False},
+        {"use_angle_cls": False, "lang": "ch"},
         {"use_textline_orientation": False, "lang": "ch"},
         {"lang": "ch"},
     ):
