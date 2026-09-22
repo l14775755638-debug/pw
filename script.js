@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 85;
+const ROW_COLOR_LOGIC_VERSION = 86;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
@@ -5180,7 +5180,6 @@ function isTrustedAiRowColorAction(item, action, threshold) {
 }
 
 function isTrustedAiRowSkipDecision(table, rowIndex) {
-  if (isPendingRowManuallyPublished(table, rowIndex)) return false;
   if (table?.rowColorAiAutoApplyAllowed !== true) return false;
   const item = getAiRowColorItem(table, rowIndex);
   if (!item || item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
@@ -5199,7 +5198,6 @@ function isTrustedAiRowPublishDecision(table, rowIndex) {
 
 function shouldAutoSkipForRowColor(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
-  if (isPendingRowManuallyPublished(table, rowIndex)) return false;
   if (table.rowColorSource === "ai_row_color") return isTrustedAiRowSkipDecision(table, rowIndex);
   if (hasVerifiedWhiteAndNonWhiteRowColorHold(table) && hasVerifiedNonWhiteRowColorHold(table, rowIndex)) return true;
   if (hasCountMatchedMixedRowColorAutoSkipSource(table) && isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex)) return true;
@@ -6519,7 +6517,7 @@ function isDefaultAutoSkipColorLabel(label) {
 }
 
 function hasContextualAnchorNonWhiteRowColorSignal(table, rowIndex) {
-  if (!hasOpenCvRowColorPreview(table) || isPendingRowManuallyPublished(table, rowIndex)) return false;
+  if (!hasOpenCvRowColorPreview(table)) return false;
   const item = table?.rowColorRows?.[rowIndex];
   if (!item || item.userCleared || item.source !== "ticket_row_anchor") return false;
   if (item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
@@ -6554,7 +6552,7 @@ function hasVerifiedWhiteRowColorReference(table) {
 }
 
 function hasVerifiedNonWhiteRowColorHold(table, rowIndex) {
-  if (!hasOpenCvRowColorPreview(table) || isPendingRowManuallyPublished(table, rowIndex)) return false;
+  if (!hasOpenCvRowColorPreview(table)) return false;
   if (!Array.isArray(table?.rowColorRows) || !table.rowColorRows[rowIndex]) return false;
   const item = table.rowColorRows[rowIndex];
   if (item.source === "ticket_row_anchor") {
