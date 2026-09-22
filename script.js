@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 83;
+const ROW_COLOR_LOGIC_VERSION = 84;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
@@ -6541,13 +6541,18 @@ function hasVerifiedNonWhiteRowColorHold(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table) || isPendingRowManuallyPublished(table, rowIndex)) return false;
   if (!Array.isArray(table?.rowColorRows) || !table.rowColorRows[rowIndex]) return false;
   const item = table.rowColorRows[rowIndex];
-  const label = getStrictRowLocalOpenCvColorLabel(item) || getOpenCvItemDecisionColorLabel(item);
-  if (!label || isAvailableRowColorLabel(label)) return false;
   if (item.source === "ticket_row_anchor") {
     if (item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
+    const label =
+      getStrictRowLocalOpenCvColorLabel(item) ||
+      getOpenCvItemDecisionColorLabel(item) ||
+      getOpenCvItemRawColorLabel(item);
+    if (!label || isAvailableRowColorLabel(label)) return false;
     if (item.strong === true) return true;
     return hasVerifiedWhiteRowColorReference(table) && hasContextualAnchorNonWhiteRowColorSignal(table, rowIndex);
   }
+  const label = getStrictRowLocalOpenCvColorLabel(item) || getOpenCvItemDecisionColorLabel(item);
+  if (!label || isAvailableRowColorLabel(label)) return false;
   if (item.source === "ai_row_color") return isTrustedAiRowSkipDecision(table, rowIndex);
   if (!hasExactVisualRowColorAlignment(table)) return false;
   return item.strong === true || isOpenCvCellNonWhiteTicketSignal(item);
