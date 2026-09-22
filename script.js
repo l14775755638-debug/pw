@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 84;
+const ROW_COLOR_LOGIC_VERSION = 85;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
@@ -6404,6 +6404,8 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   if (
     analysis.source !== "ai_row_color" &&
     !table.rowColorReliable &&
+    !table.rowColorActionableConflict &&
+    !hasVerifiedRowColorConflict &&
     !hasActionableOpenCvColorSource(table)
   ) {
     Object.keys(table.publishRows || {}).forEach((rowIndex) => {
@@ -6529,6 +6531,20 @@ function hasContextualAnchorNonWhiteRowColorSignal(table, rowIndex) {
   return coloredRatio >= 0.34 && coverageRatio >= 0.5 && coloredRatio >= whiteRatio + 0.1;
 }
 
+function hasContextualAnchorWhiteRowColorSignal(table, rowIndex) {
+  if (!hasOpenCvRowColorPreview(table)) return false;
+  const item = table?.rowColorRows?.[rowIndex];
+  if (!item || item.userCleared || item.source !== "ticket_row_anchor") return false;
+  if (item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (rawLabel && isAvailableRowColorLabel(rawLabel)) return true;
+  if (rawLabel && !isAvailableRowColorLabel(rawLabel)) return false;
+  const whiteRatio = Math.max(Number(item.whiteRatio || 0), Number(item.localPixelWhiteRatio || 0));
+  const coloredRatio = Math.max(Number(item.coloredRatio || 0), Number(item.localPixelColoredRatio || 0));
+  const coverageRatio = Number(item.coverageRatio || 0);
+  return whiteRatio >= 0.34 && coloredRatio <= Math.max(0.32, whiteRatio * 1.25) && coverageRatio <= 0.65;
+}
+
 function hasVerifiedWhiteRowColorReference(table) {
   if (!Array.isArray(table?.rows) || !table.rows.length) return false;
   return table.rows.some((row, index) => {
@@ -6570,11 +6586,17 @@ function hasVerifiedWhiteRowColorHold(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
   if (!Array.isArray(table?.rowColorRows) || !table.rowColorRows[rowIndex]) return false;
   const item = table.rowColorRows[rowIndex];
+  if (item.source === "ticket_row_anchor") {
+    if (item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
+    const label =
+      getStrictRowLocalOpenCvColorLabel(item) ||
+      getOpenCvItemDecisionColorLabel(item) ||
+      getOpenCvItemRawColorLabel(item);
+    if (label && isAvailableRowColorLabel(label)) return true;
+    return hasContextualAnchorWhiteRowColorSignal(table, rowIndex);
+  }
   const label = getStrictRowLocalOpenCvColorLabel(item) || getOpenCvItemDecisionColorLabel(item);
   if (!isAvailableRowColorLabel(label)) return false;
-  if (item.source === "ticket_row_anchor") {
-    return item.rowTextVerified === true && item.rowGeometryVerified === true && Number(item.confidence || 0) >= 0.82;
-  }
   if (item.source === "ai_row_color") return isTrustedAiRowPublishDecision(table, rowIndex);
   if (!hasExactVisualRowColorAlignment(table)) return false;
   return item.strong === true || isOpenCvCellMajorityWhite(item);
@@ -12114,11 +12136,14 @@ function isAutoApplicableAnchorRowColorAnalysis(analysis, rowCount = 0) {
 
 function getVerifiedAnchorRowColorLabel(row) {
   if (!row || row.rowTextVerified !== true || row.rowGeometryVerified !== true || row.matched === false) return "";
-  if (Number(row.confidence || 0) < 0.82) return "";
   const label = normalizeRowColorLabel(row.label) || normalizeRowColorLabel(row.rawLabel);
   if (!label) return "";
   if (isAvailableRowColorLabel(label)) return label;
-  return row.strong === true ? label : "";
+  if (row.strong === true) return label;
+  const coloredRatio = Number(row.coloredRatio || 0);
+  const whiteRatio = Number(row.whiteRatio || 0);
+  const coverageRatio = Number(row.coverageRatio || 0);
+  return coloredRatio >= 0.34 && coverageRatio >= 0.5 && coloredRatio >= whiteRatio + 0.1 ? label : "";
 }
 
 function hasUsableAnchorRowColorConflict(analysis, rowCount = 0) {
