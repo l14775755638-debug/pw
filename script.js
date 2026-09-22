@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 86;
+const ROW_COLOR_LOGIC_VERSION = 87;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
@@ -11985,8 +11985,26 @@ function shouldAutoRepairRowColors(table) {
   if (hasFreshRowColorLogic && table.rowColorSource === "ai_row_color") return false;
   if (hasFreshRowColorLogic && (table._rowColorRepairing || table._rowColorRepairDone || table._rowColorRepairTried)) return false;
   if (isVisualRowColorSource(table) && hasFreshRowColorLogic) {
-    const hasAnyAutoSkip = table.rows.some((row, rowIndex) => isColorMarkedSoldTicket({ table, row, index: rowIndex }));
-    if (hasAnyAutoSkip || !hasAnyOpenCvWhiteAndColoredConflict(table)) return false;
+    const hasUsableRowColorRows =
+      hasOpenCvRowColorPreview(table) &&
+      table.rowColorRows.some((item) => {
+        if (!item || item.userCleared) return false;
+        return Boolean(
+          getOpenCvItemRawColorLabel(item) ||
+            getOpenCvItemDecisionColorLabel(item) ||
+            item.rowTextVerified === true ||
+            item.rowGeometryVerified === true ||
+            Number(item.confidence || 0) > 0 ||
+            Number(item.coloredRatio || 0) > 0 ||
+            Number(item.whiteRatio || 0) > 0,
+        );
+      });
+    // A failed upload-time color pass can still stamp the latest logic version
+    // with no usable rows. Keep repairing those cases on review open.
+    if (hasUsableRowColorRows) {
+      const hasAnyAutoSkip = table.rows.some((row, rowIndex) => isColorMarkedSoldTicket({ table, row, index: rowIndex }));
+      if (hasAnyAutoSkip || !hasAnyOpenCvWhiteAndColoredConflict(table)) return false;
+    }
   }
   if (!isPdfTableSource(table) && !String(table.originalType || "").startsWith("image/")) return false;
   if (!table.originalImage) return false;

@@ -255,6 +255,76 @@ def group_ocr_rows(ocr_items):
     return output
 
 
+def create_paddle_ocr():
+    from paddleocr import PaddleOCR
+
+    for kwargs in (
+        {"use_angle_cls": False, "lang": "ch", "show_log": False},
+        {"use_textline_orientation": False, "lang": "ch"},
+        {"lang": "ch"},
+    ):
+        try:
+            return PaddleOCR(**kwargs)
+        except TypeError:
+            continue
+    return PaddleOCR()
+
+
+def normalize_paddle_result(raw):
+    if not raw:
+        return []
+    if (
+        isinstance(raw, list)
+        and raw
+        and isinstance(raw[0], list)
+        and (not raw[0] or (isinstance(raw[0][0], (list, tuple)) and len(raw[0][0]) >= 2))
+    ):
+        return raw[0]
+
+    items = []
+    pages = raw if isinstance(raw, list) else [raw]
+    for page in pages:
+        data = page
+        if hasattr(data, "json"):
+            try:
+                data = data.json
+            except Exception:
+                pass
+        if hasattr(data, "res"):
+            data = data.res
+        if not isinstance(data, dict):
+            continue
+        data = data.get("res") if isinstance(data.get("res"), dict) else data
+        texts = data.get("rec_texts") or data.get("texts") or []
+        scores = data.get("rec_scores") or data.get("scores") or []
+        polys = data.get("rec_polys") or data.get("dt_polys") or data.get("polys") or []
+        boxes = data.get("rec_boxes") or data.get("boxes") or []
+        for index, text in enumerate(texts):
+            points = polys[index] if index < len(polys) else None
+            if points is None and index < len(boxes):
+                box = boxes[index]
+                if isinstance(box, (list, tuple)) and len(box) >= 4:
+                    x1, y1, x2, y2 = [float(value) for value in box[:4]]
+                    points = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+            if points is None:
+                continue
+            score = scores[index] if index < len(scores) else 0
+            items.append((points, (text, score)))
+    return items
+
+
+def run_paddle_ocr(engine, image_path):
+    try:
+        raw = engine.ocr(str(image_path), cls=False)
+    except TypeError:
+        raw = engine.ocr(str(image_path))
+    if raw:
+        return normalize_paddle_result(raw)
+    if hasattr(engine, "predict"):
+        return normalize_paddle_result(engine.predict(str(image_path)))
+    return []
+
+
 def token_matches_row(token, visual_row):
     row_compact = visual_row.get("compact") or ""
     matched_words = []
@@ -398,19 +468,17 @@ def analyze_image(image_path, rows, columns=None, engine=None):
     height, width = image.shape[:2]
     init_seconds = 0
     if engine is None:
-        from paddleocr import PaddleOCR
-
         start = time.time()
-        engine = PaddleOCR(use_angle_cls=False, lang="ch", show_log=False)
+        engine = create_paddle_ocr()
         init_seconds = time.time() - start
     infer_start = time.time()
     try:
-        raw = engine.ocr(str(pp_path), cls=False)
+        ocr_items = run_paddle_ocr(engine, pp_path)
     finally:
         if resized_path:
             resized_path.unlink(missing_ok=True)
     infer_seconds = time.time() - infer_start
-    ocr_rows = group_ocr_rows(raw[0] if raw else [])
+    ocr_rows = group_ocr_rows(ocr_items)
     matches = []
     row_candidate_lists = []
     for index, row in enumerate(rows):
@@ -521,13 +589,11 @@ def main():
     args = parser.parse_args()
     try:
         if args.batch_json:
-            from paddleocr import PaddleOCR
-
             batch = json.loads(args.batch_json)
             if not isinstance(batch, list):
                 raise RuntimeError("batch-json must be a list")
             start = time.time()
-            engine = PaddleOCR(use_angle_cls=False, lang="ch", show_log=False)
+            engine = create_paddle_ocr()
             init_seconds = time.time() - start
             results = []
             for item in batch:
