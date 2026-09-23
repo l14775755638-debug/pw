@@ -530,6 +530,7 @@ def analyze_image(image_path, rows, columns=None, engine=None):
         color = classify_sample(image, match_rect) if best else {"label": "", "confidence": 0, "sampleBox": None, "reason": "no_match"}
         label = color.get("label") or ""
         color_strong = bool(color.get("strong")) and bool(label)
+        text_match_high = bool(matched and best and best["score"] >= 0.84)
         matches.append({
             "index": index,
             "label": label,
@@ -543,7 +544,7 @@ def analyze_image(image_path, rows, columns=None, engine=None):
             "rowGeometryVerified": matched,
             "matched": matched,
             "score": best["score"] if best else 0,
-            "matchConfidence": "high" if matched and best["score"] >= 0.84 and color_strong else "medium" if matched else "none",
+            "matchConfidence": "high" if text_match_high else "medium" if matched else "none",
             "reason": "matched_by_text_anchors" if matched else "ambiguous_or_missing_text_anchor",
             "tokens": [t.get("raw") for t in tokens],
             "matchedTokens": best["matchedTokens"] if best else [],

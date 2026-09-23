@@ -49,24 +49,37 @@ def build_color_masks(region):
     # Drop black text/grid pixels. They carry row borders/text, not background.
     non_ink = valid & ~((v < 100) & (s < 80))
     total = int(np.count_nonzero(non_ink))
+    neutral_delta = np.maximum.reduce([np.abs(r - g), np.abs(r - b), np.abs(g - b)])
+    pale_red_or_pink = (
+        non_ink
+        & (s > 18)
+        & (v > 128)
+        & (r > 145)
+        & (r > g + 8)
+        & (r > b + 8)
+        & ((h <= 8) | (h >= 150))
+    )
     masks = {
-        "white": non_ink & (s < 38) & (v > 178),
+        "white": non_ink & (s < 38) & (v > 178) & (neutral_delta < 28),
         "gray": non_ink & (s < 45) & (v <= 178) & (v > 80),
         "black": valid & (v <= 55),
-        "red": non_ink
-        & (s > 92)
-        & (v > 105)
-        & ((h <= 6) | (h >= 174))
-        & (r > 135)
-        & (r > g * 1.22)
-        & (r > b * 1.22),
+        "red": (
+            non_ink
+            & (s > 92)
+            & (v > 105)
+            & ((h <= 6) | (h >= 174))
+            & (r > 135)
+            & (r > g * 1.22)
+            & (r > b * 1.22)
+        )
+        | (pale_red_or_pink & ((h <= 8) | (h >= 170))),
         "orange": non_ink & (s > 72) & (v > 105) & (h > 8) & (h < 23) & (r > b * 1.18),
         "yellow": non_ink & (s > 62) & (v > 112) & (h >= 24) & (h < 39) & (r > b * 1.08) & (g > b * 1.08),
         "green": non_ink & (s > 45) & (v > 80) & (h >= 40) & (h < 88),
         "cyan": non_ink & (s > 45) & (v > 80) & (h >= 88) & (h < 104),
         "blue": non_ink & (s > 45) & (v > 70) & (h >= 104) & (h < 130),
         "purple": non_ink & (s > 45) & (v > 70) & (h >= 130) & (h < 153),
-        "pink": non_ink & (s > 45) & (v > 90) & (h >= 153) & (h < 170),
+        "pink": (non_ink & (s > 45) & (v > 90) & (h >= 153) & (h < 170)) | (pale_red_or_pink & (h >= 150)),
     }
     return masks, non_ink, total
 
@@ -97,7 +110,10 @@ def get_spatial_color_stats(masks, non_ink, color_name, bins=14):
             continue
         valid_bins += 1
         segment_color_count = int(np.count_nonzero(masks[color_name][:, x1:x2]))
-        segment_colored_total = sum(int(np.count_nonzero(masks[key][:, x1:x2])) for key in COLOR_KEYS)
+        segment_colored_mask = np.zeros_like(segment_non_ink, dtype=bool)
+        for key in COLOR_KEYS:
+            segment_colored_mask |= masks[key][:, x1:x2]
+        segment_colored_total = int(np.count_nonzero(segment_colored_mask))
         segment_white_count = int(np.count_nonzero(masks["white"][:, x1:x2]))
         color_ratio = segment_color_count / max(1, segment_total)
         colored_ratio = segment_colored_total / max(1, segment_total)
@@ -139,7 +155,10 @@ def classify_pixels(region):
         }
 
     counts = {name: int(np.count_nonzero(mask)) for name, mask in masks.items()}
-    colored_total = sum(counts[name] for name in counts if name not in ("white", "gray", "black"))
+    colored_mask = np.zeros_like(non_ink, dtype=bool)
+    for key in COLOR_KEYS:
+        colored_mask |= masks[key]
+    colored_total = int(np.count_nonzero(colored_mask))
     white_ratio = counts["white"] / total
     gray_ratio = counts["gray"] / total
     neutral_ratio = white_ratio + gray_ratio
@@ -148,8 +167,8 @@ def classify_pixels(region):
     dominant_ratio = counts[dominant] / total
 
     colored_counts = {name: counts[name] for name in counts if name not in ("white", "gray", "black")}
-    colored_name = max(colored_counts, key=colored_counts.get) if colored_counts else dominant
-    colored_confidence = colored_counts.get(colored_name, 0) / max(1, colored_total)
+    colored_name = max(colored_counts, key=colored_counts.get) if colored_counts and max(colored_counts.values()) > 0 else ""
+    colored_confidence = colored_counts.get(colored_name, 0) / max(1, colored_total) if colored_name else 0
     spatial = get_spatial_color_stats(masks, non_ink, colored_name)
     coverage_ratio = spatial["coverageRatio"]
 
@@ -196,7 +215,7 @@ def classify_pixels(region):
             **spatial,
             "strong": False,
             "reason": "weak_or_partial_color",
-            "rawLabel": COLOR_NAMES.get(colored_name, ""),
+            "rawLabel": COLOR_NAMES.get(colored_name, "") if colored_total >= max(6, int(total * 0.035)) else "",
         }
     return {
         "label": COLOR_NAMES.get(colored_name, ""),

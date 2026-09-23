@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 89;
+const ROW_COLOR_LOGIC_VERSION = 90;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
@@ -6345,6 +6345,10 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
     rowTextVerified: row?.rowTextVerified === true,
     rowGeometryVerified: row?.rowGeometryVerified === true,
     pixelMismatch: row?.pixelMismatch === true,
+    matched: row?.matched === true,
+    matchConfidence: row?.matchConfidence || "",
+    score: Number(row?.score || 0),
+    visualRowIndex: Number.isFinite(Number(row?.visualRowIndex)) ? Number(row.visualRowIndex) : "",
     matchedText: row?.matchedText || "",
     localPixelLabel: row?.localPixelLabel || "",
     localPixelRedRatio: row?.localPixelRedRatio || 0,
@@ -6523,6 +6527,8 @@ function hasContextualAnchorNonWhiteRowColorSignal(table, rowIndex) {
   if (item.rowTextVerified !== true || item.rowGeometryVerified !== true) return false;
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return false;
+  const anchorConfidence = Math.max(Number(item.confidence || 0), Number(item.score || 0));
+  if ((item.matchConfidence === "high" || anchorConfidence >= 0.88) && anchorConfidence >= 0.88) return true;
   const coloredRatio = Number(item.coloredRatio || 0);
   const whiteRatio = Number(item.whiteRatio || 0);
   const coverageRatio = Number(item.coverageRatio || 0);
@@ -12156,6 +12162,8 @@ function getVerifiedAnchorRowColorLabel(row) {
   if (!label) return "";
   if (isAvailableRowColorLabel(label)) return label;
   if (row.strong === true) return label;
+  const anchorConfidence = Number(row.confidence || row.score || 0);
+  if ((row.matchConfidence === "high" || anchorConfidence >= 0.88) && anchorConfidence >= 0.88) return label;
   const coloredRatio = Number(row.coloredRatio || 0);
   const whiteRatio = Number(row.whiteRatio || 0);
   const coverageRatio = Number(row.coverageRatio || 0);
@@ -12191,46 +12199,20 @@ async function repairPendingTableRowColors(table) {
   table._rowColorRepairing = true;
   table._rowColorRepairTried = true;
   const wasLightReview = table.lightReviewFlags === true;
-  table.rowColorMessage = "正在用 AI 视觉复核票行底色...";
+  table.rowColorMessage = "正在用文字锚点绑定原图票行底色...";
   renderUploadRecords({ normalize: false });
   try {
     const source = String(table.originalImage || "");
     const sourcePayload = source.startsWith("uploads/") ? { sourceUrl: source } : { image: await getReviewSourceDataUrl(table) };
-    let aiError = null;
-    let result = null;
-    let anchorError = null;
-    const aiAnalysisPromise = requestAiRowColorAnalysisForTable(table, sourcePayload).catch((error) => {
-      aiError = error;
-      return null;
-    });
-    try {
-      table.rowColorMessage = "AI 视觉复核已启动，正在用文字锚点绑定原图票行...";
-      renderReviewPanel(undefined, { normalize: false });
-      const anchorAnalysis = await requestAnchorRowColorAnalysisForTable(table, sourcePayload);
-      if (isAutoApplicableAnchorRowColorAnalysis(anchorAnalysis, table.rows?.length || 0)) {
-        result = { rowColorAnalysis: anchorAnalysis };
-      } else {
-        anchorError = new Error(anchorAnalysis?.error || "文字锚点未能一一匹配全部票行。");
-      }
-    } catch (error) {
-      anchorError = error;
+    renderReviewPanel(undefined, { normalize: false });
+    const analysis = await requestAnchorRowColorAnalysisForTable(table, sourcePayload);
+    if (!isReusableAnchorRowColorAnalysis(analysis, table.rows?.length || 0)) {
+      throw new Error(analysis?.error || "文字锚点未能稳定匹配这张表的票行底色，保留人工确认。");
     }
-    if (!result) {
-      const aiAnalysis = await aiAnalysisPromise;
-      if (!aiAnalysis) throw new Error([aiError?.message || "AI 视觉复核失败。", anchorError?.message || "文字锚点未能一一匹配全部票行。"].filter(Boolean).join("；"));
-      result = { rowColorAnalysis: aiAnalysis };
-      result.rowColorAnalysis.anchorFallbackError = anchorError?.message || "文字锚点未能一一匹配全部票行。";
-    }
-    const analysis = result.rowColorAnalysis;
     if (!analysis) throw new Error("行底色重新检测没有返回结果。");
     table.rowColorSparseSourceRepair = isPdfTableSource(table) && getRowColorExpectedRowsForPendingTable(table) > (table.rows?.length || 0);
     const rowColorStart = Math.max(0, Math.floor(Number(table.rowColorAlignedStart ?? table.rowColorPageRowOffset ?? 0) || 0));
     applyOpenCvRowColorsToTable(table, analysis, rowColorStart);
-    if (analysis.aiFallbackError) {
-      table.rowColorMessage = `${table.rowColorMessage || "文字锚点已完成"}；AI 视觉复核未完成：${analysis.aiFallbackError}`;
-    } else if (analysis.anchorFallbackError) {
-      table.rowColorMessage = `${table.rowColorMessage || "AI 视觉复核已完成"}；文字锚点未接管：${analysis.anchorFallbackError}`;
-    }
     table._rowColorRepairDone = true;
     table._rowColorRepairError = "";
     if (wasLightReview) markPendingTableReviewFlagsLightly(table);

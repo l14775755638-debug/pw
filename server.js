@@ -62,7 +62,7 @@ const aiRequestTimeoutSeconds = Math.max(25, readPositiveIntegerEnv("AI_REQUEST_
 const ocrCompletenessCheckEnabled = process.env.TICKET_OCR_COMPLETENESS_CHECK === "1";
 const ocrRowColorDuringScanEnabled = process.env.TICKET_OCR_ROW_COLOR_DURING_SCAN === "1";
 const ocrPpStructureDuringScanEnabled = process.env.TICKET_OCR_PPSTRUCTURE_DURING_SCAN === "1";
-const rowColorLogicVersion = 89;
+const rowColorLogicVersion = 90;
 const maxAnchorRowsPerTable = Math.max(40, readPositiveIntegerEnv("TICKET_ANCHOR_MAX_ROWS_PER_TABLE", 260));
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
