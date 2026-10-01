@@ -7,6 +7,7 @@ const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 180;
 const MAX_ANCHOR_ROWS_PER_TABLE = 260;
+const MAX_ANCHOR_BATCH_PAGES_PER_REQUEST = 4;
 const MAX_REVIEW_ROWS_RENDERED = 240;
 const MAX_UPLOAD_RECORDS_RENDERED = 36;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
@@ -12129,7 +12130,7 @@ async function requestAnchorRowColorAnalysisForTable(table, sourcePayload) {
   return result.rowColorAnalysis;
 }
 
-async function requestAnchorRowColorAnalysesForTables(tables, sourcePayload) {
+async function requestAnchorRowColorAnalysesForTables(tables, sourcePayload, options = {}) {
   const payloadTables = (tables || [])
     .map((table) => ({
       sourcePage: table.sourcePage || 1,
@@ -12138,17 +12139,35 @@ async function requestAnchorRowColorAnalysesForTables(tables, sourcePayload) {
     }))
     .filter((table) => Array.isArray(table.rows) && table.rows.length > 0 && table.rows.length <= MAX_ANCHOR_ROWS_PER_TABLE);
   if (!payloadTables.length) return {};
-  const response = await fetch("/api/tables/analyze-row-colors-anchor-batch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...sourcePayload,
-      tables: payloadTables,
-    }),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.message || result.error || "批量文字锚点取色失败。");
-  return result.rowColorAnalyses && typeof result.rowColorAnalyses === "object" ? result.rowColorAnalyses : {};
+  const chunkSize = Math.max(1, Math.floor(Number(options.chunkSize || MAX_ANCHOR_BATCH_PAGES_PER_REQUEST)));
+  const analyses = {};
+  for (let start = 0; start < payloadTables.length; start += chunkSize) {
+    const chunk = payloadTables.slice(start, start + chunkSize);
+    options.onProgress?.({
+      phase: "start",
+      completed: start,
+      total: payloadTables.length,
+      pages: chunk.map((table) => table.sourcePage || 1),
+    });
+    const response = await fetch("/api/tables/analyze-row-colors-anchor-batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...sourcePayload,
+        tables: chunk,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.message || result.error || "批量文字锚点取色失败。");
+    if (result.rowColorAnalyses && typeof result.rowColorAnalyses === "object") Object.assign(analyses, result.rowColorAnalyses);
+    options.onProgress?.({
+      phase: "done",
+      completed: Math.min(start + chunk.length, payloadTables.length),
+      total: payloadTables.length,
+      pages: chunk.map((table) => table.sourcePage || 1),
+    });
+  }
+  return analyses;
 }
 
 function isAutoApplicableAnchorRowColorAnalysis(analysis, rowCount = 0) {
@@ -13645,8 +13664,30 @@ async function getUploadPdfRowColorAnalyses(parsedTables) {
   });
   if (anchorBatchTables.length > 1) {
     try {
-      setUploadStatus(`正在批量用文字锚点定位 ${anchorBatchTables.length} 页行底色...`, "loading");
-      Object.assign(anchorBatchAnalyses, await requestAnchorRowColorAnalysesForTables(anchorBatchTables, sourcePayload));
+      setUploadStatus(`正在批量用文字锚点定位行底色：已完成 0/${anchorBatchTables.length} 页...`, "loading");
+      Object.assign(
+        anchorBatchAnalyses,
+        await requestAnchorRowColorAnalysesForTables(anchorBatchTables, sourcePayload, {
+          chunkSize: MAX_ANCHOR_BATCH_PAGES_PER_REQUEST,
+          onProgress: ({ phase, completed, total, pages }) => {
+            const sortedPages = (pages || []).map((page) => Number(page)).filter(Boolean).sort((a, b) => a - b);
+            const pageText =
+              sortedPages.length > 1
+                ? `${sortedPages[0]}-${sortedPages[sortedPages.length - 1]}`
+                : sortedPages.length
+                  ? `${sortedPages[0]}`
+                  : "";
+            if (phase === "start") {
+              setUploadStatus(
+                `正在批量用文字锚点定位行底色：已完成 ${completed}/${total} 页${pageText ? `，正在处理 PDF 第 ${pageText} 页` : ""}...`,
+                "loading",
+              );
+            } else {
+              setUploadStatus(`文字锚点行底色进度：已完成 ${completed}/${total} 页。`, "loading");
+            }
+          },
+        }),
+      );
     } catch (error) {
       console.warn("Batch anchor row-color analysis failed; falling back to per-page analysis.", error);
     }
