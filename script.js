@@ -2341,6 +2341,8 @@ function handleInterruptedTicketOcrJob(error) {
   const recognizedText = String(uploadTableText.value || "").trim();
   if (!recognizedText) return false;
   stopTicketOcrPolling();
+  setPublishUploadBusy(false);
+  setQuickManualUploadBusy(false);
   retryFailedOcrButton.disabled = true;
   pdfDetectionStatus.textContent = `${error?.message || "批量识别任务已中断"}；已保留已读 OCR 文本，可直接点“快速人工生成”。`;
   setUploadStatus("批量识别任务已中断，但已保留已读 OCR 文本；可直接快速人工生成。", "error");
@@ -2358,10 +2360,15 @@ async function refreshTicketOcrJobSnapshot(jobId) {
   return result;
 }
 
+function isResumableTicketOcrStatus(status) {
+  const value = String(status || "").trim();
+  return !value || value === "queued" || value === "running";
+}
+
 function resumeTicketOcrPollingIfNeeded() {
   const jobId = activeTicketOcrJobId || lastTicketOcrJobSnapshot?.id || "";
   const status = String(lastTicketOcrJobSnapshot?.status || "");
-  if (!jobId || activeTicketOcrPollTimer || activeTicketOcrPollInFlight || status === "done" || status === "error") return;
+  if (!jobId || activeTicketOcrPollTimer || activeTicketOcrPollInFlight || !isResumableTicketOcrStatus(status)) return;
   activeTicketOcrPollTimer = setTimeout(() => {
     activeTicketOcrPollTimer = null;
     pollTicketOcrJob(jobId).catch((error) => {
@@ -2385,7 +2392,7 @@ function resumeRestoredTicketOcrJobIfNeeded() {
     });
     return;
   }
-  if (status === "error") return;
+  if (!isResumableTicketOcrStatus(status)) return;
   pdfDetectionStatus.textContent = "已恢复上次 OCR 任务，正在继续查询进度...";
   setUploadStatus("已恢复上次 OCR 任务，正在继续查询进度。", "loading");
   resumeTicketOcrPollingIfNeeded();
@@ -8013,9 +8020,15 @@ function applyLoadedAppState(parsed) {
   uploadedSource = parsed.uploadedSource || null;
   if (uploadedSource?.dataUrl && !uploadedSource.url) uploadedSource.url = uploadedSource.dataUrl;
   const loadedOcrJobState = parsed.ocrJobState || {};
-  activeTicketOcrJobId = loadedOcrJobState.activeTicketOcrJobId || loadedOcrJobState.lastTicketOcrJobSnapshot?.id || activeTicketOcrJobId || null;
+  const loadedOcrSnapshot = loadedOcrJobState.lastTicketOcrJobSnapshot || null;
+  const loadedOcrStatus = String(loadedOcrSnapshot?.status || "");
+  activeTicketOcrJobId =
+    loadedOcrJobState.activeTicketOcrJobId ||
+    (isResumableTicketOcrStatus(loadedOcrStatus) ? loadedOcrSnapshot?.id : "") ||
+    activeTicketOcrJobId ||
+    null;
   autoPendingGenerationJobId = loadedOcrJobState.autoPendingGenerationJobId || autoPendingGenerationJobId || null;
-  lastTicketOcrJobSnapshot = loadedOcrJobState.lastTicketOcrJobSnapshot || lastTicketOcrJobSnapshot;
+  lastTicketOcrJobSnapshot = loadedOcrSnapshot || lastTicketOcrJobSnapshot;
   largeAppStateBackupRestorePending = stateNeedsLargeBackupRestore(parsed);
   if (parsed.uploadDraft) {
     const recoverableOcrText = getRecoverableOcrTextFromState(parsed);
