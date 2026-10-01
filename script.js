@@ -7922,6 +7922,7 @@ function mergeFragmentedPendingTables(tables = []) {
   return merged.map((table) => {
     table.title = String(table.title || "").replace(/\s*·\s*第\s*\d+\s*块表\s*/g, "");
     repairMisreadDataHeaderTable(table);
+    collapseRepeatedWholeTableRows(table);
     if (Number(table.sourcePage || 0) > 0) forceCanonicalOriginalDisplay(table);
     return table;
   });
@@ -13952,6 +13953,63 @@ function cloneParsedTableForPageMerge(table) {
   return cloned;
 }
 
+function getSamePageMergeRowSignature(row = []) {
+  return JSON.stringify((Array.isArray(row) ? row : []).map((cell) => normalize(String(cell || ""))));
+}
+
+function getDuplicateSequenceAppendStart(existingRows = [], incomingRows = []) {
+  if (!existingRows.length || !incomingRows.length) return 0;
+  const existingSignatures = existingRows.map(getSamePageMergeRowSignature);
+  const incomingSignatures = incomingRows.map(getSamePageMergeRowSignature);
+  for (let start = 0; start <= existingSignatures.length - incomingSignatures.length; start += 1) {
+    const alreadyExists = incomingSignatures.every((signature, index) => existingSignatures[start + index] === signature);
+    if (alreadyExists) return incomingRows.length;
+  }
+  const maxOverlap = Math.min(existingSignatures.length, incomingSignatures.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    const matches = incomingSignatures
+      .slice(0, overlap)
+      .every((signature, index) => existingSignatures[existingSignatures.length - overlap + index] === signature);
+    if (matches) return overlap;
+  }
+  return 0;
+}
+
+function keepRowIndexedObjectPrefix(value, length) {
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => {
+      const index = Number(key);
+      return Number.isInteger(index) && index >= 0 && index < length;
+    }),
+  );
+}
+
+function collapseRepeatedWholeTableRows(table) {
+  if (!table || !Array.isArray(table.rows) || Number(table.sourcePage || 0) <= 0) return false;
+  const rows = table.rows;
+  if (rows.length < 4 || rows.length % 2 !== 0) return false;
+  const half = rows.length / 2;
+  const signatures = rows.map(getSamePageMergeRowSignature);
+  const isRepeatedHalf = signatures.slice(0, half).every((signature, index) => signature === signatures[half + index]);
+  if (!isRepeatedHalf) return false;
+  table.rows = rows.slice(0, half).map((row) => [...row]);
+  if (Array.isArray(table.originalRows) && table.originalRows.length === rows.length) table.originalRows = table.originalRows.slice(0, half).map((row) => [...row]);
+  if (Array.isArray(table.rowColorRows) && table.rowColorRows.length === rows.length) table.rowColorRows = table.rowColorRows.slice(0, half).map((item) => ({ ...item }));
+  if (Array.isArray(table.rowColorSourceIndexes) && table.rowColorSourceIndexes.length === rows.length) table.rowColorSourceIndexes = table.rowColorSourceIndexes.slice(0, half);
+  if (Array.isArray(table.rowActionRows) && table.rowActionRows.length === rows.length) table.rowActionRows = table.rowActionRows.slice(0, half).map((item) => ({ ...item }));
+  if (Array.isArray(table.ppStructureTicketRowMatches) && table.ppStructureTicketRowMatches.length === rows.length) {
+    table.ppStructureTicketRowMatches = table.ppStructureTicketRowMatches.slice(0, half).map(clonePpStructureMatch);
+  }
+  table.publishRows = keepRowIndexedObjectPrefix(table.publishRows, half) || {};
+  table.manualPublishRows = keepRowIndexedObjectPrefix(table.manualPublishRows, half) || {};
+  table.manualSkipRows = keepRowIndexedObjectPrefix(table.manualSkipRows, half) || {};
+  table.reviewedRows = keepRowIndexedObjectPrefix(table.reviewedRows, half) || {};
+  table.userEditedRows = keepRowIndexedObjectPrefix(table.userEditedRows, half) || {};
+  table._dedupedRepeatedRows = (Number(table._dedupedRepeatedRows || 0) || 0) + half;
+  return true;
+}
+
 function appendParsedTableOnSamePdfPage(target, source) {
   if (!target || !source) return;
   repairMisreadDataHeaderTable(target);
@@ -14003,10 +14061,12 @@ function appendParsedTableOnSamePdfPage(target, source) {
         sourceRowIndex,
       };
     });
-  const mappedRows = mappedEntries.map((entry) => entry.row);
+  const appendStart = getDuplicateSequenceAppendStart(target.rows, mappedEntries.map((entry) => entry.row));
+  const appendEntries = appendStart > 0 ? mappedEntries.slice(appendStart) : mappedEntries;
+  const mappedRows = appendEntries.map((entry) => entry.row);
   target.rows.push(...mappedRows);
   target.rowColorSourceIndexes.push(
-    ...mappedEntries.map((entry, index) => {
+    ...appendEntries.map((entry, index) => {
       const sourceIndex = Number(sourceColorIndexes[entry.sourceRowIndex]);
       if (Number.isFinite(sourceIndex) && sourceIndex >= 0) return sourceIndex;
       return targetColorIndexBase + index;
@@ -14016,6 +14076,7 @@ function appendParsedTableOnSamePdfPage(target, source) {
     target.rowColorSourceIndexMode = "sequence";
   }
   extendColumnsForOverflowRows(target.columns, target.rows);
+  collapseRepeatedWholeTableRows(target);
   repairMisreadDataHeaderTable(target);
   normalizePendingTableColumns(target);
   forceCanonicalOriginalDisplay(target);
@@ -14033,6 +14094,7 @@ function mergeParsedTablesByPdfPage(parsedTables = []) {
     const pageKey = String(sourcePage);
     const startIndex = nextRowColorIndexByPage.get(pageKey) || 0;
     const cloned = cloneParsedTableForPageMerge({ ...table, sourcePage, sourcePart: 1, rowColorPageStartIndex: startIndex });
+    collapseRepeatedWholeTableRows(cloned);
     nextRowColorIndexByPage.set(pageKey, startIndex + cloned.rows.length);
     const existing = tableByPage.get(pageKey);
     if (!existing) {
