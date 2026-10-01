@@ -4937,8 +4937,24 @@ function hasOpenCvWhitePriceSideCell(item) {
   return rightWhiteRatio >= 0.3 && rightColoredRatio <= Math.max(0.34, rightWhiteRatio * 1.2);
 }
 
+function getOpenCvPriceSideCellNonWhiteLabel(item) {
+  if (!item || item.userCleared || item.source === "ai_row_color") return "";
+  const label = normalizeRowColorLabel(item.rightmostCellLabel || item.rightmostCellRawLabel);
+  if (!label || isAvailableRowColorLabel(label)) return "";
+  const rightWhiteRatio = Number(item.rightmostCellWhiteRatio || 0);
+  const rightColoredRatio = Number(item.rightmostCellColoredRatio || 0);
+  const clearNonWhiteCell = rightColoredRatio >= 0.68 && rightColoredRatio >= rightWhiteRatio + 0.35;
+  const dominantNonWhiteCell = rightColoredRatio >= 0.82 && rightColoredRatio >= rightWhiteRatio * 2.5;
+  return clearNonWhiteCell || dominantNonWhiteCell ? label : "";
+}
+
+function hasOpenCvNonWhitePriceSideCell(item) {
+  return Boolean(getOpenCvPriceSideCellNonWhiteLabel(item));
+}
+
 function hasOpenCvNonWhiteTicketCellEvidence(item) {
   if (!item || item.userCleared || item.source === "ai_row_color") return false;
+  if (hasOpenCvNonWhitePriceSideCell(item)) return true;
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return false;
   const { cellCount, coloredCellCount, whiteCellCount, coloredCellRatio } = getOpenCvCellStats(item);
@@ -4977,6 +4993,7 @@ function isOpenCvCellMajorityNonWhite(item) {
 
 function isOpenCvCellNonWhiteTicketSignal(item) {
   if (!item || item.userCleared || item.source === "ai_row_color") return false;
+  if (hasOpenCvNonWhitePriceSideCell(item)) return true;
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return false;
   if (hasOpenCvNonWhiteTicketCellEvidence(item)) return true;
@@ -5003,6 +5020,8 @@ function isOpenCvCellNonWhiteTicketSignal(item) {
 
 function getStrictRowLocalOpenCvColorLabel(item) {
   if (!item || item.userCleared || item.source === "ai_row_color") return "";
+  const priceCellLabel = getOpenCvPriceSideCellNonWhiteLabel(item);
+  if (priceCellLabel) return priceCellLabel;
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (item.source === "paddle_ppstructure" || item.source === "ticket_row_anchor") {
     if (item.rowTextVerified !== true || item.rowGeometryVerified !== true || Number(item.confidence || 0) < 0.82) return "";
@@ -5349,7 +5368,8 @@ function getOpenCvItemRawColorLabel(item) {
 
 function getOpenCvItemDecisionColorLabel(item) {
   const label = getOpenCvItemRawColorLabel(item);
-  if (!label) return "";
+  const priceCellLabel = getOpenCvPriceSideCellNonWhiteLabel(item);
+  if (!label) return priceCellLabel;
   const cellMajorityWhite = isOpenCvCellMajorityWhite(item);
   const cellMajorityNonWhite = isOpenCvCellMajorityNonWhite(item);
   const confidence = Number(item?.confidence || 0);
@@ -5361,6 +5381,7 @@ function getOpenCvItemDecisionColorLabel(item) {
     if (isAvailableRowColorLabel(label)) return confidence >= 0.55 ? "白底" : "";
     return confidence >= 0.72 ? label : "";
   }
+  if (priceCellLabel) return priceCellLabel;
   const coloredRatio = Number(item?.coloredRatio || 0);
   const whiteRatio = Number(item?.whiteRatio || 0);
   const coverageRatio = Number(item?.coverageRatio || 0);
@@ -5452,6 +5473,8 @@ function getOpenCvItemConflictActionLabel(item) {
     const label = getStrictRowLocalOpenCvColorLabel(item);
     return label && !isAvailableRowColorLabel(label) && item.strong === true ? label : "";
   }
+  const priceCellLabel = getOpenCvPriceSideCellNonWhiteLabel(item);
+  if (priceCellLabel) return priceCellLabel;
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (rawLabel && !isAvailableRowColorLabel(rawLabel) && hasOpenCvNonWhiteTicketCellEvidence(item)) return rawLabel;
   if (isOpenCvCellMajorityWhite(item)) return "白底";
@@ -5463,6 +5486,8 @@ function getOpenCvItemConflictActionLabel(item) {
 
 function getOpenCvConflictNonWhiteLabel(item) {
   if (!item || item.userCleared) return "";
+  const priceCellLabel = getOpenCvPriceSideCellNonWhiteLabel(item);
+  if (priceCellLabel) return priceCellLabel;
   if (isOpenCvCellMajorityWhite(item)) return "";
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel)) return "";
@@ -5487,6 +5512,8 @@ function hasUsableOpenCvColorSignalForEffectiveTicket(table, row, rowIndex, colo
 }
 
 function getAutoSkipOpenCvColorLabel(item) {
+  const priceCellLabel = getOpenCvPriceSideCellNonWhiteLabel(item);
+  if (priceCellLabel) return priceCellLabel;
   const label = getOpenCvItemRawColorLabel(item);
   if (!label || isAvailableRowColorLabel(label) || item?.userCleared) return "";
   if (item?.source === "ai_row_color") return "";
@@ -5495,6 +5522,7 @@ function getAutoSkipOpenCvColorLabel(item) {
 }
 
 function isPartialOpenCvNonWhiteSignal(item) {
+  if (hasOpenCvNonWhitePriceSideCell(item)) return true;
   const label = getOpenCvItemRawColorLabel(item);
   if (!label || isAvailableRowColorLabel(label) || item?.userCleared) return false;
   if (item?.source === "ai_row_color") return false;
@@ -5754,6 +5782,7 @@ function hasRowLevelMixedOpenCvColorConflict(table) {
 }
 
 function isRawNonWhiteColorStrongEnoughForMixedTable(item) {
+  if (hasOpenCvNonWhitePriceSideCell(item)) return true;
   const rawLabel = getOpenCvItemRawColorLabel(item);
   if (!rawLabel || isAvailableRowColorLabel(rawLabel) || item?.userCleared) return false;
   if (item?.source === "ai_row_color") return false;
@@ -11249,12 +11278,12 @@ function isReviewRowEditing(table, rowIndex) {
 function startReviewRowEdit(table, rowIndex) {
   if (!table || !table.rows[rowIndex]) return;
   editingReviewRows.add(getReviewEditKey(table, rowIndex));
-  renderReviewPanel(rowIndex);
+  if (!refreshStandardReviewRowCard(table, rowIndex)) renderReviewPanel(rowIndex);
 }
 
 function cancelReviewRowEdit(table, rowIndex) {
   editingReviewRows.delete(getReviewEditKey(table, rowIndex));
-  renderReviewPanel(rowIndex);
+  if (!refreshStandardReviewRowCard(table, rowIndex)) renderReviewPanel(rowIndex);
 }
 
 function saveReviewRowPrice(table, rowIndex, value) {
@@ -11278,7 +11307,8 @@ function saveReviewRowPrice(table, rowIndex, value) {
   table.userEditedRows[rowIndex] = true;
   updatePendingTableReviewFlags(table);
   markPendingRowReviewed(table, rowIndex);
-  refreshReviewAfterRowAction(rowIndex, `修改售价：第 ${rowIndex + 1} 条设为 ${price}`, "校对");
+  if (!refreshStandardReviewRowCard(table, rowIndex)) refreshReviewAfterRowAction(rowIndex);
+  setReviewDraftDirty(table, true);
   showToast("售价已保存，并设为可发布。", "success");
 }
 
@@ -11336,7 +11366,8 @@ function saveReviewRowEdits(table, rowIndex, card) {
   editingReviewRows.delete(getReviewEditKey(table, rowIndex));
   updatePendingTableReviewFlags(table);
   markPendingRowReviewed(table, rowIndex);
-  refreshReviewAfterRowAction(rowIndex, `修改票源：第 ${rowIndex + 1} 条`, "校对");
+  if (!refreshStandardReviewRowCard(table, rowIndex)) refreshReviewAfterRowAction(rowIndex);
+  setReviewDraftDirty(table, true);
   showToast("票源信息已修改。", "success");
 }
 
@@ -11372,7 +11403,8 @@ function togglePendingRowSold(table, rowIndex) {
   }
   markPendingRowReviewed(table, rowIndex);
   updatePendingTableReviewFlags(table);
-  refreshReviewAfterRowAction(rowIndex, `标记售卖状态：第 ${rowIndex + 1} 条`, "校对");
+  if (!refreshStandardReviewRowCard(table, rowIndex)) refreshReviewAfterRowAction(rowIndex);
+  setReviewDraftDirty(table, true);
 }
 
 function clearSoldMarkersFromRow(table, rowIndex) {
@@ -11463,6 +11495,132 @@ function getPendingRowDecisionReason(ticket, { selectedForPublish = false, publi
   return "满足发布条件";
 }
 
+function setReviewDraftDirty(table, dirty = true) {
+  if (!table) return;
+  table._reviewDraftDirty = Boolean(dirty);
+  updateReviewDraftDirtyStatus(table);
+}
+
+function updateReviewDraftDirtyStatus(table) {
+  if (!table || table.id !== selectedPendingTableId) return;
+  reviewLayout.querySelectorAll("[data-review-draft-status]").forEach((item) => {
+    item.textContent = table._reviewDraftDirty ? "本页有未保存修改" : "本页修改已保存";
+    item.dataset.status = table._reviewDraftDirty ? "dirty" : "saved";
+  });
+}
+
+function renderReviewEditPanelHtml(table, rowIndex) {
+  const currentRow = table?.rows?.[rowIndex] || [];
+  const editFields = (table?.columns || [])
+    .map((column, index) => ({ column, index }))
+    .filter((field) => !isInternalColorColumn(field.column))
+    .map(
+      (field) => `
+        <label class="review-edit-field">
+          <span>${escapeHtml(field.column)}</span>
+          <input type="text" value="${escapeHtml(currentRow[field.index] || "")}" data-review-edit-input="${field.index}" />
+        </label>
+      `,
+    )
+    .join("");
+  return `
+    <div class="review-edit-panel">
+      <div class="review-edit-grid">${editFields}</div>
+      <div class="review-edit-actions">
+        <button class="small-button" type="button" data-save-review-row="${rowIndex}">保存修改</button>
+        <button class="small-button ghost" type="button" data-cancel-review-row="${rowIndex}">取消</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderStandardReviewRowCard(table, rowIndex, aiDecisionByRow = null) {
+  const currentRow = table?.rows?.[rowIndex];
+  if (!table || !currentRow) return "";
+  const aiDecision = aiDecisionByRow?.get?.(rowIndex + 1) || null;
+  const ticket = { table, row: currentRow, index: rowIndex };
+  const selectedForPublish = isPendingRowSelectedForPublish(table, rowIndex);
+  const publishEligible = isCustomerPublishableTicket(ticket);
+  const shouldPublish = selectedForPublish && publishEligible;
+  const fieldObjects = getOriginalTicketFields(ticket, { preserveOriginal: false });
+  const visibleSalePrice = getVisibleTicketSalePriceValue(ticket);
+  const missingPrice = !visibleSalePrice;
+  const soldLike = isSoldTicket(ticket);
+  const colorHeld = !soldLike && isColorHeldForReviewTicket(ticket);
+  const ppStructureMatchText = getPpStructureMatchText(table, rowIndex);
+  const publishBlockReason = selectedForPublish && !publishEligible ? getPendingRowPublishBlockReason(ticket) : "";
+  const decisionReason = getPendingRowDecisionReason(ticket, { selectedForPublish, publishEligible });
+  const zoneUnmatched =
+    !soldLike &&
+    currentEvent.zones.length > 0 &&
+    !currentEvent.zones.some((zone) => zoneMatchesTicket(ticket, zone));
+  const editing = isReviewRowEditing(table, rowIndex);
+  const colorSamples = table.colorReviewSamples || {};
+  const fields = fieldObjects
+    .map(
+      (field) => `
+        <span class="review-ticket-field">
+          <em>${escapeHtml(field.label)}</em>
+          <strong>${escapeHtml(field.value)}</strong>
+        </span>
+      `,
+    )
+    .join("");
+  const priceEditor = missingPrice
+    ? `<div class="review-price-editor">
+        <label>
+          <span>补售价</span>
+          <input type="text" placeholder="例如 4800" data-review-price-input="${rowIndex}" />
+        </label>
+        <button class="small-button" type="button" data-save-review-price="${rowIndex}">保存价格</button>
+      </div>`
+    : "";
+  return `
+    <article class="review-ticket-card ${soldLike ? "sold-row" : ""} ${colorHeld ? "color-review-row" : ""} ${missingPrice ? "missing-price" : ""}" data-review-row-index="${rowIndex}">
+      <div class="review-ticket-top">
+        <strong>第 ${rowIndex + 1} 条票</strong>
+        <span class="${shouldPublish ? "review-ticket-status upload" : "review-ticket-status skip"}">${shouldPublish ? "会发布到客户前台" : selectedForPublish ? "已选择发布，待修正" : soldLike ? "已售" : colorHeld ? "颜色标色下架" : "不会发布"}</span>
+      </div>
+      ${missingPrice ? `<div class="review-ticket-warning">缺少售价：请对照左侧原图补上售价，保存后再决定是否发布。</div>${priceEditor}` : ""}
+      ${publishBlockReason ? `<div class="review-ticket-warning">已记录“发布到前台”，但暂不能发布：${escapeHtml(publishBlockReason)}</div>` : ""}
+      ${!shouldPublish ? `<div class="review-ticket-warning">当前原因：${escapeHtml(decisionReason)}</div>` : ""}
+      ${zoneUnmatched ? `<div class="review-ticket-warning">区域未匹配座位图热区：请检查“区域”是否识别错字，或到座位图热区里补这个区。</div>` : ""}
+      ${ppStructureMatchText ? `<div class="ai-suggestion publish"><strong>结构坐标</strong><span>${escapeHtml(ppStructureMatchText)}</span></div>` : ""}
+      ${
+        aiDecision
+          ? `<div class="ai-suggestion ${aiDecision.action === "publish" ? "publish" : "skip"}">
+              <strong>AI 建议：${aiDecision.action === "publish" ? "发布" : "不发布"}</strong>
+              <span>${escapeHtml(aiDecision.status || "")}${aiDecision.reason ? ` · ${escapeHtml(aiDecision.reason)}` : ""}</span>
+            </div>`
+          : ""
+      }
+      <div class="review-ticket-fields">
+        ${fields || `<span class="review-ticket-empty">这一行没有识别到有效内容</span>`}
+      </div>
+      ${editing ? renderReviewEditPanelHtml(table, rowIndex) : ""}
+      <div class="review-ticket-actions">
+        <div class="publish-choice" role="group" aria-label="是否发布到前台">
+          <button class="choice-button ${selectedForPublish ? "active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="true">发布到前台</button>
+          <button class="choice-button ${!selectedForPublish ? "danger active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="false">不发布</button>
+        </div>
+        <button class="row-action-button" type="button" data-edit-review-row="${rowIndex}">${editing ? "正在修改" : "修改"}</button>
+        <button class="row-action-button" type="button" data-toggle-row-sold="${rowIndex}">标已售</button>
+        <button class="row-action-button sample ${colorSamples.soldRow === rowIndex ? "active" : ""}" type="button" data-color-sample-row="${rowIndex}" data-color-sample-type="sold">设为已售样本</button>
+        <button class="row-action-button sample ${colorSamples.availableRow === rowIndex ? "active" : ""}" type="button" data-color-sample-row="${rowIndex}" data-color-sample-type="available">设为未售样本</button>
+      </div>
+    </article>
+  `;
+}
+
+function refreshStandardReviewRowCard(table, rowIndex) {
+  if (!table || table.quickManualMode) return false;
+  const current = reviewLayout.querySelector(`.review-ticket-card[data-review-row-index="${rowIndex}"]`);
+  if (!current) return false;
+  current.outerHTML = renderStandardReviewRowCard(table, rowIndex);
+  updateReviewDraftDirtyStatus(table);
+  return true;
+}
+
 function togglePendingRowPublish(table, rowIndex) {
   if (!table || !table.rows[rowIndex]) return;
   table.publishRows = table.publishRows || {};
@@ -11482,9 +11640,8 @@ function togglePendingRowPublish(table, rowIndex) {
   table.userEditedRows[rowIndex] = true;
   markPendingRowReviewed(table, rowIndex);
   updatePendingTableReviewFlags(table);
-  renderUploadRecords();
-  renderReviewPanel(rowIndex);
-  saveAndArchiveAppStep(`${nextPublish ? "设为发布" : "设为不发布"}：第 ${rowIndex + 1} 条`, "校对");
+  if (!refreshStandardReviewRowCard(table, rowIndex)) renderReviewPanel(rowIndex);
+  setReviewDraftDirty(table, true);
 }
 
 function setPendingRowPublish(table, rowIndex, shouldPublish) {
@@ -11505,9 +11662,8 @@ function setPendingRowPublish(table, rowIndex, shouldPublish) {
   table.userEditedRows[rowIndex] = true;
   markPendingRowReviewed(table, rowIndex);
   updatePendingTableReviewFlags(table);
-  renderUploadRecords();
-  renderReviewPanel(rowIndex);
-  saveAndArchiveAppStep(`${shouldPublish ? "设为发布" : "设为不发布"}：第 ${rowIndex + 1} 条`, "校对");
+  if (!refreshStandardReviewRowCard(table, rowIndex)) renderReviewPanel(rowIndex);
+  setReviewDraftDirty(table, true);
 }
 
 function setPendingRowPublishDraft(table, rowIndex, shouldPublish) {
@@ -11617,6 +11773,7 @@ function saveCurrentReviewChoices({ advance = false } = {}) {
   updatePendingTableReviewFlags(table);
   renderUploadRecords();
   const saved = saveAndArchiveAppStep(`保存本页勾叉：${table.title || currentEvent.name}`, "校对", { silent: true });
+  if (saved) setReviewDraftDirty(table, false);
   showToast(saved ? (advance ? "已保存本页勾叉，进入下一页。" : "已保存本页勾叉。") : "保存失败，请稍后再试。", saved ? "success" : "error");
   if (saved && advance) selectAdjacentPendingTable(1, { saveCurrent: false });
   else renderReviewPanel(undefined, { normalize: false });
@@ -13246,103 +13403,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   const hiddenReviewRowCount = 0;
   const reviewZoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
   const rows = renderedReviewRows
-    .map(({ row, rowIndex }) => {
-      const currentRow = table.rows[rowIndex] || row;
-      const aiDecision = aiDecisionByRow.get(rowIndex + 1);
-      const ticket = { table, row: currentRow, index: rowIndex };
-      const selectedForPublish = isPendingRowSelectedForPublish(table, rowIndex);
-      const publishEligible = isCustomerPublishableTicket(ticket);
-      const shouldPublish = selectedForPublish && publishEligible;
-      const fieldObjects = getOriginalTicketFields(ticket, { preserveOriginal: false });
-      const visibleSalePrice = getVisibleTicketSalePriceValue(ticket);
-      const missingPrice = !visibleSalePrice;
-      const soldLike = isSoldTicket(ticket);
-      const colorHeld = !soldLike && isColorHeldForReviewTicket(ticket);
-      const ppStructureMatchText = getPpStructureMatchText(table, rowIndex);
-      const publishBlockReason = selectedForPublish && !publishEligible ? getPendingRowPublishBlockReason(ticket) : "";
-      const decisionReason = getPendingRowDecisionReason(ticket, { selectedForPublish, publishEligible });
-      const zoneUnmatched =
-        !soldLike &&
-        currentEvent.zones.length > 0 &&
-        !currentEvent.zones.some((zone) => zoneMatchesTicket(ticket, zone));
-      const editing = isReviewRowEditing(table, rowIndex);
-      const fields = fieldObjects
-        .map(
-          (field) => `
-            <span class="review-ticket-field">
-              <em>${escapeHtml(field.label)}</em>
-              <strong>${escapeHtml(field.value)}</strong>
-            </span>
-          `,
-        )
-        .join("");
-      const editFields = table.columns
-        .map((column, index) => ({ column, index }))
-        .filter((field) => !isInternalColorColumn(field.column))
-        .map(
-          (field) => `
-            <label class="review-edit-field">
-              <span>${escapeHtml(field.column)}</span>
-              <input type="text" value="${escapeHtml(currentRow[field.index] || "")}" data-review-edit-input="${field.index}" />
-            </label>
-          `,
-        )
-        .join("");
-      const priceEditor = missingPrice
-        ? `<div class="review-price-editor">
-            <label>
-              <span>补售价</span>
-              <input type="text" placeholder="例如 4800" data-review-price-input="${rowIndex}" />
-            </label>
-            <button class="small-button" type="button" data-save-review-price="${rowIndex}">保存价格</button>
-          </div>`
-        : "";
-      return `
-        <article class="review-ticket-card ${soldLike ? "sold-row" : ""} ${colorHeld ? "color-review-row" : ""} ${missingPrice ? "missing-price" : ""}" data-review-row-index="${rowIndex}">
-          <div class="review-ticket-top">
-            <strong>第 ${rowIndex + 1} 条票</strong>
-            <span class="${shouldPublish ? "review-ticket-status upload" : "review-ticket-status skip"}">${shouldPublish ? "会发布到客户前台" : selectedForPublish ? "已选择发布，待修正" : soldLike ? "已售" : colorHeld ? "颜色标色下架" : "不会发布"}</span>
-          </div>
-          ${missingPrice ? `<div class="review-ticket-warning">缺少售价：请对照左侧原图补上售价，保存后再决定是否发布。</div>${priceEditor}` : ""}
-          ${publishBlockReason ? `<div class="review-ticket-warning">已记录“发布到前台”，但暂不能发布：${escapeHtml(publishBlockReason)}</div>` : ""}
-          ${!shouldPublish ? `<div class="review-ticket-warning">当前原因：${escapeHtml(decisionReason)}</div>` : ""}
-          ${zoneUnmatched ? `<div class="review-ticket-warning">区域未匹配座位图热区：请检查“区域”是否识别错字，或到座位图热区里补这个区。</div>` : ""}
-          ${ppStructureMatchText ? `<div class="ai-suggestion publish"><strong>结构坐标</strong><span>${escapeHtml(ppStructureMatchText)}</span></div>` : ""}
-          ${
-            aiDecision
-              ? `<div class="ai-suggestion ${aiDecision.action === "publish" ? "publish" : "skip"}">
-                  <strong>AI 建议：${aiDecision.action === "publish" ? "发布" : "不发布"}</strong>
-                  <span>${escapeHtml(aiDecision.status || "")}${aiDecision.reason ? ` · ${escapeHtml(aiDecision.reason)}` : ""}</span>
-                </div>`
-              : ""
-          }
-          <div class="review-ticket-fields">
-            ${fields || `<span class="review-ticket-empty">这一行没有识别到有效内容</span>`}
-          </div>
-          ${
-            editing
-              ? `<div class="review-edit-panel">
-                  <div class="review-edit-grid">${editFields}</div>
-                  <div class="review-edit-actions">
-                    <button class="small-button" type="button" data-save-review-row="${rowIndex}">保存修改</button>
-                    <button class="small-button ghost" type="button" data-cancel-review-row="${rowIndex}">取消</button>
-                  </div>
-                </div>`
-              : ""
-          }
-          <div class="review-ticket-actions">
-            <div class="publish-choice" role="group" aria-label="是否发布到前台">
-              <button class="choice-button ${selectedForPublish ? "active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="true">发布到前台</button>
-              <button class="choice-button ${!selectedForPublish ? "danger active" : ""}" type="button" data-set-row-publish="${rowIndex}" data-publish-value="false">不发布</button>
-            </div>
-            <button class="row-action-button" type="button" data-edit-review-row="${rowIndex}">${editing ? "正在修改" : "修改"}</button>
-            <button class="row-action-button" type="button" data-toggle-row-sold="${rowIndex}">标已售</button>
-            <button class="row-action-button sample ${colorSamples.soldRow === rowIndex ? "active" : ""}" type="button" data-color-sample-row="${rowIndex}" data-color-sample-type="sold">设为已售样本</button>
-            <button class="row-action-button sample ${colorSamples.availableRow === rowIndex ? "active" : ""}" type="button" data-color-sample-row="${rowIndex}" data-color-sample-type="available">设为未售样本</button>
-          </div>
-        </article>
-      `;
-    })
+    .map(({ rowIndex }) => renderStandardReviewRowCard(table, rowIndex, aiDecisionByRow))
     .join("");
   const source = table.originalImage || "";
   const isPdf = isPdfTableSource(table);
@@ -13376,9 +13437,12 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
       <div class="review-ticket-list-head">
         <div>
           <strong>逐票确认</strong>
-          <span>${skippedSoldRows ? `已自动跳过 ${skippedSoldRows} 条已售/颜色下架票源；` : ""}修改和发布状态会先保留，最后点“确认并发布”。</span>
+          <span>${skippedSoldRows ? `已自动跳过 ${skippedSoldRows} 条已售/颜色下架票源；` : ""}修改和发布状态会先保留，最后点“保存本页修改”或“确认并发布”。</span>
+          <span data-review-draft-status data-status="${table._reviewDraftDirty ? "dirty" : "saved"}">${table._reviewDraftDirty ? "本页有未保存修改" : "本页修改已保存"}</span>
         </div>
         <div class="review-bulk-actions">
+          <button class="small-button ghost" type="button" data-cache-review-page>保存本页修改</button>
+          <button class="small-button ghost" type="button" data-cache-review-page-next>保存并下一页</button>
           ${
             skippedSoldRows
               ? `<button class="small-button ghost" type="button" data-toggle-skipped-review>${table.showSoldInReview ? "隐藏已跳过票源" : `显示已跳过票源 ${skippedSoldRows} 条`}</button>`

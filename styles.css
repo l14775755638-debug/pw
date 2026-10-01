@@ -2449,6 +2449,26 @@ tr.hit-row td {
   gap: 8px;
 }
 
+[data-review-draft-status] {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 4px 8px;
+  color: #146c75;
+  font-size: 12px;
+  font-weight: 900;
+  border: 1px solid rgba(20, 108, 117, 0.2);
+  border-radius: 999px;
+  background: #eef8f7;
+}
+
+[data-review-draft-status][data-status="dirty"] {
+  color: #9b1c12;
+  border-color: rgba(155, 28, 18, 0.24);
+  background: #fff1ee;
+}
+
 .review-quick-tools {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto;
