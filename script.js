@@ -14007,6 +14007,7 @@ function collapseRepeatedWholeTableRows(table) {
   table.reviewedRows = keepRowIndexedObjectPrefix(table.reviewedRows, half) || {};
   table.userEditedRows = keepRowIndexedObjectPrefix(table.userEditedRows, half) || {};
   table._dedupedRepeatedRows = (Number(table._dedupedRepeatedRows || 0) || 0) + half;
+  table._columnRepairChanged = true;
   return true;
 }
 
