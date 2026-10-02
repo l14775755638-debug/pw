@@ -62,6 +62,11 @@ const aiRequestTimeoutSeconds = Math.max(25, readPositiveIntegerEnv("AI_REQUEST_
 const ocrCompletenessCheckEnabled = process.env.TICKET_OCR_COMPLETENESS_CHECK === "1";
 const ocrRowColorDuringScanEnabled = process.env.TICKET_OCR_ROW_COLOR_DURING_SCAN === "1";
 const ocrPpStructureDuringScanEnabled = process.env.TICKET_OCR_PPSTRUCTURE_DURING_SCAN === "1";
+const serverCpuCount = Math.max(1, os.cpus()?.length || 1);
+const paddleCpuThreads = Math.max(
+  1,
+  Math.min(readPositiveIntegerEnv("PADDLE_CPU_THREADS", Math.max(1, Math.floor(serverCpuCount / batchOcrConcurrency))), serverCpuCount),
+);
 const rowColorLogicVersion = 90;
 const maxAnchorRowsPerTable = Math.max(40, readPositiveIntegerEnv("TICKET_ANCHOR_MAX_ROWS_PER_TABLE", 260));
 const port = Number(process.env.PORT || 4173);
@@ -117,6 +122,19 @@ function createProxyAgent(proxyUrl) {
 
 const proxyAgent = createProxyAgent(getProxyUrl());
 
+function buildWorkerProcessEnv() {
+  const threads = String(paddleCpuThreads);
+  return {
+    ...process.env,
+    PADDLE_CPU_THREADS: process.env.PADDLE_CPU_THREADS || threads,
+    PADDLE_ENABLE_MKLDNN: process.env.PADDLE_ENABLE_MKLDNN || "1",
+    OMP_NUM_THREADS: process.env.OMP_NUM_THREADS || threads,
+    MKL_NUM_THREADS: process.env.MKL_NUM_THREADS || threads,
+    OPENBLAS_NUM_THREADS: process.env.OPENBLAS_NUM_THREADS || threads,
+    NUMEXPR_NUM_THREADS: process.env.NUMEXPR_NUM_THREADS || threads,
+  };
+}
+
 function readBody(request) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -152,7 +170,7 @@ function readRawBody(request) {
 
 function runFile(command, args) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout: 120000 }, (error, stdout, stderr) => {
+    execFile(command, args, { timeout: 120000, env: buildWorkerProcessEnv() }, (error, stdout, stderr) => {
       if (error) {
         error.stderr = stderr;
         reject(error);
@@ -165,7 +183,7 @@ function runFile(command, args) {
 
 function runFileWithTimeout(command, args, timeout) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(command, args, { timeout, maxBuffer: 50 * 1024 * 1024, env: buildWorkerProcessEnv() }, (error, stdout, stderr) => {
       if (error) {
         error.stderr = stderr;
         reject(error);
@@ -1386,6 +1404,7 @@ async function analyzeTicketAnchorRowColorsBatch(payload, tables = []) {
 
 function getPpStructurePythonPath() {
   if (process.env.PADDLEOCR_PYTHON) return process.env.PADDLEOCR_PYTHON;
+  if (fs.existsSync(anchorOcrPythonPath)) return anchorOcrPythonPath;
   if (fs.existsSync(localPaddlePythonPath)) return localPaddlePythonPath;
   return pythonPath;
 }

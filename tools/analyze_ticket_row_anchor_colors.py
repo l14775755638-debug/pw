@@ -1,12 +1,36 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import re
 import sys
 import tempfile
 import time
 from pathlib import Path
 from functools import lru_cache
+
+
+def get_cpu_threads():
+    try:
+        return max(1, int(os.environ.get("PADDLE_CPU_THREADS") or os.cpu_count() or 1))
+    except ValueError:
+        return 1
+
+
+def configure_cpu_runtime():
+    threads = str(get_cpu_threads())
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(name, threads)
+
+
+def paddle_cpu_kwargs():
+    kwargs = {"cpu_threads": get_cpu_threads()}
+    if os.environ.get("PADDLE_ENABLE_MKLDNN", "1") != "0":
+        kwargs["enable_mkldnn"] = True
+    return kwargs
+
+
+configure_cpu_runtime()
 
 import cv2
 
@@ -258,10 +282,15 @@ def group_ocr_rows(ocr_items):
 def create_paddle_ocr():
     from paddleocr import PaddleOCR
 
+    cpu_kwargs = paddle_cpu_kwargs()
     for kwargs in (
+        {"use_angle_cls": False, "lang": "ch", "show_log": False, **cpu_kwargs},
         {"use_angle_cls": False, "lang": "ch", "show_log": False},
+        {"use_angle_cls": False, "lang": "ch", **cpu_kwargs},
         {"use_angle_cls": False, "lang": "ch"},
+        {"use_textline_orientation": False, "lang": "ch", **cpu_kwargs},
         {"use_textline_orientation": False, "lang": "ch"},
+        {"lang": "ch", **cpu_kwargs},
         {"lang": "ch"},
     ):
         try:

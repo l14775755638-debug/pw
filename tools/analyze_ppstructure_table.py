@@ -1,11 +1,35 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import sys
 import tempfile
 import time
 from html.parser import HTMLParser
 from pathlib import Path
+
+
+def get_cpu_threads():
+    try:
+        return max(1, int(os.environ.get("PADDLE_CPU_THREADS") or os.cpu_count() or 1))
+    except ValueError:
+        return 1
+
+
+def configure_cpu_runtime():
+    threads = str(get_cpu_threads())
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(name, threads)
+
+
+def paddle_cpu_kwargs():
+    kwargs = {"cpu_threads": get_cpu_threads()}
+    if os.environ.get("PADDLE_ENABLE_MKLDNN", "1") != "0":
+        kwargs["enable_mkldnn"] = True
+    return kwargs
+
+
+configure_cpu_runtime()
 
 import cv2
 
@@ -237,11 +261,28 @@ def build_cells(html_rows, cell_bboxes, table_bbox):
     return cells
 
 
-def analyze_image(image_path):
+def create_ppstructure():
     from paddleocr import PPStructure
 
+    cpu_kwargs = paddle_cpu_kwargs()
+    for kwargs in (
+        {"show_log": False, "image_orientation": False, "lang": "ch", **cpu_kwargs},
+        {"show_log": False, "image_orientation": False, "lang": "ch"},
+        {"show_log": False, "lang": "ch", **cpu_kwargs},
+        {"show_log": False, "lang": "ch"},
+        {"lang": "ch", **cpu_kwargs},
+        {"lang": "ch"},
+    ):
+        try:
+            return PPStructure(**kwargs)
+        except TypeError:
+            continue
+    return PPStructure()
+
+
+def analyze_image(image_path):
     start = time.time()
-    engine = PPStructure(show_log=False, image_orientation=False, lang="ch")
+    engine = create_ppstructure()
     init_seconds = time.time() - start
     image = cv2.imread(str(image_path))
     if image is None:
