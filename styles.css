@@ -2241,7 +2241,7 @@ tr.hit-row td {
 
 .source-action-review-layout .review-source-action-stage,
 .quick-manual-review-layout .review-source-action-stage {
-  width: calc(100% - 88px);
+  width: max(calc(100% - 88px), 760px);
 }
 
 .quick-manual-fallback-review-layout .review-source-with-actions {
@@ -2251,7 +2251,16 @@ tr.hit-row td {
 
 .quick-manual-fallback-review-layout .review-source-image,
 .quick-manual-fallback-review-layout .review-source-frame {
+  width: max(100%, 760px);
   max-height: calc(100vh - 230px);
+}
+
+.quick-manual-fallback-review-layout .review-source-image {
+  max-height: none;
+}
+
+.quick-manual-fallback-review-layout .review-source-frame {
+  height: calc(100vh - 230px);
 }
 
 .quick-manual-fallback-review-layout .quick-table-wrap {

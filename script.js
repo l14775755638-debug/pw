@@ -13840,6 +13840,80 @@ async function publishUpload() {
   }
 }
 
+function getQuickManualParsedTablePage(parsedTable, index) {
+  return Number(parsedTable?.sourcePage || 0) || index + 1;
+}
+
+function getQuickManualPageKey(sourceKey, page) {
+  return `${sourceKey}::${Number(page || 0) || 1}`;
+}
+
+function filterNewQuickManualParsedTables(parsedTables, sourceKey, existingPageKeys) {
+  return (parsedTables || []).filter((table, index) => {
+    const page = getQuickManualParsedTablePage(table, index);
+    return !existingPageKeys.has(getQuickManualPageKey(sourceKey, page));
+  });
+}
+
+function splitQuickManualRecognizedTables(text, sourceKey, existingPageKeys) {
+  const blocks = splitRecognizedPageBlocks(text).filter((source, index) => {
+    const page = Number(source.sourcePage || 0) || index + 1;
+    return !existingPageKeys.has(getQuickManualPageKey(sourceKey, page));
+  });
+  if (!blocks.length) return [];
+  const nextText = blocks
+    .map((source) => {
+      const page = Number(source.sourcePage || 0) || 0;
+      return page ? `-- PDF 第 ${page} 页 --\n${source.text}` : source.text;
+    })
+    .join("\n\n");
+  return splitRecognizedTables(nextText);
+}
+
+function hasNewQuickManualPageText(text, sourceKey, existingPageKeys) {
+  return splitRecognizedPageBlocks(text).some((source, index) => {
+    const page = Number(source.sourcePage || 0) || index + 1;
+    return !existingPageKeys.has(getQuickManualPageKey(sourceKey, page));
+  });
+}
+
+function groupParsedTablesByPage(parsedTables = []) {
+  const groups = [];
+  const byPage = new Map();
+  parsedTables.forEach((table, index) => {
+    const page = getQuickManualParsedTablePage(table, index);
+    const pageKey = String(page);
+    let group = byPage.get(pageKey);
+    if (!group) {
+      group = { page, tables: [] };
+      byPage.set(pageKey, group);
+      groups.push(group);
+    }
+    group.tables.push(table);
+  });
+  return groups;
+}
+
+async function createQuickManualUploadedTablesInBatches(parsedTables, existingPageKeys, sourceKey) {
+  const groups = groupParsedTablesByPage(parsedTables);
+  const tables = [];
+  const batchSize = 6;
+  for (let start = 0; start < groups.length; start += batchSize) {
+    const chunkGroups = groups.slice(start, start + batchSize);
+    const chunkParsedTables = chunkGroups.flatMap((group) => group.tables);
+    const chunkTables = createUploadedTables(chunkParsedTables, {}, { skipRowColor: true, quickManualMode: true })
+      .filter((table) => table.rows.length)
+      .filter((table) => !existingPageKeys.has(getQuickManualPageKey(sourceKey, table.sourcePage)));
+    tables.push(...chunkTables);
+    setUploadStatus(
+      `正在用快速人工通道生成确认表：${Math.min(start + chunkGroups.length, groups.length)}/${groups.length} 页...`,
+      "loading",
+    );
+    await waitForBrowserPaint();
+  }
+  return tables;
+}
+
 async function publishUploadInner() {
   if (fieldMappingDraft) {
     const draftSource = String(fieldMappingDraft.sourceName || fieldMappingDraft.sourceType || "").toLowerCase();
@@ -13894,30 +13968,37 @@ async function publishUploadQuickManual() {
     showToast("请先处理字段映射。", "error");
     return;
   }
-  const parsedTables = splitRecognizedTables(uploadTableText.value);
   if (!uploadedSource) {
     setUploadStatus("请先选择一张图片或 PDF。", "error");
     showToast("快速生成失败：请先选择文件。", "error");
     return;
   }
-  if (!parsedTables.length) {
-    setUploadStatus("OCR 文本至少需要表头和一行票源。", "error");
-    showToast("快速生成失败：表格内容不完整。", "error");
-    return;
-  }
   setQuickManualUploadBusy(true);
-  setUploadStatus("正在用快速人工通道生成待确认表...", "loading");
+  setUploadStatus("正在准备快速人工生成，OCR 会继续运行...", "loading");
   showToast("正在生成快速人工待确认表...", "loading");
   try {
+    await waitForBrowserPaint();
     const sourceKey = String(uploadedSource?.url || uploadedSource?.name || "");
     const existingPageKeys = new Set(
       [...pendingTables, ...(currentEvent.tables || [])]
         .filter((table) => table.eventId === currentEvent.id && String(table.originalImage || table.sourceFileName || "") === sourceKey)
-        .map((table) => `${sourceKey}::${Number(table.sourcePage || 0) || 1}`),
+        .map((table) => getQuickManualPageKey(sourceKey, table.sourcePage)),
     );
-    const tables = createUploadedTables(parsedTables, {}, { skipRowColor: true, quickManualMode: true })
-      .filter((table) => table.rows.length)
-      .filter((table) => !existingPageKeys.has(`${sourceKey}::${Number(table.sourcePage || 0) || 1}`));
+    setUploadStatus("正在解析已读 OCR 文本...", "loading");
+    await waitForBrowserPaint();
+    const parsedTables = splitQuickManualRecognizedTables(uploadTableText.value, sourceKey, existingPageKeys);
+    const newParsedTables = filterNewQuickManualParsedTables(parsedTables, sourceKey, existingPageKeys);
+    if (!parsedTables.length) {
+      if (String(uploadTableText.value || "").trim() && !hasNewQuickManualPageText(uploadTableText.value, sourceKey, existingPageKeys)) {
+        setUploadStatus("当前 OCR 文本里的页都已经生成过了；等后面页文本继续出现后，再点快速人工生成即可追加。", "idle");
+        showToast("没有新的 OCR 页需要追加。", "error");
+        return;
+      }
+      setUploadStatus("OCR 文本至少需要表头和一行票源。", "error");
+      showToast("快速生成失败：表格内容不完整。", "error");
+      return;
+    }
+    const tables = await createQuickManualUploadedTablesInBatches(newParsedTables, existingPageKeys, sourceKey);
     if (!tables.length) {
       setUploadStatus("当前 OCR 文本里的页都已经生成过了；等后面页文本继续出现后，再点快速人工生成即可追加。", "idle");
       showToast("没有新的 OCR 页需要追加。", "error");
@@ -13937,7 +14018,12 @@ async function publishUploadQuickManual() {
     );
     showToast(`已生成 ${tables.length} 张快速人工待确认表。`, "success");
     renderUploadRecords({ save: false, normalize: false });
-    renderReviewPanel(0);
+    reviewTitle.textContent = "快速人工待确认表已生成";
+    confirmReviewButton.disabled = true;
+    reviewLayout.classList.remove("quick-manual-review-layout");
+    reviewLayout.classList.remove("source-action-review-layout");
+    reviewLayout.classList.remove("quick-manual-fallback-review-layout");
+    reviewLayout.innerHTML = `<div class="empty-state">已生成 ${tables.length} 张快速人工待确认表。为避免大 PDF 卡住页面，请从上方待确认列表点“打开这一页”逐页处理。</div>`;
     renderPublishedTables();
     renderAdminEvent();
     uploadRecords.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -15622,6 +15708,16 @@ function runWhenPageIdle(callback, timeout = 1200) {
     return;
   }
   window.setTimeout(callback, 0);
+}
+
+function waitForBrowserPaint() {
+  return new Promise((resolve) => {
+    if ("requestAnimationFrame" in window) {
+      window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+      return;
+    }
+    window.setTimeout(resolve, 0);
+  });
 }
 
 modeButtons.forEach((button) => {
