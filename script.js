@@ -10938,8 +10938,16 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
     : 0;
   const visiblePending = shouldWindowRecords ? currentPending.slice(windowStart, windowStart + MAX_UPLOAD_RECORDS_RENDERED) : currentPending;
   const windowEnd = windowStart + visiblePending.length;
+  const primaryVisibleTable = visiblePending.find((table) => table.id === selectedPendingTableId) || visiblePending[0] || currentPending[0];
   const windowNote = shouldWindowRecords
-    ? `<div class="upload-record-window-note">为避免页面卡顿，只显示当前附近第 ${windowStart + 1}-${windowEnd} / ${currentPending.length} 张待确认表；上一页/下一页仍可切到全部页面。</div>`
+    ? `<div class="upload-record-window-note">
+        <span>为避免页面卡顿，只显示当前附近第 ${windowStart + 1}-${windowEnd} / ${currentPending.length} 张待确认表；上一页/下一页仍可切到全部页面。</span>
+        ${
+          primaryVisibleTable
+            ? `<button class="small-button" type="button" data-review-table="${escapeHtml(primaryVisibleTable.id)}">打开当前页</button>`
+            : ""
+        }
+      </div>`
     : "";
 
   uploadRecords.innerHTML = `

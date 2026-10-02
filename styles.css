@@ -1876,6 +1876,10 @@ tr.hit-row td {
 }
 
 .upload-record-window-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 10px;
   color: #48666b;
   font-size: 12px;
@@ -1883,6 +1887,14 @@ tr.hit-row td {
   border: 1px solid #bfdde2;
   border-radius: 8px;
   background: #f0fbfb;
+}
+
+.upload-record-window-note span {
+  flex: 1 1 auto;
+}
+
+.upload-record-window-note .small-button {
+  flex: 0 0 auto;
 }
 
 .upload-record {
