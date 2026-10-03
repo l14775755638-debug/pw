@@ -7163,6 +7163,45 @@ function buildSerializableAppState(serializableEvents, serializablePendingTables
   };
 }
 
+function compactRowColorAnalysesForMainCache(analyses) {
+  if (!analyses || typeof analyses !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(analyses).map(([page, analysis]) => [
+      page,
+      {
+        source: analysis?.source || "",
+        expectedRows: Number(analysis?.expectedRows || 0),
+        detectedRows: Number(analysis?.detectedRows || 0),
+        selectionMode: analysis?.selectionMode || "",
+        reliable: analysis?.reliable === true,
+        exactRowAligned: analysis?.exactRowAligned === true,
+        autoApplyAllowed: analysis?.autoApplyAllowed === true,
+        manualReviewOnly: analysis?.manualReviewOnly === true,
+        rowColorLogicVersion: Number(analysis?.rowColorLogicVersion || 0),
+        labels: Array.isArray(analysis?.labels) ? [...analysis.labels] : [],
+        unreliableReasons: Array.isArray(analysis?.unreliableReasons) ? [...analysis.unreliableReasons] : [],
+        warningReasons: Array.isArray(analysis?.warningReasons) ? [...analysis.warningReasons] : [],
+        rows: Array.isArray(analysis?.rows)
+          ? analysis.rows.slice(0, 260).map((row, index) => ({
+              index: Number.isFinite(Number(row?.index)) ? Number(row.index) : index,
+              label: row?.label || "",
+              rawLabel: row?.rawLabel || "",
+              confidence: Number(row?.confidence || 0),
+              coloredRatio: Number(row?.coloredRatio || 0),
+              whiteRatio: Number(row?.whiteRatio || 0),
+              coverageRatio: Number(row?.coverageRatio || 0),
+              strong: row?.strong === true,
+              reason: row?.reason || "",
+              y1: Number(row?.y1 || 0),
+              y2: Number(row?.y2 || 0),
+            }))
+          : [],
+        error: analysis?.error || "",
+      },
+    ]),
+  );
+}
+
 function trimAppStateForLocalStorage(state) {
   if (!state || typeof state !== "object") return state;
   const uploadDraft = state.uploadDraft || {};
@@ -7176,7 +7215,8 @@ function trimAppStateForLocalStorage(state) {
     ocrText.length > MAX_UPLOAD_DRAFT_STORAGE_CHARS ||
     ocrPartialText.length > MAX_UPLOAD_DRAFT_STORAGE_CHARS ||
     ocrSavedText.length > MAX_UPLOAD_DRAFT_STORAGE_CHARS;
-  if (!shouldTrimDraft && !shouldTrimOcrSnapshot) return state;
+  const shouldCompactOcrAnalyses = Boolean(ocrSnapshot?.rowColorAnalyses || ocrSnapshot?.ppStructureAnalyses);
+  if (!shouldTrimDraft && !shouldTrimOcrSnapshot && !shouldCompactOcrAnalyses) return state;
   const trimmedState = {
     ...state,
     uploadDraft: {
@@ -7187,15 +7227,17 @@ function trimAppStateForLocalStorage(state) {
       omittedLargeDraft: shouldTrimDraft ? true : uploadDraft.omittedLargeDraft,
     },
   };
-  if (shouldTrimOcrSnapshot) {
+  if (ocrSnapshot) {
     trimmedState.ocrJobState = {
       ...(state.ocrJobState || {}),
       lastTicketOcrJobSnapshot: {
         ...ocrSnapshot,
-        text: "",
-        partialText: "",
-        savedOcrText: "",
-        omittedLargeText: true,
+        text: shouldTrimOcrSnapshot ? "" : ocrSnapshot.text,
+        partialText: shouldTrimOcrSnapshot ? "" : ocrSnapshot.partialText,
+        savedOcrText: shouldTrimOcrSnapshot ? "" : ocrSnapshot.savedOcrText,
+        omittedLargeText: shouldTrimOcrSnapshot ? true : ocrSnapshot.omittedLargeText,
+        rowColorAnalyses: compactRowColorAnalysesForMainCache(ocrSnapshot.rowColorAnalyses),
+        ppStructureAnalyses: {},
       },
     };
   }
