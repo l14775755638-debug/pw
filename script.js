@@ -1,8 +1,8 @@
-const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 92;
+const REVIEW_FLAGS_VERSION = 36;
+const ROW_COLOR_LOGIC_VERSION = 93;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
-const COLUMN_NORMALIZATION_VERSION = 6;
+const COLUMN_NORMALIZATION_VERSION = 7;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = false;
@@ -15,6 +15,7 @@ const MAX_UPLOAD_RECORDS_RENDERED = 36;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
 const DATE_COLUMN_NAMES = ["日期", "演出日期", "门票时间", "票期", "场次日期", "date", "day", "일자"];
+const SERIAL_COLUMN_NAMES = ["序号", "编号", "no", "num", "number", "index", "id"];
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -902,17 +903,25 @@ function alignCompactTicketRowToColumns(row, columns) {
       used.add("delivery");
       return;
     }
-    if (!used.has("zone") && zoneIndex >= 0 && (extractZoneTokenFromText(value) || isLikelyZoneCode(value) || index === 0)) {
+    if (!used.has("zone") && zoneIndex >= 0 && (parseCompositeSeatInfo(value)?.zone || extractZoneTokenFromText(value) || isLikelyZoneCode(value))) {
       putMappedCell(mapped, zoneIndex, value, "区域");
       used.add("zone");
       return;
     }
-    if (!used.has("row") && rowIndex >= 0) {
+    if (
+      !used.has("row") &&
+      rowIndex >= 0 &&
+      (extractSeatRowFromText(value, { allowBareRange: true }) || isLikelySeatRowValue(value))
+    ) {
       putMappedCell(mapped, rowIndex, value, "排");
       used.add("row");
       return;
     }
-    if (!used.has("seat") && seatIndex >= 0) {
+    if (
+      !used.has("seat") &&
+      seatIndex >= 0 &&
+      (extractSeatNumberFromText(value, { allowBareRange: true }) || isLikelySeatNumberValue(value))
+    ) {
       putMappedCell(mapped, seatIndex, value, "座位号");
       used.add("seat");
       return;
@@ -925,9 +934,27 @@ function alignCompactTicketRowToColumns(row, columns) {
     if (remarkIndex >= 0) putMappedCell(mapped, remarkIndex, value, getDefaultFieldForHeader(columns[remarkIndex]));
   });
 
-  if (!mapped[zoneIndex] && zoneIndex >= 0 && remaining.length >= 3) putMappedCell(mapped, zoneIndex, remaining[0], "区域");
-  if (!mapped[rowIndex] && rowIndex >= 0 && remaining.length >= 2) putMappedCell(mapped, rowIndex, remaining[1], "排");
-  if (!mapped[seatIndex] && seatIndex >= 0 && remaining.length >= 3) putMappedCell(mapped, seatIndex, remaining[2], "座位号");
+  if (
+    !mapped[zoneIndex] &&
+    zoneIndex >= 0 &&
+    remaining.length >= 3 &&
+    (parseCompositeSeatInfo(remaining[0])?.zone || extractZoneTokenFromText(remaining[0]) || isLikelyZoneCode(remaining[0]))
+  )
+    putMappedCell(mapped, zoneIndex, remaining[0], "区域");
+  if (
+    !mapped[rowIndex] &&
+    rowIndex >= 0 &&
+    remaining.length >= 2 &&
+    (extractSeatRowFromText(remaining[1], { allowBareRange: true }) || isLikelySeatRowValue(remaining[1]))
+  )
+    putMappedCell(mapped, rowIndex, remaining[1], "排");
+  if (
+    !mapped[seatIndex] &&
+    seatIndex >= 0 &&
+    remaining.length >= 3 &&
+    (extractSeatNumberFromText(remaining[2], { allowBareRange: true }) || isLikelySeatNumberValue(remaining[2]))
+  )
+    putMappedCell(mapped, seatIndex, remaining[2], "座位号");
   return mapped;
 }
 
@@ -1315,6 +1342,7 @@ function inferColumnsForMisreadDataRows(rows = []) {
   chooseBestIndex("日期", (value) => isLikelyDateValue(value) || isLikelyDateColumnValue(value), (values, index) => (index <= 2 ? 8 : 0), { threshold: 0.45 });
   chooseBestIndex("状态", isLikelyStatusValue, () => 0, { threshold: 0.45 });
   chooseBestIndex("票面", isLikelyFaceValue, () => 0, { threshold: 0.45 });
+  chooseBestIndex("序号", isLikelySerialValue, (values, index) => (index === 0 ? 30 : 0), { threshold: 0.45 });
   chooseBestIndex(
     "区域",
     (value) => {
@@ -1329,7 +1357,6 @@ function inferColumnsForMisreadDataRows(rows = []) {
     threshold: 0.35,
   });
   chooseBestIndex("数量", isLikelySeatCountValue, (values, index) => (index > 0 ? -index : 0), { threshold: 0.55 });
-  chooseBestIndex("序号", isLikelySerialValue, (values, index) => (index === 0 ? 30 : 0), { threshold: 0.45 });
 
   const seen = new Map();
   return columns.map((column, index) => {
@@ -4561,7 +4588,10 @@ function repairSeparatedSeatPositionFields(table, row) {
 
 function getLikelyZoneFromRow(table, row) {
   const columns = table.columns || [];
-  const preferredIndexes = findColumnIndexes(columns, ["位置", "区域", "区", "block", "section", "구역", "구"]);
+  const serialIndexes = new Set(findSourceSequenceColumnIndexes(columns));
+  const preferredIndexes = findColumnIndexes(columns, ["位置", "区域", "区", "block", "section", "구역", "구"]).filter(
+    (index) => !serialIndexes.has(index),
+  );
   const matchedBySeatmap = preferredIndexes.find((index) =>
     currentEvent?.zones?.some((zone) => zoneTokenMatches(row[index], zone)),
   );
@@ -4582,13 +4612,14 @@ function findSeatmapZoneValueInRow(table, row) {
   const columns = table.columns || [];
   const ignoredIndexes = new Set([
     ...findColumnIndexes(columns, DATE_COLUMN_NAMES),
+    ...findSourceSequenceColumnIndexes(columns),
     ...findSalePriceColumnIndexes(columns),
     ...findColumnIndexes(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]),
     ...findColumnIndexes(columns, ["备注", "remark", "note", "说明", "状态", "status"]),
   ]);
   const candidates = row
     .map((value, index) => ({ value, index, token: getZoneTokenFromCell(value) }))
-    .filter(({ value, index, token }) => value && token && !ignoredIndexes.has(index))
+    .filter(({ value, index, token }) => value && token && !ignoredIndexes.has(index) && !isReservedSerialZoneToken(token))
     .filter(({ value, token }) => isLikelyZoneCode(token) || zones.some((zone) => zoneTokenMatches(value, zone)))
     .filter(({ value }) => zones.some((zone) => zoneTokenMatches(value, zone)));
   const preferred = candidates.find(({ index }) => /区域|区|位置|block|section|zone|area/i.test(columns[index] || ""));
@@ -4599,13 +4630,14 @@ function findLikelyZoneValueInRow(table, row) {
   const columns = table.columns || [];
   const ignoredIndexes = new Set([
     ...findColumnIndexes(columns, DATE_COLUMN_NAMES),
+    ...findSourceSequenceColumnIndexes(columns),
     ...findSalePriceColumnIndexes(columns),
     ...findColumnIndexes(columns, ["售价", "单价", "价格", "报价", "金额", "ask", "price"]),
     ...findColumnIndexes(columns, ["状态", "售卖状态", "销售状态", "status", "是否售出", "售出"]),
   ]);
   const candidates = row
     .map((value, index) => ({ value, index, token: getZoneTokenFromCell(value), column: columns[index] || "" }))
-    .filter(({ value, index, token }) => value && token && !ignoredIndexes.has(index))
+    .filter(({ value, index, token }) => value && token && !ignoredIndexes.has(index) && !isReservedSerialZoneToken(token))
     .filter(({ value, token }) => isLikelyZoneCode(token) || currentEvent?.zones?.some((zone) => zoneTokenMatches(value, zone)));
   if (!candidates.length) return "";
   const seatmapMatched = candidates.find(({ value }) => currentEvent?.zones?.some((zone) => zoneTokenMatches(value, zone)));
@@ -5550,9 +5582,11 @@ function getOpenCvPriceSideCellNonWhiteLabel(item) {
   if (!label || isAvailableRowColorLabel(label)) return "";
   const rightWhiteRatio = Number(item.rightmostCellWhiteRatio || 0);
   const rightColoredRatio = Number(item.rightmostCellColoredRatio || 0);
-  const clearNonWhiteCell = rightColoredRatio >= 0.68 && rightColoredRatio >= rightWhiteRatio + 0.35;
+  const confidence = Number(item.confidence || 0);
+  const clearNonWhiteCell = rightColoredRatio >= 0.45 && rightColoredRatio >= rightWhiteRatio + 0.18;
+  const labelledNonWhiteCell = confidence >= 0.45 && rightColoredRatio >= 0.34 && rightColoredRatio >= rightWhiteRatio + 0.12;
   const dominantNonWhiteCell = rightColoredRatio >= 0.82 && rightColoredRatio >= rightWhiteRatio * 2.5;
-  return clearNonWhiteCell || dominantNonWhiteCell ? label : "";
+  return clearNonWhiteCell || labelledNonWhiteCell || dominantNonWhiteCell ? label : "";
 }
 
 function hasOpenCvNonWhitePriceSideCell(item) {
@@ -6248,6 +6282,7 @@ function hasManualReviewRowColorAutoSkipSource(table) {
 function hasActionableOpenCvColorSource(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
   if (table.rowColorManualReviewOnly === true) return hasManualReviewRowColorAutoSkipSource(table);
+  if (hasHighConfidenceLocalNonWhiteAutoSkipSource(table)) return true;
   if (hasCountMatchedMixedRowColorAutoSkipSource(table)) return true;
   if (hasRowLevelMixedOpenCvColorConflict(table)) return true;
   if (
@@ -6696,6 +6731,7 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
   table.rows.forEach((row, rowIndex) => {
     const ticket = { table, row, index: rowIndex };
     if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return;
+    if (table.manualPublishRows?.[rowIndex] === true) return;
     if (shouldAutoSkipForRowColor(table, rowIndex)) {
       table.publishRows[rowIndex] = false;
       autoSkipRows.push(rowIndex);
@@ -6716,6 +6752,13 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
         : `已按同表白底参照自动下架 ${skipCount} 条非白底票；表头、表尾、分割线不参与判断。`;
   }
   return skipCount + releasedCount;
+}
+
+function refreshOpenCvPublishRowsAfterTableRepair(table) {
+  if (!hasOpenCvRowColorPreview(table) || table.rowColorSource === "ai_row_color") return 0;
+  if (table.rowColorManualReviewOnly === true && !hasManualReviewRowColorAutoSkipSource(table)) return 0;
+  if (!hasActionableOpenCvColorSource(table)) return 0;
+  return applyOpenCvWhiteVsColoredAutoDecision(table);
 }
 
 function clearUntrustedRowColorPublishHolds(table) {
@@ -6758,7 +6801,11 @@ function getLastOcrColorAnalysisForPage(page) {
 }
 
 function isSourceSequenceColumnName(column = "") {
-  return /(^|[^a-z0-9])(序号|编号|no|number|index)([^a-z0-9]|$)/i.test(normalize(column || ""));
+  return /(^|[^a-z0-9])(序号|编号|no|num|number|index|id)([^a-z0-9]|$)/i.test(normalize(column || ""));
+}
+
+function findSourceSequenceColumnIndexes(columns = []) {
+  return columns.map((column, index) => (isSourceSequenceColumnName(column) ? index : -1)).filter((index) => index >= 0);
 }
 
 function getVisibleSourceSequenceNumbers(table) {
@@ -7486,6 +7533,7 @@ function updatePendingTableReviewFlags(table) {
   if (table._columnRepairChanged === true) {
     forceCanonicalOriginalDisplay(table);
   }
+  refreshOpenCvPublishRowsAfterTableRepair(table);
   const useLightRisk = table.lightReviewFlags === true || (table.rows || []).length > 12;
   const risk = useLightRisk ? analyzePendingTableRiskLightly(table) : analyzePendingTableRisk(table);
   const forcedReviewReasons = table.returnedForReview ? ["从已发布退回校对"] : [];
@@ -7500,6 +7548,7 @@ function markPendingTableReviewFlagsLightly(table) {
   if (!table) return table;
   repairMisreadDataHeaderTable(table);
   normalizePendingTableColumns(table);
+  refreshOpenCvPublishRowsAfterTableRepair(table);
   const risk = analyzePendingTableRiskLightly(table);
   const forcedReviewReasons = table.returnedForReview ? ["从已发布退回校对"] : [];
   table.lightReviewFlags = true;
