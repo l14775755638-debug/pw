@@ -53,6 +53,7 @@ bash tools/deploy-server.sh
 - 重启 PM2
 - 保存 PM2 开机恢复列表
 - 检查本机 API 是否正常
+- 默认保持 `4173` 公网直连关闭，只让 nginx 访问 Node
 
 ## 服务器重启后怎么检查
 
@@ -103,9 +104,13 @@ OMP_NUM_THREADS=4
 MKL_NUM_THREADS=4
 OPENBLAS_NUM_THREADS=4
 NUMEXPR_NUM_THREADS=4
+EXTERNAL_API_MAX_CONCURRENCY=5
+EXTERNAL_API_RETRIES=3
+EXTERNAL_API_RETRY_DELAY_MS=2000
 ```
 
 含义：同时跑 2 个 OCR 页面任务，每个 PaddleOCR 任务最多用 4 个 CPU 线程。
+外部 AI 接口最多同时请求 5 个；超时、429、5xx 会自动等待并重试。
 
 不要急着调高并发。只有当 CPU 和内存都很稳、但排队明显变慢时，再考虑测试：
 
@@ -129,6 +134,20 @@ http://47.119.130.91/
 ```bash
 cd /Users/macbook/Documents/pw
 LOCKDOWN_DIRECT_PORT=1 bash tools/deploy-server.sh
+```
+
+现在服务器已经进入这个正式状态。以后普通部署直接运行下面命令即可，脚本默认也会保持 `4173` 关闭：
+
+```bash
+cd /Users/macbook/Documents/pw
+bash tools/deploy-server.sh
+```
+
+只有临时排查时才打开公网直连：
+
+```bash
+cd /Users/macbook/Documents/pw
+ALLOW_DIRECT_PORT=1 bash tools/deploy-server.sh
 ```
 
 如果想手动在服务器执行，也可以：

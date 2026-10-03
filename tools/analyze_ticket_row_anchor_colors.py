@@ -615,12 +615,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("image", nargs="?")
     parser.add_argument("--rows-json")
+    parser.add_argument("--rows-json-file")
     parser.add_argument("--columns-json", default="[]")
+    parser.add_argument("--columns-json-file")
     parser.add_argument("--batch-json")
+    parser.add_argument("--batch-json-file")
     args = parser.parse_args()
     try:
-        if args.batch_json:
-            batch = json.loads(args.batch_json)
+        if args.batch_json or args.batch_json_file:
+            if args.batch_json_file:
+                batch = json.loads(Path(args.batch_json_file).read_text(encoding="utf-8"))
+            else:
+                batch = json.loads(args.batch_json)
             if not isinstance(batch, list):
                 raise RuntimeError("batch-json must be a list")
             start = time.time()
@@ -656,10 +662,16 @@ def main():
                 "results": results,
             }
         else:
-            if not args.image or not args.rows_json:
+            if not args.image or not (args.rows_json or args.rows_json_file):
                 raise RuntimeError("image and rows-json are required unless batch-json is provided")
-            rows = json.loads(args.rows_json)
-            columns = json.loads(args.columns_json)
+            if args.rows_json_file:
+                rows = json.loads(Path(args.rows_json_file).read_text(encoding="utf-8"))
+            else:
+                rows = json.loads(args.rows_json)
+            if args.columns_json_file:
+                columns = json.loads(Path(args.columns_json_file).read_text(encoding="utf-8"))
+            else:
+                columns = json.loads(args.columns_json)
             output = analyze_image(Path(args.image), rows if isinstance(rows, list) else [], columns if isinstance(columns, list) else [])
         print(json.dumps(output, ensure_ascii=False))
     except Exception as error:

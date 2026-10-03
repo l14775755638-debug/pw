@@ -59,6 +59,9 @@ const batchOcrConcurrency = Math.max(1, Math.min(readPositiveIntegerEnv("TICKET_
 const batchOcrRetries = Math.max(0, Math.min(readPositiveIntegerEnv("TICKET_OCR_RETRIES", 3), 6));
 const batchOcrRetryDelayMs = Math.max(300, readPositiveIntegerEnv("TICKET_OCR_RETRY_DELAY_MS", 1800));
 const aiRequestTimeoutSeconds = Math.max(25, readPositiveIntegerEnv("AI_REQUEST_TIMEOUT_SECONDS", 180));
+const externalApiMaxConcurrency = Math.max(1, Math.min(readPositiveIntegerEnv("EXTERNAL_API_MAX_CONCURRENCY", 5), 10));
+const externalApiRetries = Math.max(0, Math.min(readPositiveIntegerEnv("EXTERNAL_API_RETRIES", 3), 6));
+const externalApiRetryDelayMs = Math.max(500, readPositiveIntegerEnv("EXTERNAL_API_RETRY_DELAY_MS", 2000));
 const ocrCompletenessCheckEnabled = process.env.TICKET_OCR_COMPLETENESS_CHECK === "1";
 const ocrRowColorDuringScanEnabled = process.env.TICKET_OCR_ROW_COLOR_DURING_SCAN === "1";
 const ocrPpStructureDuringScanEnabled = process.env.TICKET_OCR_PPSTRUCTURE_DURING_SCAN === "1";
@@ -121,6 +124,14 @@ function createProxyAgent(proxyUrl) {
 }
 
 const proxyAgent = createProxyAgent(getProxyUrl());
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled async task error; keeping server alive.", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught server error; keeping server alive to avoid PM2 restart loop.", error);
+});
 
 function buildWorkerProcessEnv() {
   const threads = String(paddleCpuThreads);
@@ -383,7 +394,53 @@ function normalizeRegion(region, index) {
   return { label: safeLabel, polygon: normalizedPolygon, labelPoint, missingIndex: safeLabel ? null : index + 1 };
 }
 
+let externalApiActive = 0;
+const externalApiQueue = [];
+
+function runExternalApiLimited(task) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      externalApiActive += 1;
+      Promise.resolve()
+        .then(task)
+        .then(resolve, reject)
+        .finally(() => {
+          externalApiActive = Math.max(0, externalApiActive - 1);
+          const next = externalApiQueue.shift();
+          if (next) next();
+        });
+    };
+    if (externalApiActive < externalApiMaxConcurrency) {
+      run();
+    } else {
+      externalApiQueue.push(run);
+    }
+  });
+}
+
 async function requestJson(url, payload, headers = {}) {
+  return runExternalApiLimited(() => requestJsonWithRetry(url, payload, headers));
+}
+
+async function requestJsonWithRetry(url, payload, headers = {}) {
+  let lastError = null;
+  let lastResponse = null;
+  for (let attempt = 1; attempt <= externalApiRetries + 1; attempt += 1) {
+    try {
+      const response = await requestJsonOnce(url, payload, headers);
+      if (response.ok || !isRetryableApiResponse(response) || attempt > externalApiRetries) return response;
+      lastResponse = response;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableOcrError(error) || attempt > externalApiRetries) throw error;
+    }
+    await sleep(externalApiRetryDelayMs * attempt);
+  }
+  if (lastResponse) return lastResponse;
+  throw lastError || new Error("外部 AI 接口请求失败。");
+}
+
+async function requestJsonOnce(url, payload, headers = {}) {
   if (!proxyAgent) return requestJsonDirect(url, payload, headers);
   try {
     return await requestJsonViaCurl(url, payload, headers);
@@ -392,6 +449,11 @@ async function requestJson(url, payload, headers = {}) {
     console.warn(`Aliyun proxy request failed, retrying direct: ${error.message || error}`);
     return requestJsonDirect(url, payload, headers);
   }
+}
+
+function isRetryableApiResponse(response) {
+  const status = Number(response?.status || 0);
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
 }
 
 function getApiErrorMessage(apiResponse, fallback, providerName = "") {
@@ -572,7 +634,7 @@ function isRetryableOcrError(error) {
   if (status === 429 || status === 408) return true;
   if (status >= 500) return true;
   const message = String(error?.message || "").toLowerCase();
-  return /timeout|超时|network|socket|econn|rate|limit|busy|temporar|稍后|重试/.test(message);
+  return /timeout|超时|network|socket|econn|eai_again|etimedout|rate|limit|busy|temporar|稍后|重试/.test(message);
 }
 
 function getOutputText(result) {
@@ -1297,17 +1359,21 @@ async function analyzeTicketAnchorRowColorsFromDataUrl(imageDataUrl, rows, colum
   const { mimeType, buffer } = dataUrlToBuffer(imageDataUrl);
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-row-anchor-color-"));
   const imagePath = path.join(tempDir, `page${getExtensionForMime(mimeType, "page.jpg")}`);
+  const rowsJsonPath = path.join(tempDir, "rows.json");
+  const columnsJsonPath = path.join(tempDir, "columns.json");
   fs.writeFileSync(imagePath, buffer);
+  fs.writeFileSync(rowsJsonPath, JSON.stringify(Array.isArray(rows) ? rows : []));
+  fs.writeFileSync(columnsJsonPath, JSON.stringify(Array.isArray(columns) ? columns : []));
   try {
     const { stdout } = await runFileWithTimeout(
       getAnchorRowColorPythonPath(),
       [
         ticketRowAnchorColorScriptPath,
         imagePath,
-        "--rows-json",
-        JSON.stringify(Array.isArray(rows) ? rows : []),
-        "--columns-json",
-        JSON.stringify(Array.isArray(columns) ? columns : []),
+        "--rows-json-file",
+        rowsJsonPath,
+        "--columns-json-file",
+        columnsJsonPath,
       ],
       90000,
     );
@@ -1364,9 +1430,11 @@ async function analyzeTicketAnchorRowColorsBatch(payload, tables = []) {
       });
     }
     if (!batch.length) return { rowColorAnalyses: {} };
+    const batchJsonPath = path.join(tempDir, "batch.json");
+    fs.writeFileSync(batchJsonPath, JSON.stringify(batch));
     const { stdout } = await runFileWithTimeout(
       getAnchorRowColorPythonPath(),
-      [ticketRowAnchorColorScriptPath, "--batch-json", JSON.stringify(batch)],
+      [ticketRowAnchorColorScriptPath, "--batch-json-file", batchJsonPath],
       Math.max(120000, batch.length * 25000),
     );
     const parsed = JSON.parse(stdout || "{}");
