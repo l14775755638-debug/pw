@@ -5335,6 +5335,7 @@ function isTrustedAiRowPublishDecision(table, rowIndex) {
 function shouldAutoSkipForRowColor(table, rowIndex) {
   if (!hasOpenCvRowColorPreview(table)) return false;
   if (table.rowColorSource === "ai_row_color") return isTrustedAiRowSkipDecision(table, rowIndex);
+  if (isHighConfidenceLocalNonWhiteAutoSkipRow(table, rowIndex)) return true;
   if (hasVerifiedWhiteAndNonWhiteRowColorHold(table) && hasVerifiedNonWhiteRowColorHold(table, rowIndex)) return true;
   if (hasCountMatchedMixedRowColorAutoSkipSource(table) && isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex)) return true;
   if (hasRowLevelMixedOpenCvColorConflict(table) && isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex)) return true;
@@ -5671,9 +5672,74 @@ function getAutoOpenCvRowColorLabel(table, rowIndex) {
   return fullRowEnough ? rawLabel : "";
 }
 
+function hasHighConfidenceLocalRowColorBinding(table) {
+  if (
+    !hasOpenCvRowColorPreview(table) ||
+    table?.rowColorSource === "ai_row_color" ||
+    !Array.isArray(table?.rows) ||
+    !Array.isArray(table?.rowColorRows) ||
+    !table.rows.length ||
+    table.rowColorRows.length !== table.rows.length
+  ) {
+    return false;
+  }
+  return hasRowLevelOpenCvColorBinding(table);
+}
+
+function getHighConfidenceLocalNonWhiteAutoSkipLabel(table, rowIndex) {
+  if (!hasHighConfidenceLocalRowColorBinding(table)) return "";
+  const ticket = { table, row: table.rows?.[rowIndex], index: rowIndex };
+  if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return "";
+  const item = table.rowColorRows?.[rowIndex];
+  if (!item || item.userCleared || item.source === "ai_row_color") return "";
+  if (item.source === "ticket_row_anchor" && (item.rowTextVerified !== true || item.rowGeometryVerified !== true)) return "";
+
+  const priceCellLabel = getOpenCvPriceSideCellNonWhiteLabel(item);
+  if (priceCellLabel) return priceCellLabel;
+
+  const rawLabel = getOpenCvItemRawColorLabel(item);
+  if (!rawLabel || isAvailableRowColorLabel(rawLabel) || isOpenCvCellMajorityWhite(item)) return "";
+
+  const strictLabel = getStrictRowLocalOpenCvColorLabel(item);
+  if (strictLabel && !isAvailableRowColorLabel(strictLabel) && hasOpenCvNonWhiteTicketCellEvidence(item)) return strictLabel;
+
+  const { cellCount, coloredCellCount, whiteCellCount, coloredCellRatio } = getOpenCvCellStats(item);
+  const confidence = Number(item.confidence || 0);
+  const coloredRatio = Math.max(Number(item.coloredRatio || 0), Number(item.localPixelColoredRatio || 0));
+  const whiteRatio = Math.max(Number(item.whiteRatio || 0), Number(item.localPixelWhiteRatio || 0));
+  const coverageRatio = Number(item.coverageRatio || 0);
+  const strongCellMajority =
+    cellCount >= 3 &&
+    coloredCellCount >= Math.max(2, Math.ceil(cellCount * 0.5)) &&
+    coloredCellRatio >= 0.5 &&
+    coloredCellCount >= whiteCellCount + 2 &&
+    confidence >= 0.52;
+  const strongPixelBand =
+    item.strong === true &&
+    confidence >= 0.68 &&
+    coverageRatio >= 0.42 &&
+    coloredRatio >= Math.max(0.45, whiteRatio + 0.2);
+  return strongCellMajority || strongPixelBand ? rawLabel : "";
+}
+
+function isHighConfidenceLocalNonWhiteAutoSkipRow(table, rowIndex) {
+  return Boolean(getHighConfidenceLocalNonWhiteAutoSkipLabel(table, rowIndex));
+}
+
+function getHighConfidenceLocalNonWhiteAutoSkipRows(table) {
+  if (!Array.isArray(table?.rows)) return [];
+  return table.rows
+    .map((row, index) => ({ row, index, label: getHighConfidenceLocalNonWhiteAutoSkipLabel(table, index) }))
+    .filter(({ label }) => Boolean(label));
+}
+
+function hasHighConfidenceLocalNonWhiteAutoSkipSource(table) {
+  return getHighConfidenceLocalNonWhiteAutoSkipRows(table).length > 0;
+}
+
 function hasActionableOpenCvColorSource(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
-  if (table.rowColorManualReviewOnly === true) return false;
+  if (table.rowColorManualReviewOnly === true) return hasHighConfidenceLocalNonWhiteAutoSkipSource(table);
   if (hasCountMatchedMixedRowColorAutoSkipSource(table)) return true;
   if (hasRowLevelMixedOpenCvColorConflict(table)) return true;
   if (
@@ -5959,10 +6025,12 @@ function getOpenCvEffectiveColorState(table) {
     nonWhiteCount: 0,
     labels: [],
   };
+  const hasHighConfidenceLocalNonWhite = hasHighConfidenceLocalNonWhiteAutoSkipSource(table);
   if (
     (!hasOpenCvColorDecisionAlignment(table) &&
       !hasCountMatchedMixedRowColorAutoSkipSource(table) &&
-      !hasRowLevelMixedOpenCvColorConflict(table)) ||
+      !hasRowLevelMixedOpenCvColorConflict(table) &&
+      !hasHighConfidenceLocalNonWhite) ||
     !Array.isArray(table.rows)
   )
     return state;
@@ -5987,6 +6055,13 @@ function getOpenCvEffectiveColorState(table) {
       state.hasNonWhite = true;
       state.nonWhiteCount += 1;
       state.labels.push(getOpenCvItemRawColorLabel(item) || "非白底");
+    } else {
+      const highConfidenceLabel = getHighConfidenceLocalNonWhiteAutoSkipLabel(table, index);
+      if (highConfidenceLabel) {
+        state.hasNonWhite = true;
+        state.nonWhiteCount += 1;
+        state.labels.push(highConfidenceLabel);
+      }
     }
   });
 
@@ -6126,7 +6201,12 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
   table.rowColorConfirmed = skipCount > 0;
   table.rowColorAutoApplied = skipCount > 0;
   table.rowColorAutoSkipCount = skipCount;
-  if (skipCount > 0) table.rowColorMessage = `已按同表白底参照自动下架 ${skipCount} 条非白底票；表头、表尾、分割线不参与判断。`;
+  if (skipCount > 0) {
+    table.rowColorMessage =
+      table.rowColorManualReviewOnly === true
+        ? `已按本地高置信颜色自动下架 ${skipCount} 条非白底票；其他颜色仍保留人工确认。`
+        : `已按同表白底参照自动下架 ${skipCount} 条非白底票；表头、表尾、分割线不参与判断。`;
+  }
   return skipCount + releasedCount;
 }
 
@@ -6547,7 +6627,8 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
         hasCountMatchedMixedColorConflict ||
         hasRowLevelMixedColorConflict),
   );
-  if (!manualReviewOnly) applyOpenCvWhiteVsColoredAutoDecision(table);
+  const hasHighConfidenceLocalAutoSkip = hasHighConfidenceLocalNonWhiteAutoSkipSource(table);
+  if (!manualReviewOnly || hasHighConfidenceLocalAutoSkip) applyOpenCvWhiteVsColoredAutoDecision(table);
   const actionableColorState = table.rowColorActionableConflict ? getOpenCvEffectiveColorState(table) : colorState;
   const hasActionableColorConflict = actionableColorState.hasWhite && actionableColorState.hasNonWhite;
   const untrustedColorMapping =
@@ -6571,7 +6652,9 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   }
   const engineName = getRowColorEngineName(table);
   if (manualReviewOnly) {
-    table.rowColorMessage = labels.length
+    table.rowColorMessage = table.rowColorAutoSkipCount > 0
+      ? `${engineName} 已自动下架 ${table.rowColorAutoSkipCount} 条高置信非白底票；其余低置信颜色只作待确认参考。`
+      : labels.length
       ? `${engineName} 已本地识别 ${assignedRows.length}/${table.rows.length} 行底色；结果只进待确认参考，不会自动改变发布状态。`
       : `${engineName} 未识别到稳定逐行底色；请在待确认区对照原图人工判断。`;
   } else if (analysis.source === "ai_row_color" && table.rowColorAutoApplied === true) {
@@ -13524,10 +13607,19 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
       : "";
   const ppStructureStatusText = table.ppStructureMessage || getPpStructureMatchSummary(table);
   const colorEngineHint = rowColorManualReviewOnly
-    ? "本地颜色检测只提供参考，不会自动改变发布状态。"
+    ? table.rowColorAutoSkipCount > 0
+      ? "高置信非白底已自动设为不发布；低置信颜色仍只提供参考。"
+      : "本地颜色检测只提供参考，不会自动改变发布状态。"
     : openCvConflict
     ? "同表混色时非白底行会自动设为不发布；你仍可手动改回发布。"
     : "颜色检测会先等待白底参照和可靠对齐，再参与发布判断。";
+  const openCvPreviewHint = rowColorManualReviewOnly
+    ? table.rowColorAutoSkipCount > 0
+      ? "高置信非白底已自动设为不发布；低置信颜色仍只作参考。"
+      : "本地颜色检测只作为待确认参考，不会自动改变发布状态。"
+    : openCvConflict
+    ? "这张表同时有白底和其他底色；非白底行会自动设为不发布。"
+    : "颜色会等待同表白底参照后再参与发布判断。";
   const openCvPreviewRows =
     hasColorPreview && table.showOpenCvColorPreview
       ? table.rows
@@ -13680,9 +13772,9 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
             </div>
             ${
               openCvPreviewRows
-                  ? `<div class="opencv-color-preview">
+                ? `<div class="opencv-color-preview">
                     <strong>${escapeHtml(rowColorEngineName)} 逐行颜色</strong>
-                    <span>${rowColorManualReviewOnly ? "本地颜色检测只作为待确认参考，不会自动改变发布状态。" : openCvConflict ? "这张表同时有白底和其他底色；非白底行会自动设为不发布。" : "颜色会等待同表白底参照后再参与发布判断。"}${table.rows.length > MAX_OPENCV_PREVIEW_ROWS_RENDERED ? ` 仅显示前 ${MAX_OPENCV_PREVIEW_ROWS_RENDERED} 行颜色明细。` : ""}</span>
+                    <span>${escapeHtml(openCvPreviewHint)}${table.rows.length > MAX_OPENCV_PREVIEW_ROWS_RENDERED ? ` 仅显示前 ${MAX_OPENCV_PREVIEW_ROWS_RENDERED} 行颜色明细。` : ""}</span>
                     <div class="opencv-color-grid">${openCvPreviewRows}</div>
                   </div>`
                 : ""
