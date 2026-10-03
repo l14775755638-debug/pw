@@ -9145,19 +9145,6 @@ function isNonTicketPlaceholderRow(ticket) {
   return false;
 }
 
-function hasTicketIdentityForColorDecision(ticket) {
-  if (!ticket?.table || !Array.isArray(ticket.row)) return false;
-  const rowText = getTicketRowPlainText(ticket);
-  if (!rowText || isPlaceholderOrSeparatorText(rowText)) return false;
-  if (hasTicketSalePrice(ticket)) return true;
-  const zoneValue = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["区域", "区", "位置", "票面", "zone", "area", "section"]);
-  const rowValue = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["排", "排数", "行", "row"]);
-  const seatValue = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["座位号", "座位", "号段", "seat"]);
-  if (zoneValue && (rowValue || seatValue)) return true;
-  if (findCompositeSeatInfoInTicket(ticket)) return true;
-  return /[A-Z]{1,3}\d{0,4}\s*(?:区|區)?[^，,\n]*(?:\d+\s*排|[A-Z]\s*排|row)/i.test(rowText);
-}
-
 function isEffectiveTicketRowForColorDecision(ticket) {
   const table = ticket?.table;
   const rowIndex = Number(ticket?.index);
@@ -9166,11 +9153,11 @@ function isEffectiveTicketRowForColorDecision(ticket) {
     const cacheKey = `${rowIndex}:${(table.columns || []).length}:${ticket.row.join("\u0001")}`;
     const cached = table._rowColorEffectiveTicketCache[rowIndex];
     if (cached?.key === cacheKey) return cached.value;
-    const value = hasTicketIdentityForColorDecision(ticket);
+    const value = hasTicketSalePrice(ticket) && !isNonTicketPlaceholderRow(ticket);
     table._rowColorEffectiveTicketCache[rowIndex] = { key: cacheKey, value };
     return value;
   }
-  return hasTicketIdentityForColorDecision(ticket);
+  return hasTicketSalePrice(ticket) && !isNonTicketPlaceholderRow(ticket);
 }
 
 function getFirstNonEmptyColumnValue(table, row, names) {
@@ -11745,14 +11732,15 @@ function isPendingRowSelectedForPublish(table, rowIndex) {
 function getPendingRowPublishBlockReason(ticket) {
   if (!ticket?.table || !ticket.table.rows?.[ticket.index]) return "票源行不存在，无法发布。";
   if (isSoldTicket(ticket)) return "仍被识别为已售，请点修改清掉 SOLD/已售字样，或重新点“发布到前台”。";
-  if (isColorHeldForReviewTicket(ticket)) return "仍被颜色标色下架，请确认这行不是已售后再点“发布到前台”。";
   if (!hasTicketSalePrice(ticket)) return "缺少有效售价，请先补售价。";
+  if (isColorHeldForReviewTicket(ticket)) return "仍被颜色标色下架，请确认这行不是已售后再点“发布到前台”。";
   return "";
 }
 
 function getPendingRowDecisionReason(ticket, { selectedForPublish = false, publishEligible = false } = {}) {
   if (!ticket?.table || !ticket.table.rows?.[ticket.index]) return "票源行不存在";
   if (isSoldTicket(ticket)) return "文字 SOLD/已售 下架";
+  if (!hasTicketSalePrice(ticket)) return "缺少有效售价";
   const aiItem = getAiRowColorItem(ticket.table, ticket.index);
   if (isTrustedAiRowSkipDecision(ticket.table, ticket.index)) {
     return `AI视觉复核不发布${aiItem?.reason ? `：${aiItem.reason}` : ""}`;
@@ -11761,7 +11749,6 @@ function getPendingRowDecisionReason(ticket, { selectedForPublish = false, publi
     const label = getWhiteVsColoredConflictLabel(ticket.table, ticket.index) || getTicketRowColorLabel(ticket) || "非白底";
     return `颜色${label}下架`;
   }
-  if (!hasTicketSalePrice(ticket)) return "缺少有效售价";
   if (selectedForPublish && !publishEligible) return getPendingRowPublishBlockReason(ticket) || "未满足发布条件";
   if (!selectedForPublish) {
     if (ticket.table.manualSkipRows?.[ticket.index] === true || ticket.table.bulkSkipDraft === true) return "人工选择不发布";
