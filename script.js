@@ -10,6 +10,7 @@ const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 180;
 const MAX_ANCHOR_ROWS_PER_TABLE = 260;
 const MAX_ANCHOR_BATCH_PAGES_PER_REQUEST = 4;
 const MAX_REVIEW_ROWS_RENDERED = 240;
+const STANDARD_REVIEW_ROW_WINDOW_SIZE = 60;
 const MAX_UPLOAD_RECORDS_RENDERED = 36;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
@@ -11755,6 +11756,63 @@ function getReviewTableNavigation(table) {
   };
 }
 
+function getStandardReviewRows(table) {
+  if (!table || !Array.isArray(table.rows)) return [];
+  return table.rows
+    .map((row, rowIndex) => ({ row, rowIndex }))
+    .filter(({ row, rowIndex }) => table.showSoldInReview || !isUnavailableTicket({ table, row, index: rowIndex }));
+}
+
+function getReviewRowWindow(table, reviewRows, focusRowIndex = null) {
+  const total = Array.isArray(reviewRows) ? reviewRows.length : 0;
+  const pageSize = STANDARD_REVIEW_ROW_WINDOW_SIZE;
+  let start = Number(table?.reviewRowWindowStart || 0);
+  if (Number.isInteger(focusRowIndex)) {
+    const focusIndex = reviewRows.findIndex((item) => item.rowIndex === focusRowIndex);
+    if (focusIndex >= 0) start = Math.floor(focusIndex / pageSize) * pageSize;
+  }
+  const maxStart = total > 0 ? Math.floor((total - 1) / pageSize) * pageSize : 0;
+  start = Math.max(0, Math.min(start, maxStart));
+  const end = Math.min(total, start + pageSize);
+  return {
+    start,
+    end,
+    total,
+    pageSize,
+    rows: reviewRows.slice(start, end),
+    hasPrevious: start > 0,
+    hasNext: end < total,
+  };
+}
+
+function renderReviewRowWindowNav(windowInfo) {
+  if (!windowInfo || windowInfo.total <= windowInfo.pageSize) return "";
+  return `
+    <div class="review-table-nav review-row-window-nav">
+      <button class="small-button ghost" type="button" data-review-row-window="prev" ${windowInfo.hasPrevious ? "" : "disabled"}>上一批</button>
+      <span>当前显示第 ${windowInfo.start + 1}-${windowInfo.end} 条 / 共 ${windowInfo.total} 条票</span>
+      <button class="small-button ghost" type="button" data-review-row-window="next" ${windowInfo.hasNext ? "" : "disabled"}>下一批</button>
+    </div>
+  `;
+}
+
+function shiftReviewRowWindow(table, direction) {
+  if (!table) return false;
+  const reviewRows = getStandardReviewRows(table);
+  const currentWindow = getReviewRowWindow(table, reviewRows);
+  const pageSize = currentWindow.pageSize;
+  const maxStart = currentWindow.total > 0 ? Math.floor((currentWindow.total - 1) / pageSize) * pageSize : 0;
+  const nextStart =
+    direction < 0
+      ? Math.max(0, currentWindow.start - pageSize)
+      : Math.min(maxStart, currentWindow.start + pageSize);
+  if (nextStart === currentWindow.start) return false;
+  table.reviewRowWindowStart = nextStart;
+  const focusRowIndex = reviewRows[nextStart]?.rowIndex ?? null;
+  renderReviewPanel(focusRowIndex, { normalize: false });
+  return true;
+}
+
 function selectPendingTable(tableId, { scroll = false } = {}) {
   const table = pendingTables.find((item) => item.id === tableId && item.eventId === currentEvent.id);
   if (!table) return false;
@@ -14170,11 +14228,12 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
           const ticket = { table, row, index: rowIndex };
           return !isUnavailableTicket(ticket) && !String(row[dateColumnIndex] || "").trim() && !getTicketDateValues(ticket).length;
         }).length;
-  const reviewRows = table.rows
-    .map((row, rowIndex) => ({ row, rowIndex }))
-    .filter(({ row, rowIndex }) => table.showSoldInReview || !isUnavailableTicket({ table, row, index: rowIndex }));
-  const renderedReviewRows = reviewRows;
-  const hiddenReviewRowCount = 0;
+  const reviewRows = getStandardReviewRows(table);
+  const reviewRowWindow = getReviewRowWindow(table, reviewRows, focusRowIndex);
+  table.reviewRowWindowStart = reviewRowWindow.start;
+  const renderedReviewRows = reviewRowWindow.rows;
+  const hiddenReviewRowCount = Math.max(0, reviewRowWindow.total - renderedReviewRows.length);
+  const reviewRowWindowNav = renderReviewRowWindowNav(reviewRowWindow);
   const reviewZoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
   const rows = renderedReviewRows
     .map(({ rowIndex }) => renderStandardReviewRowCard(table, rowIndex, aiDecisionByRow))
@@ -14230,6 +14289,7 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
         <span>${escapeHtml(navigationLabel)}</span>
         <button class="small-button ghost" type="button" data-review-table-nav="next" ${navigation.next ? "" : "disabled"}>下一页</button>
       </div>
+      ${reviewRowWindowNav}
       ${
         missingDateCount
           ? `<div class="review-quick-tools">
@@ -14306,9 +14366,10 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
       </div>
       ${
         hiddenReviewRowCount
-          ? `<div class="review-ticket-limit-note">为了避免大表卡住页面，本页先显示前 ${MAX_REVIEW_ROWS_RENDERED} 条可见票源，剩余 ${hiddenReviewRowCount} 条仍会参与确认发布和保存。</div>`
+          ? `<div class="review-ticket-limit-note">为了避免大表卡住页面，本页分批显示票卡；当前还有 ${hiddenReviewRowCount} 条未显示在这一批，但仍会参与保存和确认发布。</div>`
           : ""
       }
+      ${reviewRowWindowNav}
       ${
         rows ||
         `<div class="empty-state">这张表当前没有显示中的票；可以点“显示已跳过票源”恢复查看，或从“校对历史”恢复到上一步。</div>`
@@ -14755,6 +14816,22 @@ async function createQuickManualUploadedTablesInBatches(parsedTables, existingPa
   return tables;
 }
 
+async function createUploadedTablesInBatches(parsedTables, rowColorAnalyses = {}, options = {}) {
+  const groups = groupParsedTablesByPage(parsedTables);
+  const tables = [];
+  const batchSize = Number(options.batchSize || 6);
+  const createOptions = options.createOptions || {};
+  const statusPrefix = options.statusPrefix || "正在分批生成待确认表";
+  for (let start = 0; start < groups.length; start += batchSize) {
+    const chunkGroups = groups.slice(start, start + batchSize);
+    const chunkParsedTables = chunkGroups.flatMap((group) => group.tables);
+    tables.push(...createUploadedTables(chunkParsedTables, rowColorAnalyses, createOptions));
+    setUploadStatus(`${statusPrefix}：${Math.min(start + chunkGroups.length, groups.length)}/${groups.length} 页...`, "loading");
+    await waitForBrowserPaint();
+  }
+  return tables;
+}
+
 async function publishUploadInner() {
   if (fieldMappingDraft) {
     const draftSource = String(fieldMappingDraft.sourceName || fieldMappingDraft.sourceType || "").toLowerCase();
@@ -14779,7 +14856,7 @@ async function publishUploadInner() {
   }
   let rowColorAnalyses = await getUploadImageRowColorAnalysesSafely(parsedTables);
   rowColorAnalyses = await ensureUploadPdfRowColorAnalyses(parsedTables, rowColorAnalyses);
-  const rawTables = createUploadedTables(parsedTables, rowColorAnalyses);
+  const rawTables = await createUploadedTablesInBatches(parsedTables, rowColorAnalyses);
   const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
   const tables = rawTables.filter((table) => table.rows.length);
   pendingTables.unshift(...tables);
@@ -17337,6 +17414,11 @@ reviewLayout.addEventListener("click", (event) => {
   const navButton = event.target.closest("[data-review-table-nav]");
   if (navButton) {
     selectAdjacentPendingTable(navButton.dataset.reviewTableNav === "prev" ? -1 : 1);
+    return;
+  }
+  const rowWindowButton = event.target.closest("[data-review-row-window]");
+  if (rowWindowButton) {
+    shiftReviewRowWindow(getSelectedPendingTable(), rowWindowButton.dataset.reviewRowWindow === "prev" ? -1 : 1);
     return;
   }
   const bulkSkipButton = event.target.closest("[data-mark-all-skip-draft]");
