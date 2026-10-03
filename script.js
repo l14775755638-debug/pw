@@ -1,8 +1,8 @@
-const REVIEW_FLAGS_VERSION = 36;
-const ROW_COLOR_LOGIC_VERSION = 93;
+const REVIEW_FLAGS_VERSION = 37;
+const ROW_COLOR_LOGIC_VERSION = 94;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
-const COLUMN_NORMALIZATION_VERSION = 7;
+const COLUMN_NORMALIZATION_VERSION = 8;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = false;
@@ -3149,6 +3149,7 @@ function isLikelyZoneCode(value) {
   const text = cleanZoneToken(value);
   if (!text || isSoldText(text, { strict: true }) || isLikelyRowColorValue(text)) return false;
   if (isReservedSerialZoneToken(text)) return false;
+  if (/^row\d{1,3}$/i.test(text)) return false;
   if (/^\d{1,2}$/.test(text)) return false;
   if (/^\d{3}[a-z]?$/i.test(text)) return true;
   if (/^[a-z]{1,3}\d+[a-z]?$/i.test(text)) return true;
@@ -3942,7 +3943,7 @@ function chooseBetterZoneToken(...values) {
 function isReservedSerialZoneToken(value) {
   const text = cleanZoneToken(value);
   if (!text) return false;
-  return /^(?:add|new|item|ticket|no)\d+$/i.test(text);
+  return /^(?:add|new|item|ticket|no)\d+$/i.test(text) || /^row\d{1,3}$/i.test(text);
 }
 
 function extractZoneTokenFromText(value) {
@@ -4361,13 +4362,13 @@ function parseCompositeSeatInfo(value) {
     .replace(/\s+/g, " ")
     .trim();
   const parsedLocation =
-    parseCompressedForeignSeatInfo(withoutDate) ||
     parseEnglishSideRowPosition(withoutDate) ||
     parseKoreanCompositeSeatInfo(withoutDate) ||
     parseHybridCompositeSeatInfo(withoutDate) ||
     parseLooseCompositeSeatInfo(withoutDate) ||
     parseEnglishCompositeSeatInfo(withoutDate) ||
-    parseCompactCompositeSeatInfo(withoutDate);
+    parseCompactCompositeSeatInfo(withoutDate) ||
+    parseCompressedForeignSeatInfo(withoutDate);
   if (parsedLocation?.zone) {
     return {
       date,
@@ -8682,6 +8683,76 @@ function flushAppStateSaveNow() {
   saveAppState();
 }
 
+function hasReusableLoadedVisualRowColorRows(table) {
+  if (!table || table.rowColorSource === "ai_row_color" || !isVisualRowColorSource(table)) return false;
+  if (!Array.isArray(table.rows) || !table.rows.length || !Array.isArray(table.rowColorRows)) return false;
+  if (table.rowColorRows.length !== table.rows.length) return false;
+  return table.rowColorRows.some((item) => {
+    if (!item || item.userCleared) return false;
+    return Boolean(
+      getOpenCvItemRawColorLabel(item) ||
+        Number(item.confidence || 0) > 0 ||
+        Number(item.coloredRatio || 0) > 0 ||
+        Number(item.whiteRatio || 0) > 0 ||
+        Number(item.coverageRatio || 0) > 0 ||
+        Array.isArray(item.cells) ||
+        Array.isArray(item.cellLabels) ||
+        item.rowTextVerified === true ||
+        item.rowGeometryVerified === true ||
+        item.strong === true,
+    );
+  });
+}
+
+function prepareLoadedVisualRowColorMigration(table) {
+  if (!hasReusableLoadedVisualRowColorRows(table)) return false;
+  Object.keys(table.publishRows || {}).forEach((rowIndex) => {
+    if (table.manualSkipRows?.[rowIndex] !== true && table.manualPublishRows?.[rowIndex] !== true) delete table.publishRows[rowIndex];
+  });
+  table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
+  table.rowColorReliable = true;
+  table.rowColorConfirmed = table.rowColorConfirmed === true || table.rowColorAutoApplied === true;
+  if (!Array.isArray(table.rowColorSourceIndexes) || table.rowColorSourceIndexes.length !== table.rows.length) {
+    table.rowColorSourceIndexes = table.rows.map((_, index) => index);
+  }
+  if (table.rowColorExactRowAligned !== true && table.rowColorPartialSequenceAligned !== true) {
+    table.rowColorExactRowAligned = true;
+  }
+  table.rowColorActionableConflict = Boolean(table.rowColorActionableConflict);
+  table.rowColorManualReviewOnly = false;
+  table.forceRowColorRepair = false;
+  table._rowColorRepairing = false;
+  table._rowColorRepairDone = false;
+  table._rowColorRepairTried = false;
+  table.rowColorMessage = table.rowColorMessage || "已升级旧版颜色识别结果，并按当前规则重新判断发布状态。";
+  return true;
+}
+
+function markLoadedTableForRowColorRepair(table, message = "旧版颜色判断已停用，打开本页会重新逐行识别底色。") {
+  if (!table) return;
+  table.rowColorSource = "";
+  table.rowColorReliable = false;
+  table.rowColorConfirmed = false;
+  table.rowColorExactRowAligned = false;
+  table.rowColorActionableConflict = false;
+  table.rowColorManualReviewOnly = false;
+  table.rowColorAutoApplied = false;
+  table.rowColorAutoSkipCount = 0;
+  table.aiRowColorAutoRows = [];
+  table.rowColorRows = [];
+  table.rowColorSoldTextAnchor = null;
+  table.rowColorPartialSequenceAligned = false;
+  table.rowColorSparseSourceRepair = false;
+  table.rowColorPageLabels = [];
+  table.rowColorMessage = message;
+  table._rowColorRepairing = false;
+  table._rowColorRepairDone = false;
+  table._rowColorRepairTried = false;
+  if (Array.isArray(table.rows) && table.rows.length && (table.originalImage || isPdfTableSource(table))) {
+    table.forceRowColorRepair = true;
+  }
+}
+
 function normalizeLoadedPendingTable(table) {
   const loadedRowColorVersion = Number(table?.rowColorLogicVersion || 0);
   const hasStaleRowColorLogic = loadedRowColorVersion !== ROW_COLOR_LOGIC_VERSION;
@@ -8718,22 +8789,9 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable.rowActionMessage = normalizedTable.rowActionMessage || "已从旧版贴图坐标恢复逐行按钮。";
   }
   if (String(normalizedTable.rowColorSource || "").startsWith("quick_manual_") || legacyRowActionRows.length) {
-    normalizedTable.rowColorSource = "";
-    normalizedTable.rowColorReliable = false;
-    normalizedTable.rowColorConfirmed = false;
-    normalizedTable.rowColorExactRowAligned = false;
-    normalizedTable.rowColorActionableConflict = false;
-    normalizedTable.rowColorManualReviewOnly = false;
-    normalizedTable.rowColorAutoApplied = false;
-    normalizedTable.rowColorAutoSkipCount = 0;
-    normalizedTable.aiRowColorAutoRows = [];
-    normalizedTable.rowColorRows = [];
+    markLoadedTableForRowColorRepair(normalizedTable, "旧版贴图坐标已和颜色识别拆分，打开本页会重新检测底色。");
     normalizedTable.rowColorImageWidth = 0;
     normalizedTable.rowColorImageHeight = 0;
-    normalizedTable.rowColorMessage = "旧版贴图坐标已和颜色识别拆分，打开本页会重新检测底色。";
-    normalizedTable._rowColorRepairing = false;
-    normalizedTable._rowColorRepairDone = false;
-    normalizedTable._rowColorRepairTried = false;
   }
   if (hasStaleRowColorLogic) {
     normalizedTable._rowColorRepairing = false;
@@ -8741,27 +8799,19 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable._rowColorRepairTried = false;
   }
   if (isVisualRowColorSource(normalizedTable) && hasStaleRowColorLogic) {
-    Object.keys(normalizedTable.publishRows || {}).forEach((rowIndex) => {
-      if (normalizedTable.manualSkipRows?.[rowIndex] !== true) delete normalizedTable.publishRows[rowIndex];
-    });
-    normalizedTable.rowColorSource = "";
-    normalizedTable.rowColorReliable = false;
-    normalizedTable.rowColorConfirmed = false;
-    normalizedTable.rowColorExactRowAligned = false;
-    normalizedTable.rowColorActionableConflict = false;
-    normalizedTable.rowColorManualReviewOnly = false;
-    normalizedTable.rowColorAutoApplied = false;
-    normalizedTable.rowColorAutoSkipCount = 0;
-    normalizedTable.aiRowColorAutoRows = [];
-    normalizedTable.rowColorRows = [];
-    normalizedTable.rowColorSoldTextAnchor = null;
-    normalizedTable.rowColorPartialSequenceAligned = false;
-    normalizedTable.rowColorSparseSourceRepair = false;
-    normalizedTable.rowColorPageLabels = [];
-    normalizedTable.rowColorMessage = "旧版颜色判断已停用，打开本页会重新逐行识别底色。";
-    normalizedTable._rowColorRepairing = false;
-    normalizedTable._rowColorRepairDone = false;
-    normalizedTable._rowColorRepairTried = false;
+    const migratedRowColorRows = prepareLoadedVisualRowColorMigration(normalizedTable);
+    if (!migratedRowColorRows) {
+      Object.keys(normalizedTable.publishRows || {}).forEach((rowIndex) => {
+        if (normalizedTable.manualSkipRows?.[rowIndex] !== true && normalizedTable.manualPublishRows?.[rowIndex] !== true) delete normalizedTable.publishRows[rowIndex];
+      });
+      markLoadedTableForRowColorRepair(normalizedTable);
+    }
+  } else if (hasStaleRowColorLogic && !hasReusableLoadedVisualRowColorRows(normalizedTable)) {
+    normalizedTable.forceRowColorRepair = Boolean(
+      Array.isArray(normalizedTable.rows) &&
+        normalizedTable.rows.length &&
+        (normalizedTable.originalImage || isPdfTableSource(normalizedTable)),
+    );
   }
   if (
     Array.isArray(normalizedTable.rowActionRows) &&
@@ -8780,6 +8830,7 @@ function normalizeLoadedPendingTable(table) {
   repairMisreadDataHeaderTable(normalizedTable);
   normalizePendingTableColumns(normalizedTable);
   ensurePendingTableSourceRowIndexes(normalizedTable);
+  if (hasOpenCvRowColorPreview(normalizedTable)) refreshOpenCvPublishRowsAfterTableRepair(normalizedTable);
   if (hasStalePublishDecisionLogic) clearStalePublishDecisionBlocks(normalizedTable);
   normalizedTable.publishDecisionLogicVersion = PUBLISH_DECISION_LOGIC_VERSION;
   return normalizedTable;
