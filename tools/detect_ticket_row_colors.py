@@ -1335,6 +1335,131 @@ def detect_compact_colored_table_intervals(image, expected_rows):
     return intervals, "compact_color_anchor_exact"
 
 
+def get_ocr_bbox(row):
+    bbox = row.get("bbox") if isinstance(row, dict) else None
+    if not isinstance(bbox, dict):
+        return None
+    try:
+        x1 = int(round(float(bbox.get("x1"))))
+        y1 = int(round(float(bbox.get("y1"))))
+        x2 = int(round(float(bbox.get("x2"))))
+        y2 = int(round(float(bbox.get("y2"))))
+    except (TypeError, ValueError):
+        return None
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+
+
+def build_ocr_aligned_intervals(image, ocr_rows):
+    """Build one visual sampling interval for each OCR ticket row.
+
+    The generic row detector can split one visual ticket row into several
+    fragments when a table uses merged date cells or thin colored bands. OCR
+    text boxes are a better anchor for local page processing because they are
+    already one row per recognized ticket line.
+    """
+    height, _ = image.shape[:2]
+    indexed = []
+    for index, row in enumerate(ocr_rows or []):
+        bbox = get_ocr_bbox(row)
+        if not bbox:
+            continue
+        center = (bbox["y1"] + bbox["y2"]) / 2
+        indexed.append((index, row, bbox, center))
+    if not indexed:
+        return []
+
+    indexed.sort(key=lambda item: item[3])
+    centers = [item[3] for item in indexed]
+    gaps = [centers[index + 1] - centers[index] for index in range(len(centers) - 1)]
+    usable_gaps = [gap for gap in gaps if gap >= 8]
+    median_gap = float(np.median(usable_gaps)) if usable_gaps else 34.0
+    intervals = []
+    for sorted_index, (original_index, row, bbox, center) in enumerate(indexed):
+        if sorted_index == 0:
+            y1 = center - median_gap * 0.5
+        else:
+            y1 = (centers[sorted_index - 1] + center) / 2
+        if sorted_index == len(indexed) - 1:
+            y2 = center + median_gap * 0.5
+        else:
+            y2 = (center + centers[sorted_index + 1]) / 2
+
+        # The OCR bbox surrounds text, not the full cell. Keep enough vertical
+        # padding to sample the row background while still avoiding neighbors.
+        y1 = min(y1, bbox["y1"] - max(2, int(median_gap * 0.08)))
+        y2 = max(y2, bbox["y2"] + max(2, int(median_gap * 0.08)))
+        y1 = int(round(max(0, min(height - 1, y1))))
+        y2 = int(round(max(y1 + 9, min(height, y2))))
+        intervals.append(
+            {
+                "y1": y1,
+                "y2": y2,
+                "height": y2 - y1,
+                "darkDensity": 0,
+                "verticalLines": 0,
+                "ocrIndex": int(original_index),
+                "matchedText": str(row.get("text") or ""),
+                "ocrBBox": bbox,
+            }
+        )
+    return intervals
+
+
+def analyze_ocr_rows(image_path, ocr_rows):
+    image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+    if image is None:
+        raise RuntimeError("image cannot be read")
+    intervals = build_ocr_aligned_intervals(image, ocr_rows)
+    rows = []
+    for index, interval in enumerate(intervals):
+        row = classify_interval(image, interval)
+        row["index"] = index
+        row["sourceIndex"] = index
+        row["ocrIndex"] = interval.get("ocrIndex", index)
+        row["matchedText"] = interval.get("matchedText", "")
+        row["bbox"] = interval.get("ocrBBox")
+        row["rowTextVerified"] = True
+        row["rowGeometryVerified"] = True
+        rows.append(row)
+
+    labels = [row["label"] for row in rows if row.get("label")]
+    if len(rows) <= 1:
+        max_row_gap = 0
+        contiguous = True
+    else:
+        gaps = [rows[index + 1]["y1"] - rows[index]["y2"] for index in range(len(rows) - 1)]
+        heights = [row["height"] for row in rows]
+        median_height = float(np.median(heights)) if heights else 18
+        max_row_gap = int(max(gaps)) if gaps else 0
+        contiguous = max_row_gap <= max(10, median_height * 1.65)
+    low_confidence_rows = [
+        index
+        for index, row in enumerate(rows)
+        if float(row.get("confidence", 0) or 0) < 0.32 and not (row.get("label") or row.get("rawLabel"))
+    ]
+    return {
+        "source": "opencv",
+        "imageWidth": int(image.shape[1]),
+        "imageHeight": int(image.shape[0]),
+        "expectedRows": int(len(rows)),
+        "detectedRows": int(len(rows)),
+        "selectionMode": "ocr_bbox_aligned",
+        "reliable": False,
+        "exactRowAligned": bool(rows),
+        "contiguous": bool(contiguous),
+        "maxRowGap": int(max_row_gap),
+        "lowConfidenceRows": low_confidence_rows,
+        "unreliableReasons": ["manual_review_only"],
+        "warningReasons": [],
+        "removedSeparatorRows": [],
+        "labels": sorted(set(labels)),
+        "rowActionTextRows": [],
+        "rows": rows,
+    }
+
+
 def analyze(image_path, expected_rows=0):
     image = cv2.imread(image_path, cv2.IMREAD_COLOR)
     if image is None:
