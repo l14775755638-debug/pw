@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const tls = require("tls");
 const os = require("os");
+const vm = require("vm");
 const { execFile, spawn } = require("child_process");
 
 const root = __dirname;
@@ -712,6 +713,138 @@ function sendStatus(response) {
     model: config.model,
     hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY),
     proxy: proxyAgent ? proxyAgent.name : "",
+  });
+}
+
+function createFakeBrowserElement() {
+  const noop = () => {};
+  return {
+    style: {},
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    dataset: {},
+    addEventListener: noop,
+    removeEventListener: noop,
+    appendChild: noop,
+    remove: noop,
+    querySelector: () => createFakeBrowserElement(),
+    querySelectorAll: () => [],
+    closest: () => null,
+    setAttribute: noop,
+    getAttribute: () => "",
+    focus: noop,
+    scrollIntoView: noop,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }),
+    textContent: "",
+    innerHTML: "",
+    value: "",
+    checked: false,
+    disabled: false,
+  };
+}
+
+function createPendingGenerationVmContext(payload) {
+  const noop = () => {};
+  const noTimeout = () => 0;
+  const fakeWindow = {
+    location: { search: "?admin=1", protocol: "http:" },
+    addEventListener: noop,
+    removeEventListener: noop,
+    history: { replaceState: noop },
+    URL,
+    setTimeout: noTimeout,
+    clearTimeout: noop,
+    setInterval: noTimeout,
+    clearInterval: noop,
+    requestAnimationFrame: noTimeout,
+    requestIdleCallback: (callback) => (typeof callback === "function" ? callback() : 0),
+    confirm: () => false,
+    alert: noop,
+  };
+  const context = {
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    serverPayload: payload,
+    window: fakeWindow,
+    document: {
+      querySelector: () => createFakeBrowserElement(),
+      querySelectorAll: () => [],
+      getElementById: () => createFakeBrowserElement(),
+      createElement: () => createFakeBrowserElement(),
+      addEventListener: noop,
+      removeEventListener: noop,
+      body: createFakeBrowserElement(),
+      documentElement: createFakeBrowserElement(),
+      visibilityState: "hidden",
+    },
+    localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
+    sessionStorage: { getItem: () => null, setItem: noop, removeItem: noop },
+    navigator: { clipboard: { writeText: async () => {} } },
+    URLSearchParams,
+    URL,
+    Blob: typeof globalThis.Blob === "function" ? globalThis.Blob : class {},
+    File: typeof globalThis.File === "function" ? globalThis.File : class {},
+    FormData: class {},
+    atob: (value) => Buffer.from(value, "base64").toString("binary"),
+    btoa: (value) => Buffer.from(value, "binary").toString("base64"),
+    setTimeout: noTimeout,
+    clearTimeout: noop,
+    setInterval: noTimeout,
+    clearInterval: noop,
+    requestAnimationFrame: noTimeout,
+    fetch: async () => ({ ok: false, json: async () => ({}) }),
+  };
+  vm.createContext(context);
+  return context;
+}
+
+function generatePendingTablesWithClientRules(payload) {
+  const scriptPath = path.join(root, "script.js");
+  const clientScript = fs.readFileSync(scriptPath, "utf8");
+  const context = createPendingGenerationVmContext(payload);
+  vm.runInContext(clientScript, context, { filename: "script.js", timeout: 60000 });
+  const resultText = vm.runInContext(
+    `
+      currentEvent = serverPayload.currentEvent || currentEvent;
+      uploadedSource = serverPayload.uploadedSource || {};
+      uploadTableTitle.value = serverPayload.tableTitle || uploadedSource.name || "";
+      uploadTableText.value = serverPayload.recognizedText || "";
+      lastTicketOcrJobSnapshot = { rowColorAnalyses: serverPayload.rowColorAnalyses || {} };
+      const parsedTables = splitRecognizedTables(uploadTableText.value);
+      const rawTables = createUploadedTables(parsedTables, serverPayload.rowColorAnalyses || {}, serverPayload.options || {});
+      const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
+      const tables = rawTables.filter((table) => table.rows.length);
+      JSON.stringify({ parsedTableCount: parsedTables.length, tables, removedSoldRows });
+    `,
+    context,
+    { filename: "pending-generate.vm", timeout: 120000 },
+  );
+  return JSON.parse(resultText);
+}
+
+async function generatePendingTables(request, response) {
+  const raw = await readBody(request);
+  const payload = JSON.parse(raw || "{}");
+  const recognizedText = String(payload.recognizedText || "");
+  if (!recognizedText.trim()) {
+    sendJson(response, 400, { error: "Missing OCR text", message: "没有 OCR 文本，无法生成待确认表。" });
+    return;
+  }
+  if (!payload.uploadedSource?.name || !payload.uploadedSource?.type) {
+    sendJson(response, 400, { error: "Missing source", message: "缺少上传文件信息，无法生成待确认表。" });
+    return;
+  }
+  const startedAt = Date.now();
+  const result = generatePendingTablesWithClientRules({
+    recognizedText,
+    uploadedSource: payload.uploadedSource,
+    currentEvent: payload.currentEvent || {},
+    tableTitle: payload.tableTitle || "",
+    rowColorAnalyses: payload.rowColorAnalyses || {},
+    options: payload.options || {},
+  });
+  sendJson(response, 200, {
+    ...result,
+    serverGenerated: true,
+    durationMs: Date.now() - startedAt,
   });
 }
 
@@ -3283,6 +3416,14 @@ const server = http.createServer((request, response) => {
   if (request.method === "POST" && request.url === "/api/tables/review-assist") {
     assistTicketReview(request, response).catch((error) => {
       console.error("Ticket review assist failed", error);
+      const message = formatErrorMessage(error);
+      sendJson(response, error.status || 500, { error: message, message });
+    });
+    return;
+  }
+  if (request.method === "POST" && request.url === "/api/pending/generate") {
+    generatePendingTables(request, response).catch((error) => {
+      console.error("Pending table generation failed", error);
       const message = formatErrorMessage(error);
       sendJson(response, error.status || 500, { error: message, message });
     });

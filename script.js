@@ -14862,6 +14862,37 @@ async function createUploadedTablesInBatches(parsedTables, rowColorAnalyses = {}
   return tables;
 }
 
+function getServerPendingEventContext() {
+  return {
+    id: currentEvent.id,
+    name: currentEvent.name,
+    dateOptions: Array.isArray(currentEvent.dateOptions) ? currentEvent.dateOptions : [],
+    zones: Array.isArray(currentEvent.zones) ? currentEvent.zones : [],
+  };
+}
+
+async function createUploadedTablesOnServer(rowColorAnalyses = {}, options = {}) {
+  const response = await fetch("/api/pending/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      recognizedText: uploadTableText.value,
+      uploadedSource: {
+        name: uploadedSource?.name || "",
+        url: uploadedSource?.url || uploadedSource?.dataUrl || "",
+        type: uploadedSource?.type || "",
+      },
+      tableTitle: uploadTableTitle.value.trim(),
+      currentEvent: getServerPendingEventContext(),
+      rowColorAnalyses,
+      options,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.message || result.error || "服务器生成待确认表失败。");
+  return result;
+}
+
 async function publishUploadInner() {
   if (fieldMappingDraft) {
     const draftSource = String(fieldMappingDraft.sourceName || fieldMappingDraft.sourceType || "").toLowerCase();
@@ -14886,8 +14917,21 @@ async function publishUploadInner() {
   }
   let rowColorAnalyses = await getUploadImageRowColorAnalysesSafely(parsedTables);
   rowColorAnalyses = await ensureUploadPdfRowColorAnalyses(parsedTables, rowColorAnalyses);
-  const rawTables = await createUploadedTablesInBatches(parsedTables, rowColorAnalyses);
-  const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
+  let rawTables = [];
+  let removedSoldRows = 0;
+  let serverGenerated = false;
+  try {
+    setUploadStatus("正在让服务器生成待确认表...", "loading");
+    const generated = await createUploadedTablesOnServer(rowColorAnalyses);
+    rawTables = Array.isArray(generated.tables) ? generated.tables : [];
+    removedSoldRows = Number(generated.removedSoldRows || 0);
+    serverGenerated = true;
+  } catch (error) {
+    console.warn("Server pending generation failed; falling back to browser generation.", error);
+    setUploadStatus("服务器生成待确认表失败，正在用网页兜底生成...", "loading");
+    rawTables = await createUploadedTablesInBatches(parsedTables, rowColorAnalyses);
+    removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
+  }
   const tables = rawTables.filter((table) => table.rows.length);
   pendingTables.unshift(...tables);
   selectedPendingTableId = tables[0]?.id || selectedPendingTableId;
@@ -14895,7 +14939,7 @@ async function publishUploadInner() {
   selectedZone = null;
   searchTerm = "";
   searchInput.value = "";
-  setUploadStatus(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，已自动跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。校对确认后才会发布给客户。`, "success");
+  setUploadStatus(`${serverGenerated ? "服务器已生成" : "网页兜底已生成"} ${tables.length} 张待确认表${removedSoldRows ? `，已自动跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。校对确认后才会发布给客户。`, "success");
   showToast(`已生成 ${tables.length} 张待确认表${removedSoldRows ? `，跳过 ${removedSoldRows} 条已售/表尾说明行` : ""}。`, "success");
   renderUploadRecords({ save: false, normalize: false });
   reviewTitle.textContent = "待确认表已生成";
