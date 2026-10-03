@@ -356,6 +356,26 @@
               </div>
               <p class="upload-status" id="uploadStatus">先选择原始图片/PDF，再生成待确认表。</p>
               <p class="local-save-status" id="localSaveStatus">本地保存：等待操作</p>
+              <div class="ocr-task-panel hidden" id="ocrTaskPanel">
+                <div class="ocr-task-head">
+                  <div>
+                    <p class="eyebrow">当前识别任务</p>
+                    <strong id="ocrTaskTitle">暂无运行任务</strong>
+                    <span id="ocrTaskMeta">上传 PDF 后会显示页数、进度和当前处理页。</span>
+                  </div>
+                  <div class="ocr-task-progress">
+                    <span id="ocrTaskProgressText">0/0</span>
+                    <div class="ocr-progress-bar"><i id="ocrTaskProgressBar"></i></div>
+                  </div>
+                </div>
+                <div class="ocr-task-actions">
+                  <button class="small-button ghost" id="pauseOcrJobButton" type="button">暂停</button>
+                  <button class="small-button ghost" id="resumeOcrJobButton" type="button">继续</button>
+                  <button class="small-button ghost" id="generatePartialOcrButton" type="button">用已识别页生成确认表</button>
+                  <button class="small-button danger ghost" id="cancelOcrJobButton" type="button">停止任务</button>
+                  <button class="small-button danger ghost" id="deleteOcrJobButton" type="button">清除重来</button>
+                </div>
+              </div>
             </form>
             <div class="field-mapping-panel hidden" id="fieldMappingPanel">
               <div class="field-mapping-head">

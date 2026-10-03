@@ -1866,8 +1866,9 @@ function getTicketOcrText(job) {
   return cleanRecognizedTableText(blocks);
 }
 
-function publicTicketOcrJob(job) {
-  const text = getTicketOcrText(job);
+function publicTicketOcrJob(job, options = {}) {
+  const includeDetails = options.includeDetails !== false;
+  const text = includeDetails ? getTicketOcrText(job) : "";
   const failedPages = job.errors.map((item) => item.page);
   const aiColorErrors = job.results
     .filter((item) => item.rowColorAnalysis?.aiFallbackError)
@@ -1876,16 +1877,20 @@ function publicTicketOcrJob(job) {
       message: item.rowColorAnalysis.aiFallbackError,
     }))
     .sort((a, b) => a.page - b.page);
-  const rowColorAnalyses = Object.fromEntries(
-    job.results
-      .filter((item) => item.rowColorAnalysis)
-      .map((item) => [String(item.page), item.rowColorAnalysis]),
-  );
-  const ppStructureAnalyses = Object.fromEntries(
-    job.results
-      .filter((item) => item.ppStructureAnalysis)
-      .map((item) => [String(item.page), publicPpStructureAnalysis(item.ppStructureAnalysis)]),
-  );
+  const rowColorAnalyses = includeDetails
+    ? Object.fromEntries(
+        job.results
+          .filter((item) => item.rowColorAnalysis)
+          .map((item) => [String(item.page), item.rowColorAnalysis]),
+      )
+    : {};
+  const ppStructureAnalyses = includeDetails
+    ? Object.fromEntries(
+        job.results
+          .filter((item) => item.ppStructureAnalysis)
+          .map((item) => [String(item.page), publicPpStructureAnalysis(item.ppStructureAnalysis)]),
+      )
+    : {};
   return {
     id: job.id,
     status: job.status,
@@ -1893,8 +1898,14 @@ function publicTicketOcrJob(job) {
     totalPages: job.totalPages,
     pagesQueued: job.pagesQueued,
     pagesProcessed: job.pagesProcessed,
+    currentPage: Number(job.currentPage || 0),
     pagesSucceeded: job.results.filter((item) => item.text).length,
     pagesFailed: job.errors.length,
+    pauseRequested: job.pauseRequested === true,
+    cancelRequested: job.cancelRequested === true,
+    canPause: job.status === "running" || job.status === "queued",
+    canResume: job.status === "paused" || job.status === "pausing",
+    canCancel: ["queued", "running", "pausing", "paused"].includes(job.status),
     aiColorPagesQueued: job.aiColorPagesQueued || 0,
     aiColorPagesProcessed: job.aiColorPagesProcessed || 0,
     aiColorPagesFailed: job.aiColorPagesFailed || 0,
@@ -2140,7 +2151,17 @@ async function runTicketOcrBatch(job, source, maxPages) {
     job.ppStructurePagesFailed = 0;
 
     for (const page of pages) {
+      if (job.cancelRequested) break;
+      while (job.pauseRequested && !job.cancelRequested) {
+        job.status = "paused";
+        job.currentPage = 0;
+        job.message = `已暂停在 ${job.pagesProcessed}/${pages.length} 页；可以继续识别，或用已识别页先生成确认表。`;
+        await sleep(1000);
+      }
+      if (job.cancelRequested) break;
       try {
+        job.status = "running";
+        job.currentPage = page;
         job.message = `正在本地逐页识别 ${job.pagesProcessed}/${pages.length} 页，当前处理 PDF 第 ${page} 页...`;
         const result = await processTicketPdfPageLocally(pdfPath, page, job);
         if (result.text) {
@@ -2160,10 +2181,18 @@ async function runTicketOcrBatch(job, source, maxPages) {
     }
 
     const text = getTicketOcrText(job);
-    job.status = text ? "done" : "error";
-    job.message = text
-      ? `已本地逐页识别 ${job.pagesProcessed} 页，其中 ${job.results.filter((item) => item.text).length} 页有票源内容；OpenCV 行底色只作为待确认参考，不自动下架${job.errors.length ? `，${job.errors.length} 页失败可单独补扫` : ""}。`
-      : `已扫描 ${job.pagesProcessed} 页，但没有识别到可用表格内容。`;
+    job.currentPage = 0;
+    if (job.cancelRequested) {
+      job.status = text ? "cancelled" : "cancelled_empty";
+      job.message = text
+        ? `已停止识别，保留 ${job.results.filter((item) => item.text).length} 页已读内容；可先生成确认表或清除重来。`
+        : "已停止识别，没有保留到可用表格内容。";
+    } else {
+      job.status = text ? "done" : "error";
+      job.message = text
+        ? `已本地逐页识别 ${job.pagesProcessed} 页，其中 ${job.results.filter((item) => item.text).length} 页有票源内容；OpenCV 行底色只作为待确认参考，不自动下架${job.errors.length ? `，${job.errors.length} 页失败可单独补扫` : ""}。`
+        : `已扫描 ${job.pagesProcessed} 页，但没有识别到可用表格内容。`;
+    }
   } catch (error) {
     job.status = "error";
     job.message = formatErrorMessage(error);
@@ -3036,6 +3065,64 @@ async function retryFailedTicketOcrJob(request, response) {
   sendJson(response, 202, publicTicketOcrJob(job));
 }
 
+async function controlTicketOcrJob(request, response, action) {
+  const raw = await readBody(request);
+  const payload = JSON.parse(raw || "{}");
+  const id = String(payload.id || "");
+  const job = id ? ticketOcrJobs.get(id) : null;
+  if (!job) {
+    sendJson(response, 404, { error: "OCR job not found", message: "没有找到这个识别任务，可能已经结束或过期。" });
+    return;
+  }
+  if (action === "pause") {
+    if (job.status === "running" || job.status === "queued") {
+      job.pauseRequested = true;
+      job.status = "pausing";
+      job.message = `正在暂停，当前第 ${job.currentPage || job.pagesProcessed + 1} 页处理完后会停下。`;
+    }
+    sendJson(response, 200, publicTicketOcrJob(job));
+    return;
+  }
+  if (action === "resume") {
+    if (job.status === "paused" || job.status === "pausing") {
+      job.pauseRequested = false;
+      job.status = "running";
+      job.message = `已继续识别，将从第 ${job.pagesProcessed + 1} 页开始。`;
+    }
+    sendJson(response, 200, publicTicketOcrJob(job));
+    return;
+  }
+  if (action === "cancel") {
+    job.cancelRequested = true;
+    job.pauseRequested = false;
+    if (job.status === "paused" || job.status === "queued") {
+      const text = getTicketOcrText(job);
+      job.status = text ? "cancelled" : "cancelled_empty";
+      job.finishedAt = Date.now();
+      job.currentPage = 0;
+      job.message = text
+        ? `已停止识别，保留 ${job.results.filter((item) => item.text).length} 页已读内容。`
+        : "已停止识别，没有保留到可用表格内容。";
+    } else if (job.status === "running" || job.status === "pausing") {
+      job.status = "cancelling";
+      job.message = `正在停止，当前第 ${job.currentPage || job.pagesProcessed + 1} 页处理完后会结束。`;
+    }
+    sendJson(response, 200, publicTicketOcrJob(job));
+    return;
+  }
+  if (action === "delete") {
+    job.cancelRequested = true;
+    job.pauseRequested = false;
+    ticketOcrJobs.delete(id);
+    if (job.sourceTempDir && !["running", "pausing", "cancelling"].includes(job.status)) {
+      fs.rm(job.sourceTempDir, { recursive: true, force: true }, () => {});
+    }
+    sendJson(response, 200, { id, status: "deleted", message: "已清除识别任务；如果当前页正在处理，会在本页结束后停止。" });
+    return;
+  }
+  sendJson(response, 400, { error: "Unknown OCR job action", message: "未知的识别任务操作。" });
+}
+
 function sendTicketOcrJob(request, response) {
   const url = new URL(request.url, `http://127.0.0.1:${port}`);
   const id = url.searchParams.get("id");
@@ -3050,7 +3137,7 @@ function sendTicketOcrJob(request, response) {
 function sendTicketOcrJobs(request, response) {
   const jobs = Array.from(ticketOcrJobs.values())
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
-    .map(publicTicketOcrJob);
+    .map((job) => publicTicketOcrJob(job, { includeDetails: false }));
   sendJson(response, 200, { jobs });
 }
 
@@ -3220,6 +3307,15 @@ const server = http.createServer((request, response) => {
   if (request.method === "POST" && request.url === "/api/tables/recognize/retry-failed") {
     retryFailedTicketOcrJob(request, response).catch((error) => {
       console.error("Ticket table OCR failed-pages retry failed", error);
+      const message = formatErrorMessage(error);
+      sendJson(response, error.status || 500, { error: message, message });
+    });
+    return;
+  }
+  const ocrControlMatch = request.url.match(/^\/api\/tables\/recognize\/(pause|resume|cancel|delete)$/);
+  if (request.method === "POST" && ocrControlMatch) {
+    controlTicketOcrJob(request, response, ocrControlMatch[1]).catch((error) => {
+      console.error("Ticket table OCR control failed", error);
       const message = formatErrorMessage(error);
       sendJson(response, error.status || 500, { error: message, message });
     });

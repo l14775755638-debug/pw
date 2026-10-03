@@ -560,6 +560,16 @@ const pdfDetectionStatus = document.querySelector("#pdfDetectionStatus");
 const uploadTableText = document.querySelector("#uploadTableText");
 const uploadStatus = document.querySelector("#uploadStatus");
 const localSaveStatus = document.querySelector("#localSaveStatus");
+const ocrTaskPanel = document.querySelector("#ocrTaskPanel");
+const ocrTaskTitle = document.querySelector("#ocrTaskTitle");
+const ocrTaskMeta = document.querySelector("#ocrTaskMeta");
+const ocrTaskProgressText = document.querySelector("#ocrTaskProgressText");
+const ocrTaskProgressBar = document.querySelector("#ocrTaskProgressBar");
+const pauseOcrJobButton = document.querySelector("#pauseOcrJobButton");
+const resumeOcrJobButton = document.querySelector("#resumeOcrJobButton");
+const generatePartialOcrButton = document.querySelector("#generatePartialOcrButton");
+const cancelOcrJobButton = document.querySelector("#cancelOcrJobButton");
+const deleteOcrJobButton = document.querySelector("#deleteOcrJobButton");
 const failedOcrPanel = document.querySelector("#failedOcrPanel");
 const failedOcrSummary = document.querySelector("#failedOcrSummary");
 const failedOcrList = document.querySelector("#failedOcrList");
@@ -2228,9 +2238,59 @@ function buildFailedOcrReport(result = lastTicketOcrJobSnapshot) {
   ].join("\n");
 }
 
+function getOcrJobStatusLabel(status) {
+  const value = String(status || "");
+  if (value === "queued") return "排队中";
+  if (value === "running") return "识别中";
+  if (value === "pausing") return "正在暂停";
+  if (value === "paused") return "已暂停";
+  if (value === "cancelling") return "正在停止";
+  if (value === "cancelled" || value === "cancelled_empty") return "已停止";
+  if (value === "done") return "已完成";
+  if (value === "error") return "异常";
+  return value || "未开始";
+}
+
+function renderTicketOcrTaskPanel(snapshot = lastTicketOcrJobSnapshot) {
+  if (!ocrTaskPanel) return;
+  const job = snapshot || lastTicketOcrJobSnapshot;
+  const jobId = job?.id || activeTicketOcrJobId || "";
+  if (!jobId) {
+    ocrTaskPanel.classList.add("hidden");
+    return;
+  }
+  const total = Number(job?.pagesQueued || job?.totalPages || 0);
+  const processed = Number(job?.pagesProcessed || 0);
+  const succeeded = Number(job?.pagesSucceeded || 0);
+  const failed = Number(job?.pagesFailed || 0);
+  const currentPage = Number(job?.currentPage || 0);
+  const status = String(job?.status || "");
+  const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((processed / total) * 100))) : 0;
+  const fileName = job?.fileName || uploadedSource?.name || "当前 PDF";
+  ocrTaskPanel.classList.remove("hidden");
+  if (ocrTaskTitle) ocrTaskTitle.textContent = `${fileName} · ${getOcrJobStatusLabel(status)}`;
+  if (ocrTaskMeta) {
+    const currentText = currentPage ? `，当前第 ${currentPage} 页` : "";
+    const failedText = failed ? `，失败 ${failed} 页` : "";
+    ocrTaskMeta.textContent = `已处理 ${processed}/${total || "?"} 页，已读到 ${succeeded} 页${currentText}${failedText}`;
+  }
+  if (ocrTaskProgressText) ocrTaskProgressText.textContent = total ? `${processed}/${total}` : `${processed}`;
+  if (ocrTaskProgressBar) ocrTaskProgressBar.style.width = `${percent}%`;
+  const canPause = job?.canPause === true || status === "running" || status === "queued";
+  const canResume = job?.canResume === true || status === "paused" || status === "pausing";
+  const canCancel = job?.canCancel === true || ["queued", "running", "pausing", "paused"].includes(status);
+  const hasRecognizedText = Boolean(String(uploadTableText.value || job?.partialText || job?.text || "").trim());
+  if (pauseOcrJobButton) pauseOcrJobButton.disabled = !canPause || status === "pausing";
+  if (resumeOcrJobButton) resumeOcrJobButton.disabled = !canResume;
+  if (cancelOcrJobButton) cancelOcrJobButton.disabled = !canCancel || status === "cancelling";
+  if (deleteOcrJobButton) deleteOcrJobButton.disabled = !jobId;
+  if (generatePartialOcrButton) generatePartialOcrButton.disabled = !hasRecognizedText || quickManualGenerationBusy;
+}
+
 function renderFailedOcrPanel(result = null) {
   if (result) lastTicketOcrJobSnapshot = result;
   const snapshot = result || lastTicketOcrJobSnapshot;
+  renderTicketOcrTaskPanel(snapshot);
   const errors = snapshot?.errors || [];
   const failedPages = snapshot?.failedPages || errors.map((item) => item.page);
   const aiColorErrors = snapshot?.aiColorErrors || [];
@@ -2290,7 +2350,9 @@ async function pollTicketOcrJob(jobId) {
     if (partialText) setRecognizedOcrText(partialText, { snapshot: result });
     pdfDetectionStatus.textContent = result.message || `正在批量识别 ${progressText} 页。`;
     const failedDetail = failed && result.failedPages?.length ? `，失败页：${result.failedPages.slice(0, 24).join("、")}${result.failedPages.length > 24 ? "..." : ""}` : "";
-    setUploadStatus(`批量识别进度：${progressText} 页，已读到 ${success} 页内容${aiProgressText}${ppProgressText}${failed ? `，失败 ${failed} 页` : ""}${failedDetail}。`, "loading");
+    const statusLabel = getOcrJobStatusLabel(result.status);
+    const statusType = result.status === "paused" ? "idle" : result.status === "cancelling" ? "error" : "loading";
+    setUploadStatus(`${statusLabel}：${progressText} 页，已读到 ${success} 页内容${aiProgressText}${ppProgressText}${failed ? `，失败 ${failed} 页` : ""}${failedDetail}。`, statusType);
     scheduleAppStateSave(0);
 
     if (result.status === "done") {
@@ -2307,6 +2369,22 @@ async function pollTicketOcrJob(jobId) {
       showToast("批量识别完成，正在生成待确认表。", "success");
       saveAndArchiveAppStep(`PDF OCR 完成：${result.fileName || uploadedSource?.name || "票源 PDF"}`, "PDF OCR");
       await autoGeneratePendingTablesFromOcr(result, jobId);
+      return;
+    }
+
+    if (result.status === "cancelled" || result.status === "cancelled_empty") {
+      stopTicketOcrPolling();
+      activeTicketOcrJobId = result.id || jobId;
+      if (partialText) setRecognizedOcrText(partialText, { snapshot: result });
+      pdfDetectionStatus.textContent = result.message || "识别任务已停止。";
+      setUploadStatus(
+        partialText
+          ? `识别任务已停止，已保留 ${success} 页内容；可以用已识别页生成确认表，或清除重来。`
+          : "识别任务已停止，没有保留到可用内容；可以清除后重新上传。",
+        partialText ? "idle" : "error",
+      );
+      showToast("识别任务已停止。", partialText ? "idle" : "error");
+      saveAppState();
       return;
     }
 
@@ -2362,9 +2440,39 @@ async function refreshTicketOcrJobSnapshot(jobId) {
   return result;
 }
 
+async function controlTicketOcrJob(action) {
+  const jobId = activeTicketOcrJobId || lastTicketOcrJobSnapshot?.id || "";
+  if (!jobId) throw new Error("当前没有可操作的识别任务。");
+  const response = await fetch(`/api/tables/recognize/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: jobId }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.message || result.error || "识别任务操作失败。");
+  if (action === "delete") {
+    stopTicketOcrPolling();
+    activeTicketOcrJobId = null;
+    lastTicketOcrJobSnapshot = null;
+    uploadedSource = null;
+    sourceFileInput.value = "";
+    uploadTableText.value = "";
+    selectedSourceName.textContent = "文件会归入当前选中的演出。";
+    selectedSourceName.title = "";
+    renderFailedOcrPanel(null);
+    renderTicketOcrTaskPanel(null);
+    saveAppState();
+    return result;
+  }
+  activeTicketOcrJobId = result.id || jobId;
+  renderFailedOcrPanel(result);
+  resumeTicketOcrPollingIfNeeded();
+  return result;
+}
+
 function isResumableTicketOcrStatus(status) {
   const value = String(status || "").trim();
-  return !value || value === "queued" || value === "running";
+  return !value || value === "queued" || value === "running" || value === "pausing" || value === "paused" || value === "cancelling";
 }
 
 function resumeTicketOcrPollingIfNeeded() {
@@ -8181,6 +8289,7 @@ function applyLoadedAppState(parsed) {
   const removedGuides = events.reduce((count, event) => count + removeGuideOnlySeatmapZones(event), 0);
   if (removedSoldRows || removed || removedGuides || syncedBuiltIns || templateGuideZones || hydrated || missingBuiltInEvents.length || repairedTemplateMismatch) saveAppState();
   updateLocalSaveStatus({ saved: true, backup: largeAppStateBackupRestorePending ? "等待恢复完整 OCR" : "已恢复" });
+  renderTicketOcrTaskPanel(lastTicketOcrJobSnapshot);
   return true;
 }
 
@@ -16347,6 +16456,73 @@ if (quickManualUploadButton) {
   });
 }
 
+if (generatePartialOcrButton) {
+  generatePartialOcrButton.addEventListener("click", () => {
+    publishUploadQuickManual().catch((error) => {
+      setUploadStatus(error.message || "已识别页生成失败。", "error");
+      showToast("已识别页生成失败。", "error");
+    });
+  });
+}
+
+if (pauseOcrJobButton) {
+  pauseOcrJobButton.addEventListener("click", async () => {
+    try {
+      pauseOcrJobButton.disabled = true;
+      const result = await controlTicketOcrJob("pause");
+      setUploadStatus(result.message || "正在暂停识别任务。", "loading");
+      showToast("正在暂停，当前页结束后会停下。", "idle");
+    } catch (error) {
+      setUploadStatus(error.message || "暂停失败。", "error");
+      showToast("暂停失败。", "error");
+    }
+  });
+}
+
+if (resumeOcrJobButton) {
+  resumeOcrJobButton.addEventListener("click", async () => {
+    try {
+      resumeOcrJobButton.disabled = true;
+      const result = await controlTicketOcrJob("resume");
+      setUploadStatus(result.message || "已继续识别任务。", "loading");
+      showToast("已继续识别。", "success");
+    } catch (error) {
+      setUploadStatus(error.message || "继续失败。", "error");
+      showToast("继续失败。", "error");
+    }
+  });
+}
+
+if (cancelOcrJobButton) {
+  cancelOcrJobButton.addEventListener("click", async () => {
+    try {
+      cancelOcrJobButton.disabled = true;
+      const result = await controlTicketOcrJob("cancel");
+      setUploadStatus(result.message || "正在停止识别任务。", "error");
+      showToast("正在停止，当前页结束后会停下。", "idle");
+    } catch (error) {
+      setUploadStatus(error.message || "停止失败。", "error");
+      showToast("停止失败。", "error");
+    }
+  });
+}
+
+if (deleteOcrJobButton) {
+  deleteOcrJobButton.addEventListener("click", async () => {
+    if (!window.confirm("确定清除当前识别任务和 OCR 文本吗？已生成的待确认表不会删除。")) return;
+    try {
+      deleteOcrJobButton.disabled = true;
+      await controlTicketOcrJob("delete");
+      pdfDetectionStatus.textContent = "识别任务已清除；可以重新选择 PDF 或重新上传。";
+      setUploadStatus("已清除当前识别任务和 OCR 文本；待确认表如需重来，可点“清空确认表重来”。", "success");
+      showToast("识别任务已清除。", "success");
+    } catch (error) {
+      setUploadStatus(error.message || "清除任务失败。", "error");
+      showToast("清除任务失败。", "error");
+    }
+  });
+}
+
 retryFailedOcrButton.addEventListener("click", async () => {
   const jobId = lastTicketOcrJobSnapshot?.id || activeTicketOcrJobId;
   if (!jobId) {
@@ -16358,7 +16534,7 @@ retryFailedOcrButton.addEventListener("click", async () => {
   showToast("正在重试失败页。", "loading");
   try {
     const latest = await refreshTicketOcrJobSnapshot(jobId);
-    if (latest.status === "running" || latest.status === "queued") {
+    if (["running", "queued", "pausing", "paused", "cancelling"].includes(latest.status)) {
       setUploadStatus(latest.message || "当前识别任务还没结束，请等全部扫描结束后再重试失败页。", "idle");
       showToast("当前识别任务还没结束。", "idle");
       return;
