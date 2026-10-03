@@ -1,35 +1,83 @@
-# ticket-admin deployment
+# ticket-admin 服务器维护手册
 
-## Current production shape
+这份文档按“照着敲就能恢复”的思路写。当前线上机器是：
 
-- Server: `47.119.130.91`
-- App directory: `/opt/ticket-admin`
-- Runtime: Node.js + PM2 (`ticket-admin`)
-- Reverse proxy: nginx is installed and enabled. The app currently also listens on `PORT=4173` for direct testing.
-- Startup: `pm2-root` is enabled in systemd and restores `/root/.pm2/dump.pm2` after a reboot.
-- OCR pipeline: browser uploads the source and polls progress; PDF rendering, Aliyun OCR requests, OpenCV row-color detection, PaddleOCR anchor OCR, and PP-Structure checks run from `server.js` on the server.
-- Queue state: current OCR jobs are in the Node process memory map. Redis/Celery is not installed in the current deployment.
+- 公网 IP：`47.119.130.91`
+- 服务器目录：`/opt/ticket-admin`
+- 运行方式：Node.js + PM2，进程名 `ticket-admin`
+- 入口：nginx 监听 `80`，反代到本机 `4173`
+- 开机自启：`pm2-root` 和 `nginx` 已启用
+- 当前队列：Node 内存异步队列。暂时不使用 Redis/Celery
 
-## Deploy or recover the service
+## 先记住两个网址
 
-From the local repo:
+正式入口：
+
+```text
+http://47.119.130.91/
+```
+
+临时测试直连入口。正式使用稳定后可以关闭：
+
+```text
+http://47.119.130.91:4173/
+```
+
+## 平时更新代码
+
+在自己电脑的项目目录执行：
 
 ```bash
-npm run check
+cd /Users/macbook/Documents/pw
 npm run deploy:server
 ```
 
-nginx can use the checked-in reverse proxy config:
+如果本机没有 `npm`，用这组命令：
 
 ```bash
-cp deploy/nginx-ticket-admin.conf /etc/nginx/sites-available/ticket-admin
-ln -sf /etc/nginx/sites-available/ticket-admin /etc/nginx/sites-enabled/ticket-admin
-rm -f /etc/nginx/sites-enabled/default
-nginx -t
-systemctl reload nginx
+cd /Users/macbook/Documents/pw
+/Users/macbook/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check server.js
+/Users/macbook/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check script.js
+bash tools/deploy-server.sh
 ```
 
-On the server, the minimal recovery command is:
+部署脚本会做这些事：
+
+- 检查 `server.js` 和 `script.js` 语法
+- 要求本地代码已经提交，避免把半成品发上去
+- 推送 GitHub
+- 让服务器 `git pull`
+- 安装依赖
+- 写入 PaddleOCR CPU 参数
+- 更新 nginx 配置
+- 重启 PM2
+- 保存 PM2 开机恢复列表
+- 检查本机 API 是否正常
+
+## 服务器重启后怎么检查
+
+SSH 到服务器：
+
+```bash
+ssh root@47.119.130.91
+```
+
+看服务是否已经自动起来：
+
+```bash
+pm2 list
+systemctl is-active pm2-root nginx
+curl -fsS http://127.0.0.1:4173/api/status
+```
+
+正常情况应该看到：
+
+- `ticket-admin` 是 `online`
+- `pm2-root` 是 `active`
+- `nginx` 是 `active`
+- `curl` 返回一段 JSON，里面有 `provider` 和 `hasKey`
+
+如果没有自动起来，在服务器执行：
 
 ```bash
 cd /opt/ticket-admin
@@ -39,13 +87,16 @@ pm2 start server.js --name ticket-admin || true
 pm2 restart ticket-admin --update-env
 pm2 save
 systemctl enable pm2-root nginx
+systemctl restart nginx
+curl -fsS http://127.0.0.1:4173/api/status
 ```
 
-## CPU OCR defaults
+## OCR CPU 配置
 
-The deploy script keeps these CPU settings in `.env`:
+当前服务器是 8 核 16G 纯 CPU。`.env` 里保持：
 
 ```bash
+TICKET_OCR_CONCURRENCY=2
 PADDLE_CPU_THREADS=4
 PADDLE_ENABLE_MKLDNN=1
 OMP_NUM_THREADS=4
@@ -54,31 +105,99 @@ OPENBLAS_NUM_THREADS=4
 NUMEXPR_NUM_THREADS=4
 ```
 
-For the current 8-core CPU server and `TICKET_OCR_CONCURRENCY=2`, this lets two OCR/Paddle worker processes use about four CPU threads each. If the OCR provider rate limit becomes the bottleneck, keep concurrency at 2. If local PaddleOCR becomes the bottleneck and memory remains stable, test `TICKET_OCR_CONCURRENCY=3` with `PADDLE_CPU_THREADS=2`.
+含义：同时跑 2 个 OCR 页面任务，每个 PaddleOCR 任务最多用 4 个 CPU 线程。
 
-## Ports and firewall
-
-Required public ports:
-
-- `22/tcp`: SSH administration.
-- `80/tcp`: HTTP access or HTTP-to-HTTPS redirect.
-- `443/tcp`: HTTPS after a certificate is configured.
-- `4173/tcp`: direct test access only. Remove this after nginx is the only public entry.
-
-Ports that must not be public:
-
-- `6379/tcp`: Redis, if Redis is added later, must bind to `127.0.0.1` or a private network only.
-
-Host firewall baseline:
+不要急着调高并发。只有当 CPU 和内存都很稳、但排队明显变慢时，再考虑测试：
 
 ```bash
-ufw allow OpenSSH
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 4173/tcp
-ufw deny 6379/tcp
-ufw --force enable
+TICKET_OCR_CONCURRENCY=3
+PADDLE_CPU_THREADS=2
+```
+
+## 测试完 80 后关闭 4173 公网直连
+
+先确认这个网址能正常用：
+
+```text
+http://47.119.130.91/
+```
+
+确认没问题后，再执行下面命令。它会让 Node 只监听本机 `127.0.0.1`，公网只能通过 nginx 访问。
+
+在自己电脑执行：
+
+```bash
+cd /Users/macbook/Documents/pw
+LOCKDOWN_DIRECT_PORT=1 bash tools/deploy-server.sh
+```
+
+如果想手动在服务器执行，也可以：
+
+```bash
+ssh root@47.119.130.91
+cd /opt/ticket-admin
+cp .env ".env.backup.$(date +%Y%m%d-%H%M%S)"
+if grep -q '^HOST=' .env; then
+  sed -i 's/^HOST=.*/HOST=127.0.0.1/' .env
+else
+  echo 'HOST=127.0.0.1' >> .env
+fi
+pm2 restart ticket-admin --update-env
+pm2 save
+ufw delete allow 4173/tcp || true
+ufw deny 6379/tcp || true
 ufw status verbose
 ```
 
-When direct testing is no longer needed, remove `4173/tcp` from the firewall and set `HOST=127.0.0.1` in `/opt/ticket-admin/.env`, then restart PM2.
+关闭后验证：
+
+```bash
+curl -fsS http://127.0.0.1:4173/api/status
+curl -fsS http://47.119.130.91/api/status
+ss -ltnp | egrep ':(22|80|443|4173|6379)\b' || true
+```
+
+正确状态：
+
+- `127.0.0.1:4173` 能访问
+- `47.119.130.91/api/status` 能访问
+- `4173` 如果还在监听，也只能是 `127.0.0.1:4173`
+- `6379` 不应该对外监听
+
+## 防火墙规则
+
+正式阶段只需要：
+
+- `22/tcp`：SSH
+- `80/tcp`：网页入口
+- `443/tcp`：以后加 HTTPS
+- `6379/tcp`：明确拒绝。以后如果加 Redis，也只能内网/本机访问
+
+查看防火墙：
+
+```bash
+ufw status verbose
+```
+
+当前测试阶段可以保留：
+
+```bash
+4173/tcp ALLOW
+```
+
+正式稳定后删除：
+
+```bash
+ufw delete allow 4173/tcp
+```
+
+## Redis/Celery 迁移说明
+
+现在不用 Redis/Celery。当前业务量下，Node 内存异步队列 + PM2 足够。
+
+以后如果出现这些现象，再迁移：
+
+- 多个人同时上传大 PDF，任务明显排队
+- 服务器重启时，希望未完成 OCR 任务不中断
+- 需要多台服务器共同处理 OCR
+- 需要后台任务失败后自动重试和持久化记录

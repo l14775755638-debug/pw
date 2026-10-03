@@ -6,7 +6,9 @@ SERVER_USER="${SERVER_USER:-root}"
 SERVER_DIR="${SERVER_DIR:-/opt/ticket-admin}"
 PM2_APP="${PM2_APP:-ticket-admin}"
 APP_PORT="${APP_PORT:-4173}"
+APP_HOST="${APP_HOST:-}"
 PADDLE_CPU_THREADS="${PADDLE_CPU_THREADS:-4}"
+LOCKDOWN_DIRECT_PORT="${LOCKDOWN_DIRECT_PORT:-0}"
 REMOTE="${SERVER_USER}@${SERVER_HOST}"
 
 if command -v node >/dev/null 2>&1; then
@@ -56,6 +58,12 @@ ensure_env() {
 }
 
 ensure_env PORT '${APP_PORT}'
+if [ -n '${APP_HOST}' ]; then
+  ensure_env HOST '${APP_HOST}'
+fi
+if [ '${LOCKDOWN_DIRECT_PORT}' = '1' ]; then
+  ensure_env HOST 127.0.0.1
+fi
 ensure_env PADDLE_CPU_THREADS '${PADDLE_CPU_THREADS}'
 ensure_env PADDLE_ENABLE_MKLDNN 1
 ensure_env OMP_NUM_THREADS '${PADDLE_CPU_THREADS}'
@@ -63,11 +71,35 @@ ensure_env MKL_NUM_THREADS '${PADDLE_CPU_THREADS}'
 ensure_env OPENBLAS_NUM_THREADS '${PADDLE_CPU_THREADS}'
 ensure_env NUMEXPR_NUM_THREADS '${PADDLE_CPU_THREADS}'
 
+if [ -f deploy/nginx-ticket-admin.conf ]; then
+  cp deploy/nginx-ticket-admin.conf /etc/nginx/sites-available/ticket-admin
+  ln -sf /etc/nginx/sites-available/ticket-admin /etc/nginx/sites-enabled/ticket-admin
+  rm -f /etc/nginx/sites-enabled/default
+  nginx -t
+  systemctl reload nginx
+fi
+
 pm2 describe '${PM2_APP}' >/dev/null 2>&1 || pm2 start server.js --name '${PM2_APP}'
 pm2 restart '${PM2_APP}' --update-env
 pm2 save
 pm2 startup systemd -u '${SERVER_USER}' --hp \"\$HOME\" >/dev/null || true
 systemctl enable nginx >/dev/null 2>&1 || true
+ufw allow OpenSSH >/dev/null || true
+ufw allow 80/tcp >/dev/null || true
+ufw allow 443/tcp >/dev/null || true
+ufw deny 6379/tcp >/dev/null || true
+if [ '${LOCKDOWN_DIRECT_PORT}' = '1' ]; then
+  ufw delete allow '${APP_PORT}'/tcp >/dev/null 2>&1 || true
+else
+  ufw allow '${APP_PORT}'/tcp >/dev/null || true
+fi
+ufw --force enable >/dev/null || true
+curl -fsS --max-time 8 http://127.0.0.1:${APP_PORT}/api/status >/dev/null
 "
 
-echo "4/4 部署完成：http://${SERVER_HOST}:${APP_PORT}/index.html?admin=1"
+if [ "${LOCKDOWN_DIRECT_PORT}" = "1" ]; then
+  echo "4/4 部署完成：http://${SERVER_HOST}/index.html?admin=1 （4173 公网直连已关闭）"
+else
+  echo "4/4 部署完成：http://${SERVER_HOST}/index.html?admin=1"
+  echo "测试直连仍可用：http://${SERVER_HOST}:${APP_PORT}/index.html?admin=1"
+fi
