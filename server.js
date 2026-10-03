@@ -17,6 +17,7 @@ const rowColorScriptPath = path.join(root, "tools", "detect_ticket_row_colors.py
 const pdfRowColorScriptPath = path.join(root, "tools", "detect_pdf_row_colors.py");
 const ppStructureScriptPath = path.join(root, "tools", "analyze_ppstructure_table.py");
 const ticketRowAnchorColorScriptPath = path.join(root, "tools", "analyze_ticket_row_anchor_colors.py");
+const ticketLocalPdfPageScriptPath = path.join(root, "tools", "process_ticket_pdf_page_local.py");
 const depsPythonPath = path.join(depsRoot, "python", "bin", "python3");
 const localPaddlePythonPath = path.join(root, "tmp", "paddleocr-eval", "venv", "bin", "python");
 const anchorOcrPythonPath = path.join(root, "tmp", "anchor-ocr-venv", "bin", "python");
@@ -58,6 +59,7 @@ const maxBatchOcrPages = readPositiveIntegerEnv("TICKET_OCR_MAX_PAGES", Number.P
 const batchOcrConcurrency = Math.max(1, Math.min(readPositiveIntegerEnv("TICKET_OCR_CONCURRENCY", 1), 3));
 const batchOcrRetries = Math.max(0, Math.min(readPositiveIntegerEnv("TICKET_OCR_RETRIES", 3), 6));
 const batchOcrRetryDelayMs = Math.max(300, readPositiveIntegerEnv("TICKET_OCR_RETRY_DELAY_MS", 1800));
+const localOcrParallelJobs = Math.max(1, Math.min(readPositiveIntegerEnv("TICKET_LOCAL_OCR_PARALLEL_JOBS", 1), 4));
 const aiRequestTimeoutSeconds = Math.max(25, readPositiveIntegerEnv("AI_REQUEST_TIMEOUT_SECONDS", 180));
 const externalApiMaxConcurrency = Math.max(1, Math.min(readPositiveIntegerEnv("EXTERNAL_API_MAX_CONCURRENCY", 5), 10));
 const externalApiRetries = Math.max(0, Math.min(readPositiveIntegerEnv("EXTERNAL_API_RETRIES", 3), 6));
@@ -65,12 +67,13 @@ const externalApiRetryDelayMs = Math.max(500, readPositiveIntegerEnv("EXTERNAL_A
 const ocrCompletenessCheckEnabled = process.env.TICKET_OCR_COMPLETENESS_CHECK === "1";
 const ocrRowColorDuringScanEnabled = process.env.TICKET_OCR_ROW_COLOR_DURING_SCAN === "1";
 const ocrPpStructureDuringScanEnabled = process.env.TICKET_OCR_PPSTRUCTURE_DURING_SCAN === "1";
+const externalAiFeaturesEnabled = process.env.EXTERNAL_AI_FEATURES === "1";
 const serverCpuCount = Math.max(1, os.cpus()?.length || 1);
 const paddleCpuThreads = Math.max(
   1,
   Math.min(readPositiveIntegerEnv("PADDLE_CPU_THREADS", Math.max(1, Math.floor(serverCpuCount / batchOcrConcurrency))), serverCpuCount),
 );
-const rowColorLogicVersion = 90;
+const rowColorLogicVersion = 91;
 const maxAnchorRowsPerTable = Math.max(40, readPositiveIntegerEnv("TICKET_ANCHOR_MAX_ROWS_PER_TABLE", 260));
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
@@ -202,6 +205,35 @@ function runFileWithTimeout(command, args, timeout) {
       }
       resolve({ stdout, stderr });
     });
+  });
+}
+
+let activeLocalOcrProcesses = 0;
+const localOcrQueue = [];
+
+function drainLocalOcrQueue() {
+  while (activeLocalOcrProcesses < localOcrParallelJobs && localOcrQueue.length) {
+    const task = localOcrQueue.shift();
+    activeLocalOcrProcesses += 1;
+    task()
+      .catch(() => {})
+      .finally(() => {
+        activeLocalOcrProcesses -= 1;
+        drainLocalOcrQueue();
+      });
+  }
+}
+
+function runLocalOcrQueued(task) {
+  return new Promise((resolve, reject) => {
+    localOcrQueue.push(async () => {
+      try {
+        resolve(await task());
+      } catch (error) {
+        reject(error);
+      }
+    });
+    drainLocalOcrQueue();
   });
 }
 
@@ -1483,6 +1515,14 @@ function getAnchorRowColorPythonPath() {
   return getPpStructurePythonPath();
 }
 
+function getLocalTicketOcrPythonPath() {
+  if (process.env.TICKET_LOCAL_OCR_PYTHON) return process.env.TICKET_LOCAL_OCR_PYTHON;
+  if (process.env.PADDLEOCR_PYTHON) return process.env.PADDLEOCR_PYTHON;
+  if (fs.existsSync(anchorOcrPythonPath)) return anchorOcrPythonPath;
+  if (fs.existsSync(localPaddlePythonPath)) return localPaddlePythonPath;
+  return pythonPath;
+}
+
 async function analyzePpStructureImageFile(imagePath) {
   if (!fs.existsSync(ppStructureScriptPath)) {
     return { source: "paddle_ppstructure", error: "PP-Structure 分析脚本不存在。" };
@@ -1872,6 +1912,75 @@ function publicTicketOcrJob(job) {
   };
 }
 
+function normalizeManualReviewRowColorAnalysis(analysis, recognizedRows = 0) {
+  if (!analysis || typeof analysis !== "object") return null;
+  const unreliableReasons = Array.isArray(analysis.unreliableReasons) ? [...analysis.unreliableReasons] : [];
+  if (!unreliableReasons.includes("manual_review_only")) unreliableReasons.push("manual_review_only");
+  return {
+    source: "opencv",
+    imageWidth: Number(analysis.imageWidth || 0),
+    imageHeight: Number(analysis.imageHeight || 0),
+    expectedRows: Number(analysis.expectedRows || recognizedRows || 0),
+    detectedRows: Number(analysis.detectedRows || analysis.rows?.length || 0),
+    selectionMode: analysis.selectionMode || "local_page_opencv",
+    reliable: false,
+    exactRowAligned: false,
+    contiguous: Boolean(analysis.contiguous),
+    maxRowGap: Number(analysis.maxRowGap || 0),
+    lowConfidenceRows: Array.isArray(analysis.lowConfidenceRows) ? analysis.lowConfidenceRows : [],
+    unreliableReasons,
+    warningReasons: Array.isArray(analysis.warningReasons) ? analysis.warningReasons : [],
+    labels: Array.isArray(analysis.labels) ? analysis.labels : [],
+    rowActionTextRows: Array.isArray(analysis.rowActionTextRows) ? analysis.rowActionTextRows : [],
+    rows: Array.isArray(analysis.rows) ? analysis.rows : [],
+    error: analysis.error || "",
+    autoApplyAllowed: false,
+    manualReviewOnly: true,
+    rowColorLogicVersion,
+  };
+}
+
+async function processTicketPdfPageLocally(pdfPath, page, job) {
+  if (!fs.existsSync(ticketLocalPdfPageScriptPath)) {
+    throw new Error("本地逐页 OCR 脚本不存在。");
+  }
+  if (!isReadableSavedFile(pdfPath)) {
+    throw new Error("PDF 原文件不可读，请重新上传后再识别。");
+  }
+  const safePage = Math.max(1, Math.floor(Number(page || 1)));
+  const timeoutMs = Math.max(180000, readPositiveIntegerEnv("TICKET_LOCAL_PAGE_TIMEOUT_MS", 240000));
+  const { stdout } = await runLocalOcrQueued(() =>
+    runFileWithTimeout(
+      getLocalTicketOcrPythonPath(),
+      [
+        ticketLocalPdfPageScriptPath,
+        pdfPath,
+        "--page",
+        String(safePage),
+        "--task-id",
+        String(job?.id || ""),
+        "--pdftoppm",
+        pdftoppmPath,
+      ],
+      timeoutMs,
+    ),
+  );
+  const parsed = JSON.parse(stdout || "{}");
+  if (parsed.error) throw new Error(parsed.error);
+  const text = stripRecognizedColorColumns(parsed.text || "");
+  const recognizedRows = Number(parsed.recognizedRows || countRecognizedDataRows(text) || 0);
+  return {
+    page: safePage,
+    text,
+    attempts: 1,
+    recognizedRows,
+    localProcessing: true,
+    rowColorAnalysis: normalizeManualReviewRowColorAnalysis(parsed.rowColorAnalysis, recognizedRows),
+    ocrInitSeconds: Number(parsed.initSeconds || 0),
+    ocrInferSeconds: Number(parsed.inferSeconds || 0),
+  };
+}
+
 function startTicketRowColorAnalysisForPage(job, item, result) {
   if (!ocrRowColorDuringScanEnabled) return null;
   if (!result?.text || !item?.image) return null;
@@ -1999,27 +2108,28 @@ async function recognizeTicketPageTextWithCompletenessCheck(item) {
 }
 
 async function runTicketOcrBatch(job, source, maxPages) {
-  let pdfVectorTempDir = "";
+  let pdfTempDir = "";
   try {
-    pdfVectorTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-ocr-pdf-vector-"));
-    const pdfVectorPath = path.join(pdfVectorTempDir, "source.pdf");
+    let pdfPath = "";
     if (source.sourcePath) {
       job.sourcePath = source.sourcePath;
-      fs.copyFileSync(source.sourcePath, pdfVectorPath);
+      pdfPath = source.sourcePath;
     } else {
+      pdfTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-local-ocr-pdf-"));
+      pdfPath = path.join(pdfTempDir, "source.pdf");
       const { buffer } = dataUrlToBuffer(source.dataUrl);
-      fs.writeFileSync(pdfVectorPath, buffer);
+      fs.writeFileSync(pdfPath, buffer);
+      job.sourcePath = pdfPath;
+      job.sourceTempDir = pdfTempDir;
     }
-    job.totalPages = await getPdfPageCountFromPath(pdfVectorPath).catch(() => Number(maxPages) || 1);
-    const requestedPages = Number.isFinite(Number(maxPages)) && Number(maxPages) > 0 ? Number(maxPages) : job.totalPages;
-    const pagesToRender = getRequestedTicketOcrPages(Math.min(requestedPages, job.totalPages), job.totalPages);
-    job.pagesQueued = pagesToRender;
-    const limitText = pagesToRender < job.totalPages ? formatTicketOcrPageLimit() : "";
-    job.message = `正在逐页读取 PDF，共 ${pagesToRender}/${job.totalPages} 页${limitText}...`;
-    const pages = Array.from({ length: pagesToRender }, (_, index) => index + 1);
-    let cursor = 0;
+    job.totalPages = await getPdfPageCountFromPath(pdfPath).catch(() => Number(maxPages) || 1);
+    const requestedPages = getRequestedTicketOcrPages(maxPages, job.totalPages);
+    const pagesToProcess = Math.min(requestedPages, job.totalPages);
+    const pages = Array.from({ length: pagesToProcess }, (_, index) => index + 1);
+    job.pagesQueued = pages.length;
     job.status = "running";
-    job.message = `正在批量识别 0/${pages.length} 页...`;
+    const limitText = pages.length < job.totalPages ? formatTicketOcrPageLimit() : "";
+    job.message = `正在本地逐页识别 0/${pages.length} 页，总页数 ${job.totalPages}${limitText}...`;
     job.aiColorTasks = [];
     job.aiColorPagesQueued = 0;
     job.aiColorPagesProcessed = 0;
@@ -2028,56 +2138,41 @@ async function runTicketOcrBatch(job, source, maxPages) {
     job.ppStructurePagesQueued = 0;
     job.ppStructurePagesProcessed = 0;
     job.ppStructurePagesFailed = 0;
-    const workers = Array.from({ length: Math.min(batchOcrConcurrency, pages.length) }, async () => {
-      while (cursor < pages.length) {
-        const page = pages[cursor];
-        cursor += 1;
-        let image = "";
-        try {
-          image = await renderPdfPagePathToImage(pdfVectorPath, page);
-          if (!image) throw new Error("PDF 页面渲染失败，请换一个 PDF 再试。");
-          const item = { page, image, pdfPath: pdfVectorPath };
-          const result = await recognizeTicketPageWithRetry(item, job);
-          if (result.text) {
-            job.results.push(result);
-            startTicketRowColorAnalysisForPage(job, item, result);
-            startTicketPpStructureAnalysisForPage(job, item, result);
-          }
-        } catch (error) {
-          if (image) job.failedImages[page] = image;
-          job.errors.push({ page, stage: image ? "ocr" : "render", message: formatErrorMessage(error) });
-        } finally {
-          job.pagesProcessed += 1;
-          const success = job.results.filter((result) => result.text).length;
-          const failed = job.errors.length;
-          const aiQueued = job.aiColorPagesQueued || 0;
-          const aiDone = job.aiColorPagesProcessed || 0;
-          job.message = `正在批量识别 ${job.pagesProcessed}/${pages.length} 页，已读到 ${success} 页，AI 已复核 ${aiDone}/${aiQueued} 页${failed ? `，失败 ${failed} 页` : ""}...`;
+
+    for (const page of pages) {
+      try {
+        job.message = `正在本地逐页识别 ${job.pagesProcessed}/${pages.length} 页，当前处理 PDF 第 ${page} 页...`;
+        const result = await processTicketPdfPageLocally(pdfPath, page, job);
+        if (result.text) {
+          job.results = job.results.filter((existing) => existing.page !== page);
+          job.results.push(result);
+          job.results.sort((a, b) => a.page - b.page);
         }
+      } catch (error) {
+        job.errors = job.errors.filter((existing) => existing.page !== page);
+        job.errors.push({ page, stage: "local_page_ocr", message: formatErrorMessage(error) });
+      } finally {
+        job.pagesProcessed += 1;
+        const success = job.results.filter((result) => result.text).length;
+        const failed = job.errors.length;
+        job.message = `正在本地逐页识别 ${job.pagesProcessed}/${pages.length} 页，已读到 ${success} 页${failed ? `，失败 ${failed} 页` : ""}...`;
       }
-    });
-    await Promise.all(workers);
-    if (job.aiColorTasks.length) {
-      job.message = `OCR 已完成，正在等待 AI 逐行底色复核 ${job.aiColorPagesProcessed || 0}/${job.aiColorPagesQueued || 0} 页...`;
-      await Promise.allSettled(job.aiColorTasks);
-    }
-    if (job.ppStructureTasks.length) {
-      job.message = `OCR 已完成，正在等待 PP-Structure 表格坐标复核 ${job.ppStructurePagesProcessed || 0}/${job.ppStructurePagesQueued || 0} 页...`;
-      await Promise.allSettled(job.ppStructureTasks);
     }
 
     const text = getTicketOcrText(job);
     job.status = text ? "done" : "error";
     job.message = text
-      ? `已批量识别 ${job.pagesProcessed} 页，其中 ${job.results.filter((item) => item.text).length} 页有票源内容，AI 已复核 ${job.aiColorPagesProcessed || 0}/${job.aiColorPagesQueued || 0} 页，结构复核 ${job.ppStructurePagesProcessed || 0}/${job.ppStructurePagesQueued || 0} 页${job.aiColorPagesFailed ? `，AI 失败 ${job.aiColorPagesFailed} 页会在待确认里保留人工校对` : ""}${job.ppStructurePagesFailed ? `，结构复核失败 ${job.ppStructurePagesFailed} 页` : ""}${job.errors.length ? `，${job.errors.length} 页失败可单独补扫` : ""}。`
+      ? `已本地逐页识别 ${job.pagesProcessed} 页，其中 ${job.results.filter((item) => item.text).length} 页有票源内容；OpenCV 行底色只作为待确认参考，不自动下架${job.errors.length ? `，${job.errors.length} 页失败可单独补扫` : ""}。`
       : `已扫描 ${job.pagesProcessed} 页，但没有识别到可用表格内容。`;
   } catch (error) {
     job.status = "error";
     job.message = formatErrorMessage(error);
   } finally {
-    if (pdfVectorTempDir) fs.rm(pdfVectorTempDir, { recursive: true, force: true }, () => {});
     job.finishedAt = Date.now();
-    setTimeout(() => ticketOcrJobs.delete(job.id), 30 * 60 * 1000);
+    setTimeout(() => {
+      ticketOcrJobs.delete(job.id);
+      if (pdfTempDir) fs.rm(pdfTempDir, { recursive: true, force: true }, () => {});
+    }, 30 * 60 * 1000);
   }
 }
 
@@ -2086,42 +2181,37 @@ async function retryTicketOcrFailedPages(job) {
   const retryItems = job.errors
     .slice()
     .sort((a, b) => a.page - b.page)
-    .map((error) => ({ page: error.page, image: job.failedImages[error.page] || "", stage: error.stage || "" }));
+    .map((error) => ({ page: error.page, stage: error.stage || "" }));
 
   if (!retryItems.length) {
-    job.message = "失败页图片缓存已过期，请重新上传 PDF 后再识别。";
+    job.message = "没有可重试的失败页。";
+    return;
+  }
+  if (!job.sourcePath || !isReadableSavedFile(job.sourcePath)) {
+    job.message = "PDF 原文件缓存已过期，请重新上传后再识别。";
     return;
   }
 
   job.status = "running";
   job.message = `正在重试 ${retryItems.length} 个失败页...`;
-  job.aiColorTasks = Array.isArray(job.aiColorTasks) ? job.aiColorTasks : [];
   const remainingErrors = [];
   let retryProcessed = 0;
   for (const item of retryItems) {
     try {
-      if (!item.image && job.sourcePath) {
-        item.image = await renderPdfPagePathToImage(job.sourcePath, item.page);
-      }
-      if (!item.image) {
-        throw new Error("失败页图片缓存已过期，请重新上传 PDF 后再识别。");
-      }
-      const result = await recognizeTicketPageWithRetry(item, job);
-      if (result.text && !job.results.some((existing) => existing.page === item.page)) {
+      const result = await processTicketPdfPageLocally(job.sourcePath, item.page, job);
+      if (result.text) {
+        job.results = job.results.filter((existing) => existing.page !== item.page);
         job.results.push(result);
-        startTicketRowColorAnalysisForPage(job, item, result);
+        job.results.sort((a, b) => a.page - b.page);
+      } else {
+        throw new Error("本页没有识别到可用文字。");
       }
-      delete job.failedImages[item.page];
     } catch (error) {
-      remainingErrors.push({ page: item.page, stage: item.image ? "ocr" : "render", message: formatErrorMessage(error) });
+      remainingErrors.push({ page: item.page, stage: "local_page_ocr", message: formatErrorMessage(error) });
     } finally {
       retryProcessed += 1;
       job.message = `正在重试失败页 ${retryProcessed}/${retryItems.length}...`;
     }
-  }
-  if (job.aiColorTasks.length) {
-    job.message = `失败页 OCR 已完成，正在等待 AI 逐行底色复核 ${job.aiColorPagesProcessed || 0}/${job.aiColorPagesQueued || 0} 页...`;
-    await Promise.allSettled(job.aiColorTasks);
   }
 
   const untouchedErrors = job.errors.filter((error) => !retryItems.some((item) => item.page === error.page));
@@ -2135,61 +2225,46 @@ async function retryTicketOcrFailedPages(job) {
 }
 
 async function recognizeTicketTables(request, response) {
-  const config = getProviderConfig();
-  if (getActiveProvider() !== "aliyun") {
-    sendJson(response, 400, { error: "Ticket OCR currently requires Aliyun provider", message: "票源 OCR 当前请使用阿里云百炼。"});
-    return;
-  }
-  if (!process.env[config.keyName]) {
-    sendJson(response, 501, { error: `${config.keyName} is not configured`, message: `未配置阿里云百炼密钥。请在 .env 里设置 ${config.keyName}。` });
-    return;
-  }
   const raw = await readBody(request);
   const payload = JSON.parse(raw || "{}");
   const file = String(payload.file || "");
+  const sourceUrl = String(payload.sourceUrl || "");
   const fileName = String(payload.fileName || "票源文件");
-  const maxPages = getRequestedTicketOcrPages(payload.maxPages, 6);
-  if (!file.startsWith("data:application/pdf")) {
+  const maxPages = Number(payload.maxPages || 0) > 0 ? getRequestedTicketOcrPages(payload.maxPages, Number(payload.maxPages)) : null;
+  const sourcePath = sourceUrl.startsWith("uploads/") ? getReadableUploadPath(sourceUrl) : "";
+  const sourceIsPdf = sourcePath ? getMimeForExtension(sourcePath) === "application/pdf" : file.startsWith("data:application/pdf");
+  if (!sourceIsPdf) {
     sendJson(response, 400, { error: "Only PDF OCR is supported here", message: "当前自动 OCR 只处理 PDF；图片会作为单张表入库。" });
     return;
   }
-  const { buffer } = dataUrlToBuffer(file);
-  const pdfVectorTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ticket-recognize-pdf-vector-"));
-  const pdfVectorPath = path.join(pdfVectorTempDir, "source.pdf");
-  fs.writeFileSync(pdfVectorPath, buffer);
-  try {
-    const images = await renderPdfPagesToImages(file, maxPages);
-    if (!images.length) {
-      sendJson(response, 422, { error: "No pages rendered", message: "PDF 页面渲染失败，请换一个 PDF 再试。" });
-      return;
-    }
-    const blocks = [];
-    const rowColorAnalyses = {};
-    for (let index = 0; index < images.length; index += 1) {
-      const checked = await recognizeTicketPageTextWithCompletenessCheck(images[index]);
-      const text = checked.text;
-      if (text) {
-        blocks.push(`--- PDF 第 ${images[index].page} 页 ---\n${text}`);
-        const expectedRows = checked.recognizedRows;
-        if (expectedRows) {
-          const vectorAnalysis = await analyzeTicketRowColorsFromPdfPath(pdfVectorPath, images[index].page, expectedRows);
-          rowColorAnalyses[String(images[index].page)] =
-            vectorAnalysis.reliable || vectorAnalysis.rows?.length
-              ? vectorAnalysis
-              : await analyzeTicketRowColorsFromDataUrl(images[index].image, expectedRows);
-        }
-      }
-    }
-    const text = cleanRecognizedTableText(blocks);
-    sendJson(response, 200, {
-      text,
-      rowColorAnalyses,
-      pagesProcessed: images.length,
-      fileName,
-      message: text ? `已识别 ${images.length} 页票源内容。` : `已扫描 ${images.length} 页，但没有识别到可用表格内容。`,
-    });
-  } finally {
-    fs.rm(pdfVectorTempDir, { recursive: true, force: true }, () => {});
+  const job = {
+    id: `${Date.now().toString(36)}-sync`,
+    status: "queued",
+    fileName,
+    totalPages: Number(payload.detectedPages || 0),
+    pagesQueued: 0,
+    pagesProcessed: 0,
+    results: [],
+    errors: [],
+    failedImages: {},
+    sourcePath,
+    message: "正在本地逐页识别。",
+    createdAt: Date.now(),
+    finishedAt: null,
+  };
+  await runTicketOcrBatch(job, { sourcePath, dataUrl: file }, maxPages);
+  const publicJob = publicTicketOcrJob(job);
+  sendJson(response, job.status === "done" ? 200 : 422, {
+    text: publicJob.text || publicJob.partialText,
+    rowColorAnalyses: publicJob.rowColorAnalyses,
+    pagesProcessed: publicJob.pagesProcessed,
+    pagesFailed: publicJob.pagesFailed,
+    fileName,
+    message: publicJob.message,
+    errors: publicJob.errors,
+  });
+  if (job.sourceTempDir) {
+    fs.rm(job.sourceTempDir, { recursive: true, force: true }, () => {});
   }
 }
 
@@ -2803,6 +2878,13 @@ async function analyzeTicketRowColorsWithAliyun(image, { columns, rows, page }) 
 }
 
 async function analyzeTicketRowColorsAi(request, response) {
+  if (!externalAiFeaturesEnabled) {
+    sendJson(response, 410, {
+      error: "External AI disabled",
+      message: "当前已切换为本地 OpenCV/PaddleOCR 流水线，不再调用外部 AI 行底色复核。",
+    });
+    return;
+  }
   const raw = await readBody(request);
   const payload = JSON.parse(raw || "{}");
   const image = await resolveRowColorSourceImage(payload);
@@ -2848,6 +2930,13 @@ async function analyzeTicketRowColorsAnchorBatch(request, response) {
 }
 
 async function assistTicketReview(request, response) {
+  if (!externalAiFeaturesEnabled) {
+    sendJson(response, 410, {
+      error: "External AI disabled",
+      message: "当前已关闭外部 AI 辅助校对；请用本地 OCR 结果和原图逐行确认。",
+    });
+    return;
+  }
   const config = getProviderConfig();
   if (getActiveProvider() !== "aliyun") {
     sendJson(response, 400, { error: "Ticket review assist currently requires Aliyun provider", message: "票源校对 AI 辅助当前请使用阿里云百炼。" });
@@ -2889,22 +2978,12 @@ async function assistTicketReview(request, response) {
 }
 
 async function startTicketOcrJob(request, response) {
-  const config = getProviderConfig();
-  if (getActiveProvider() !== "aliyun") {
-    sendJson(response, 400, { error: "Ticket OCR currently requires Aliyun provider", message: "票源 OCR 当前请使用阿里云百炼。" });
-    return;
-  }
-  if (!process.env[config.keyName]) {
-    sendJson(response, 501, { error: `${config.keyName} is not configured`, message: `未配置阿里云百炼密钥。请在 .env 里设置 ${config.keyName}。` });
-    return;
-  }
   const raw = await readBody(request);
   const payload = JSON.parse(raw || "{}");
   const file = String(payload.file || "");
   const sourceUrl = String(payload.sourceUrl || "");
   const fileName = String(payload.fileName || "票源文件");
   const maxPages = Number(payload.maxPages || 0) > 0 ? getRequestedTicketOcrPages(payload.maxPages, Number(payload.maxPages)) : null;
-  const ppStructureEnabled = payload.ppStructure === true || payload.ppStructure === "true" || ocrPpStructureDuringScanEnabled;
   const sourcePath = sourceUrl.startsWith("uploads/") ? getReadableUploadPath(sourceUrl) : "";
   const sourceIsPdf = sourcePath ? getMimeForExtension(sourcePath) === "application/pdf" : file.startsWith("data:application/pdf");
   if (!sourceIsPdf) {
@@ -2923,7 +3002,7 @@ async function startTicketOcrJob(request, response) {
     errors: [],
     failedImages: {},
     sourcePath,
-    ppStructureEnabled,
+    ppStructureEnabled: false,
     message: "已加入批量识别队列。",
     createdAt: Date.now(),
     finishedAt: null,

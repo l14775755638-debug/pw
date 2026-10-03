@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 90;
+const ROW_COLOR_LOGIC_VERSION = 91;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
@@ -5564,6 +5564,7 @@ function getAutoOpenCvRowColorLabel(table, rowIndex) {
 
 function hasActionableOpenCvColorSource(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
+  if (table.rowColorManualReviewOnly === true) return false;
   if (hasCountMatchedMixedRowColorAutoSkipSource(table)) return true;
   if (hasRowLevelMixedOpenCvColorConflict(table)) return true;
   if (
@@ -6303,8 +6304,12 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorExactRowAligned = false;
   table.rowColorActionableConflict = false;
   table.rowColorAiAutoApplyAllowed = false;
+  table.rowColorManualReviewOnly = false;
 
   if (!analysis || !["opencv", "ai_row_color", "pdf_vector", "paddle_ppstructure", "ticket_row_anchor"].includes(analysis.source)) return 0;
+  const manualReviewOnly = Boolean(
+    analysis.manualReviewOnly === true || (analysis.autoApplyAllowed === false && analysis.unreliableReasons?.includes?.("manual_review_only")),
+  );
   table.rowColorSource = analysis.source;
   table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
   table.rowColorSelectionMode = analysis.selectionMode || "";
@@ -6313,6 +6318,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorContiguous = analysis.contiguous === true;
   table.rowColorAiGeometryVerified = analysis.aiGeometryVerified === true || analysis.rowGeometryVerified === true;
   table.rowColorAiAutoApplyAllowed = analysis.autoApplyAllowed === true;
+  table.rowColorManualReviewOnly = manualReviewOnly;
   table.rowColorMaxGap = Number(analysis.maxRowGap || 0);
   table.rowColorLowConfidenceRows = Array.isArray(analysis.lowConfidenceRows) ? analysis.lowConfidenceRows : [];
   table.rowColorUnreliableReasons = Array.isArray(analysis.unreliableReasons) ? analysis.unreliableReasons : [];
@@ -6398,7 +6404,8 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const exactRowCount = assignedRows.length === table.rows.length;
   const labels = table.rowColorRows.map((row) => getOpenCvItemConflictActionLabel(row) || getOpenCvItemRawColorLabel(row)).filter(Boolean);
   const canAttemptReliableColorDecision = Boolean(
-    (analysis.reliable || sourceIndexedAlignment) &&
+    !manualReviewOnly &&
+      (analysis.reliable || sourceIndexedAlignment) &&
       (analysis.source !== "ai_row_color" || table.rowColorAiGeometryVerified === true) &&
       table.rowColorExactBackendAligned &&
       exactRowCount &&
@@ -6425,22 +6432,24 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const hasRowLevelMixedColorConflict = hasRowLevelMixedOpenCvColorConflict(table);
   const hasVerifiedRowColorConflict = hasVerifiedWhiteAndNonWhiteRowColorHold(table);
   table.rowColorActionableConflict = Boolean(
-    (table.rowColorReliable && hasColorConflict) ||
-      hasVerifiedRowColorConflict ||
-      hasCountMatchedMixedColorConflict ||
-      hasRowLevelMixedColorConflict,
+    !manualReviewOnly &&
+      ((table.rowColorReliable && hasColorConflict) ||
+        hasVerifiedRowColorConflict ||
+        hasCountMatchedMixedColorConflict ||
+        hasRowLevelMixedColorConflict),
   );
-  applyOpenCvWhiteVsColoredAutoDecision(table);
+  if (!manualReviewOnly) applyOpenCvWhiteVsColoredAutoDecision(table);
   const actionableColorState = table.rowColorActionableConflict ? getOpenCvEffectiveColorState(table) : colorState;
   const hasActionableColorConflict = actionableColorState.hasWhite && actionableColorState.hasNonWhite;
   const untrustedColorMapping =
     !table.rowColorReliable &&
     ((analysis.source === "opencv" || analysis.source === "pdf_vector" || analysis.source === "paddle_ppstructure") &&
       (!table.rowColorExactBackendAligned || !table.rowColorExactRowAligned || table.rowColorPartialSequenceAligned));
-  if (untrustedColorMapping && !hasCountMatchedMixedColorConflict && !hasRowLevelMixedColorConflict) {
+  if (!manualReviewOnly && untrustedColorMapping && !hasCountMatchedMixedColorConflict && !hasRowLevelMixedColorConflict) {
     clearUntrustedRowColorPublishHolds(table);
   }
   if (
+    !manualReviewOnly &&
     analysis.source !== "ai_row_color" &&
     !table.rowColorReliable &&
     !table.rowColorActionableConflict &&
@@ -6452,7 +6461,11 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
     });
   }
   const engineName = getRowColorEngineName(table);
-  if (analysis.source === "ai_row_color" && table.rowColorAutoApplied === true) {
+  if (manualReviewOnly) {
+    table.rowColorMessage = labels.length
+      ? `${engineName} 已本地识别 ${assignedRows.length}/${table.rows.length} 行底色；结果只进待确认参考，不会自动改变发布状态。`
+      : `${engineName} 未识别到稳定逐行底色；请在待确认区对照原图人工判断。`;
+  } else if (analysis.source === "ai_row_color" && table.rowColorAutoApplied === true) {
     table.rowColorMessage = table.rowColorMessage || `${engineName} 已按高置信逐行结果处理。`;
   } else if (analysis.source === "ai_row_color" && table.rowColorAiAutoApplyAllowed !== true) {
     table.rowColorMessage = `${engineName} 已记录逐行颜色复核，但未通过行框级一对一验证，不会自动改变发布状态。`;
@@ -7296,6 +7309,7 @@ function makeCompactPendingTable(table) {
     rowColorConfirmed: Boolean(table.rowColorConfirmed),
     rowColorExactRowAligned: Boolean(table.rowColorExactRowAligned),
     rowColorActionableConflict: Boolean(table.rowColorActionableConflict),
+    rowColorManualReviewOnly: Boolean(table.rowColorManualReviewOnly),
     rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
     publishDecisionLogicVersion: Number(table.publishDecisionLogicVersion || 0),
     colorReviewSamples: { ...(table.colorReviewSamples || {}) },
@@ -7873,6 +7887,7 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable.rowColorConfirmed = false;
     normalizedTable.rowColorExactRowAligned = false;
     normalizedTable.rowColorActionableConflict = false;
+    normalizedTable.rowColorManualReviewOnly = false;
     normalizedTable.rowColorAutoApplied = false;
     normalizedTable.rowColorAutoSkipCount = 0;
     normalizedTable.aiRowColorAutoRows = [];
@@ -7898,6 +7913,7 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable.rowColorConfirmed = false;
     normalizedTable.rowColorExactRowAligned = false;
     normalizedTable.rowColorActionableConflict = false;
+    normalizedTable.rowColorManualReviewOnly = false;
     normalizedTable.rowColorAutoApplied = false;
     normalizedTable.rowColorAutoSkipCount = 0;
     normalizedTable.aiRowColorAutoRows = [];
@@ -11145,6 +11161,7 @@ function cloneReviewState(table) {
     rowColorConfirmed: Boolean(table.rowColorConfirmed),
     rowColorExactRowAligned: Boolean(table.rowColorExactRowAligned),
     rowColorActionableConflict: Boolean(table.rowColorActionableConflict),
+    rowColorManualReviewOnly: Boolean(table.rowColorManualReviewOnly),
     rowColorAutoApplied: Boolean(table.rowColorAutoApplied),
     rowColorAutoSkipCount: Number(table.rowColorAutoSkipCount || 0),
     rowColorMessage: table.rowColorMessage || "",
@@ -11219,6 +11236,7 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.rowColorConfirmed = Boolean(state.rowColorConfirmed);
   table.rowColorExactRowAligned = Boolean(state.rowColorExactRowAligned);
   table.rowColorActionableConflict = Boolean(state.rowColorActionableConflict);
+  table.rowColorManualReviewOnly = Boolean(state.rowColorManualReviewOnly);
   table.rowColorAutoApplied = Boolean(state.rowColorAutoApplied);
   table.rowColorAutoSkipCount = Number(state.rowColorAutoSkipCount || 0);
   table.rowColorMessage = state.rowColorMessage || "";
@@ -12000,6 +12018,7 @@ function createPublishedTableFromRows(table, rows, suffix = "") {
     rowColorConfirmed: rowColorRows.length === rows.length ? table.rowColorConfirmed : false,
     rowColorExactRowAligned: rowColorRows.length === rows.length ? table.rowColorExactRowAligned : false,
     rowColorActionableConflict: rowColorRows.length === rows.length ? table.rowColorActionableConflict : false,
+    rowColorManualReviewOnly: rowColorRows.length === rows.length ? Boolean(table.rowColorManualReviewOnly) : false,
     rowColorAutoApplied: rowColorRows.length === rows.length ? table.rowColorAutoApplied : false,
     needsManualReview: false,
     reviewReasons: [],
@@ -12248,17 +12267,6 @@ function waitForPendingTableRowColorRepair(table) {
 }
 
 function shouldEscalateRowColorAnalysisToAi(table, analysis) {
-  if (!table || table.rowColorSource === "ai_row_color") return false;
-  const rowCount = Array.isArray(table.rows) ? table.rows.length : 0;
-  if (!rowCount || rowCount > 80) return false;
-  if (!analysis || !Array.isArray(analysis.rows)) return true;
-  const labels = uniqueCleanValues((analysis.labels || analysis.rows.map((row) => row?.label || row?.rawLabel)).map(normalizeRowColorLabel).filter(Boolean));
-  if (analysis.reliable === true && analysis.exactRowAligned === true && !(Array.isArray(analysis.lowConfidenceRows) && analysis.lowConfidenceRows.length)) return false;
-  const hasWhite = labels.some(isAvailableRowColorLabel);
-  const hasNonWhite = labels.some((label) => label && !isAvailableRowColorLabel(label));
-  if (analysis.reliable !== true || analysis.exactRowAligned !== true) return true;
-  if (Array.isArray(analysis.lowConfidenceRows) && analysis.lowConfidenceRows.length) return true;
-  if (hasWhite && hasNonWhite) return true;
   return false;
 }
 
@@ -13343,13 +13351,16 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
     Number.isInteger(colorSamples.availableRow) ? `未售样本：第 ${colorSamples.availableRow + 1} 条` : "未售样本：未设置",
   ].join(" / ");
   const hasColorPreview = hasOpenCvRowColorPreview(table);
+  const rowColorManualReviewOnly = table.rowColorManualReviewOnly === true;
   const openCvConflict = hasColorPreview && hasAnyOpenCvWhiteAndColoredConflict(table);
-  const openCvLabels = hasColorPreview && (table.rowColorReliable === true || openCvConflict) ? getOpenCvNonSoldColorLabels(table) : [];
+  const openCvLabels = hasColorPreview && (table.rowColorReliable === true || openCvConflict || rowColorManualReviewOnly) ? getOpenCvNonSoldColorLabels(table) : [];
   const openCvColorState = hasColorPreview ? getOpenCvEffectiveColorState(table) : null;
   const rowColorEngineName = getRowColorEngineName(table);
   const rowColorStatusText =
     isVisualRowColorSource(table)
-      ? openCvConflict
+      ? rowColorManualReviewOnly
+        ? table.rowColorMessage || `${rowColorEngineName} 已本地识别行底色，只作为待确认参考。`
+      : openCvConflict
         ? table.rowColorMessage || getOpenCvColorReferenceMessage(table)
         : table.rowColorReliable
         ? table.rowColorMessage || getOpenCvColorReferenceMessage(table)
@@ -13360,7 +13371,9 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
             : `${rowColorEngineName} 未识别到有效颜色参考`
       : "";
   const ppStructureStatusText = table.ppStructureMessage || getPpStructureMatchSummary(table);
-  const colorEngineHint = openCvConflict
+  const colorEngineHint = rowColorManualReviewOnly
+    ? "本地颜色检测只提供参考，不会自动改变发布状态。"
+    : openCvConflict
     ? "同表混色时非白底行会自动设为不发布；你仍可手动改回发布。"
     : "颜色检测会先等待白底参照和可靠对齐，再参与发布判断。";
   const openCvPreviewRows =
@@ -13515,9 +13528,9 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
             </div>
             ${
               openCvPreviewRows
-                ? `<div class="opencv-color-preview">
+                  ? `<div class="opencv-color-preview">
                     <strong>${escapeHtml(rowColorEngineName)} 逐行颜色</strong>
-                    <span>${openCvConflict ? "这张表同时有白底和其他底色；非白底行会自动设为不发布。" : "颜色会等待同表白底参照后再参与发布判断。"}${table.rows.length > MAX_OPENCV_PREVIEW_ROWS_RENDERED ? ` 仅显示前 ${MAX_OPENCV_PREVIEW_ROWS_RENDERED} 行颜色明细。` : ""}</span>
+                    <span>${rowColorManualReviewOnly ? "本地颜色检测只作为待确认参考，不会自动改变发布状态。" : openCvConflict ? "这张表同时有白底和其他底色；非白底行会自动设为不发布。" : "颜色会等待同表白底参照后再参与发布判断。"}${table.rows.length > MAX_OPENCV_PREVIEW_ROWS_RENDERED ? ` 仅显示前 ${MAX_OPENCV_PREVIEW_ROWS_RENDERED} 行颜色明细。` : ""}</span>
                     <div class="opencv-color-grid">${openCvPreviewRows}</div>
                   </div>`
                 : ""
@@ -13525,18 +13538,18 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
           : ""
       }
       <div class="review-ai-panel">
-        <label for="reviewAiInstruction">AI 辅助校对</label>
-        <textarea id="reviewAiInstruction" rows="3" placeholder="例如：橙色整行底色是已售；浅绿色底不是已售；只有整行明显橙色才下架。AI 只生成建议，应用前你还能再看。">${escapeHtml(table.aiReviewInstruction || "")}</textarea>
+        <label for="reviewAiInstruction">AI 辅助校对已关闭</label>
+        <textarea id="reviewAiInstruction" rows="3" disabled placeholder="当前使用本地 PaddleOCR + OpenCV；颜色结果只作为待确认参考，不调用外部 AI。">${escapeHtml(table.aiReviewInstruction || "")}</textarea>
         <div class="review-sample-panel">
           <strong>颜色样本</strong>
           <span>${escapeHtml(sampleText)}</span>
           <em>先在下方票卡选择一条“已售样本”和一条“未售样本”，再生成建议。</em>
         </div>
         <div class="review-ai-actions">
-          <button class="small-button" type="button" data-review-ai-assist ${reviewAiBusy ? "disabled" : ""}>${reviewAiBusy ? "正在生成..." : "生成发布/下架建议"}</button>
+          <button class="small-button" type="button" data-review-ai-assist disabled>生成发布/下架建议</button>
           <button class="small-button ghost ${aiDecisions.length ? "" : "hidden"}" type="button" data-apply-ai-review>应用 AI 建议</button>
         </div>
-        <p class="review-ai-status">${escapeHtml(table.aiReviewStatus || "输入这张表的颜色/标记规则，AI 会按原图给出哪些上传、哪些下架。")}</p>
+        <p class="review-ai-status">${escapeHtml(table.aiReviewStatus || "外部 AI 已停用；请按左侧原图和本地颜色识别结果人工确认。")}</p>
       </div>
       ${
         hiddenReviewRowCount
