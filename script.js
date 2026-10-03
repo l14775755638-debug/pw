@@ -2,7 +2,7 @@ const REVIEW_FLAGS_VERSION = 35;
 const ROW_COLOR_LOGIC_VERSION = 91;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
-const COLUMN_NORMALIZATION_VERSION = 4;
+const COLUMN_NORMALIZATION_VERSION = 5;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = false;
@@ -4669,7 +4669,8 @@ function findFallbackSalePriceFromAnyCell(table, row) {
 }
 
 function repairCompactShiftedTicketRow(table, row) {
-  if (!table || !Array.isArray(row) || hasTicketSalePrice({ table, row, index: -1 })) return false;
+  if (!table || !Array.isArray(row)) return false;
+  if (getDirectSalePriceFromRow(table, row) || findRightmostSalePriceInRow(table, row)) return false;
   const columns = table.columns || [];
   if (!columns.some(isSalePriceColumnName)) return false;
   const candidates = row
@@ -4682,7 +4683,7 @@ function repairCompactShiftedTicketRow(table, row) {
   if (!candidate) return false;
   const compactValues = row.slice(0, candidate.index + 1).map((cell) => String(cell || "").trim()).filter(Boolean);
   const mapped = alignCompactTicketRowToColumns(compactValues, columns);
-  if (!mapped || !hasTicketSalePrice({ table, row: mapped, index: -1 })) return false;
+  if (!mapped || !(getDirectSalePriceFromRow(table, mapped) || findRightmostSalePriceInRow(table, mapped))) return false;
   const quantityIndex = findQuantityColumnIndex(columns);
   const existingQuantity = quantityIndex >= 0 && isLikelySeatCountValue(row[quantityIndex]) ? String(row[quantityIndex] || "").trim() : "";
   columns.forEach((column, index) => {
@@ -4757,6 +4758,367 @@ function repairSalePriceAndQuantity(table, row) {
   return changed;
 }
 
+function findSeatTypeColumnIndex(columns = []) {
+  return findColumnIndex(columns, ["席位", "座席", "票面", "票价", "价位", "面值", "楼层", "层数", "类型", "类别", "category"]);
+}
+
+function isVenueSeatTypeValue(value) {
+  const text = String(value || "").trim();
+  if (!text || isLikelyDateValue(text) || isLikelySalePriceValue(text)) return false;
+  if (isLikelyZoneCode(text) || isLikelySeatRowValue(text) || isLikelySeatNumberValue(text)) return false;
+  return /(Floor\s*[RS]?席?|floor\s*[rs]?|内场|內場|看台|看臺|VIP|站席|座席|席$|^\dF\s*[RS]?席?$)/i.test(text);
+}
+
+function isMergedCellArtifact(value) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  if (/^[\/\\|_\-—–~～.。,:：;；!！?？■□▪▫●○◆◇*]+$/.test(text)) return true;
+  const compact = normalize(text).replace(/[\/\\|_\-—–~～.。,:：;；!！?？■□▪▫●○◆◇*\s]/g, "");
+  return !compact;
+}
+
+function rowTextHasLinkedSeats(value) {
+  return /(连坐|連坐|连座|連座|双连|雙連|两连|兩連|\d+\s*连|연석|붙은자리)/i.test(String(value || ""));
+}
+
+function cleanMergedSeatRemark(value) {
+  const text = String(value || "").trim();
+  if (!text || isMergedCellArtifact(text)) return "";
+  return text.replace(/\s+/g, " ");
+}
+
+function isLocationPriceOnlyRemark(value) {
+  let text = String(value || "").trim();
+  if (!text) return true;
+  const price = extractSalePriceText(text, { minPrice: 100 });
+  if (price) text = text.replace(price, " ");
+  const zone = extractZoneTokenFromText(text);
+  if (zone) text = text.replace(new RegExp(zone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ");
+  const seatRow = extractSeatRowFromText(text);
+  if (seatRow) {
+    const rowNumber = seatRow.replace(/实际/g, "").replace(/排|row|열/gi, "");
+    if (rowNumber) text = text.replace(new RegExp(rowNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*(?:排|row|열)?", "ig"), " ");
+  }
+  const seat = extractSeatNumberFromText(text, { allowBareRange: true });
+  if (seat) text = text.replace(new RegExp(seat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ");
+  return isMergedCellArtifact(text);
+}
+
+function isSeatOnlyMergedRemark(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (rowTextHasLinkedSeats(text)) return false;
+  if (isLikelySeatNumberValue(text) || extractSeatNumberFromText(text, { allowBareRange: true })) return true;
+  if (/^(?:[A-Z]?\d{1,4}|X)\s+(?:[A-Z]?\d{1,4}|X)\s*(?:号|號)?$/i.test(text)) return true;
+  let rest = text;
+  const seatRow = extractSeatRowFromText(rest);
+  if (seatRow) rest = stripExtractedValueFromText(rest, seatRow);
+  const zone = extractZoneTokenFromText(rest);
+  if (zone) rest = stripExtractedValueFromText(rest, zone);
+  rest = rest
+    .replace(/[\/\\|_\-—–~～.。,:：;；!！?？■□▪▫●○◆◇*\s]+/g, "")
+    .trim();
+  return !rest;
+}
+
+function shouldReplaceMergedRemarkWithLinkedRemark(value) {
+  const remark = cleanMergedSeatRemark(value);
+  return !remark || isMergedCellArtifact(remark) || isLocationPriceOnlyRemark(remark) || isSeatOnlyMergedRemark(remark);
+}
+
+function findBestSeatRowInRow(table, row, currentIndex) {
+  const columns = table.columns || [];
+  const candidates = row
+    .map((value, index) => ({ value: String(value || "").trim(), index, column: columns[index] || "" }))
+    .filter(({ value }) => value && !isLikelyDateValue(value) && !isLikelySalePriceValue(value))
+    .map((item) => ({
+      ...item,
+      parsed: extractSeatRowFromText(item.value, { allowBareRange: isSeatRowColumnName(item.column) }),
+      score:
+        (item.index === currentIndex ? 120 : 0) +
+        (isSeatRowColumnName(item.column) ? 90 : 0) +
+        (/排|row|열/i.test(item.value) ? 50 : 0) +
+        (/[-到至]/.test(item.value) ? 18 : 0) -
+        (isRemarkColumnName(item.column) ? 15 : 0),
+    }))
+    .filter((item) => item.parsed)
+    .sort((a, b) => b.score - a.score);
+  return candidates[0]?.parsed || "";
+}
+
+function findBestSeatNumberInRow(table, row, currentIndex) {
+  const columns = table.columns || [];
+  const candidates = row
+    .map((value, index) => ({ value: String(value || "").trim(), index, column: columns[index] || "" }))
+    .filter(({ value }) => value && !isLikelyDateValue(value) && !isLikelySalePriceValue(value) && !isVenueSeatTypeValue(value))
+    .map((item) => ({
+      ...item,
+      parsed: extractSeatNumberFromText(item.value, { allowBareRange: isSeatNumberColumnName(item.column) }),
+      score:
+        (item.index === currentIndex ? 120 : 0) +
+        (isSeatNumberColumnName(item.column) ? 90 : 0) +
+        (/号|號|seat|number|[-到至]/i.test(item.value) ? 45 : 0) -
+        (isRemarkColumnName(item.column) ? 20 : 0),
+    }))
+    .filter((item) => item.parsed)
+    .sort((a, b) => b.score - a.score);
+  return candidates[0]?.parsed || "";
+}
+
+function normalizeComparablePrice(value) {
+  const price = extractSalePriceText(value, { minPrice: 100 });
+  return price || "";
+}
+
+function findStatusColumnIndex(columns = []) {
+  return findColumnIndex(columns, ["状态", "售卖状态", "销售状态", "status", "是否售出", "售出"]);
+}
+
+function isLikelyTicketStatusOrTypeValue(value) {
+  const text = String(value || "").trim();
+  if (!text || isLikelyDateValue(text) || isLikelySalePriceValue(text) || isLikelyZoneCode(text)) return false;
+  return isStandaloneLogisticsValue(text) || isBusinessStatusRemarkValue(text) || /^(手环|门票|票|现场票|纸质票|电子票|实体票)$/i.test(text);
+}
+
+function stripExtractedValueFromText(text, value) {
+  const source = String(text || "");
+  const target = String(value || "").trim();
+  if (!source || !target) return source;
+  return source.replace(new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ");
+}
+
+function extractLinkedSeatRemark(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/(\d+\s*连坐|\d+\s*連坐|连坐|連坐|连座|連座|双连|雙連|两连|兩連|연석|붙은자리)/i);
+  return match ? match[1].replace(/\s+/g, "") : "";
+}
+
+function cleanShiftedLocationRemark(value, parsed = {}) {
+  const linkedRemark = extractLinkedSeatRemark(value);
+  if (linkedRemark) return linkedRemark;
+  let text = String(value || "").trim();
+  if (!text) return "";
+  const price = extractSalePriceText(text, { minPrice: 100 });
+  if (price) text = stripExtractedValueFromText(text, price);
+  [parsed.zone, parsed.row, parsed.seat].filter(Boolean).forEach((item) => {
+    text = stripExtractedValueFromText(text, item);
+  });
+  text = text
+    .replace(/(?:^|[\s/／,，、|｜])(?:区|區|排|row|열|号|號|seat|number)(?=$|[\s/／,，、|｜])/gi, " ")
+    .replace(/[\/\\|_\-—–~～.。,:：;；!！?？■□▪▫●○◆◇*]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || isMergedCellArtifact(text) || isLocationPriceOnlyRemark(text)) return "";
+  return text;
+}
+
+function parseShiftedLocationCell(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const parsed = parseCompositeSeatInfo(text) || {};
+  const zone = chooseBetterZoneToken(parsed.zone, extractZoneTokenFromText(text));
+  const row = parsed.row || extractSeatRowFromText(text, { allowBareRange: false }) || "";
+  const seat = parsed.seat || extractSeatNumberFromText(removeFirstSeatRowPhrase(text), { allowBareRange: true }) || "";
+  const note = cleanShiftedLocationRemark(text, { zone, row, seat });
+  if (!zone && !row && !seat && !note) return null;
+  return { zone, row, seat, note };
+}
+
+function repairTailSalePriceShiftedIntoRemark(table, row) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(row)) return false;
+  let changed = false;
+  while (row.length < table.columns.length) row.push("");
+  const priceIndex = findSalePriceColumnIndex(table.columns);
+  if (priceIndex < 0 || extractSalePriceText(row[priceIndex], { minPrice: 100 })) return false;
+  const candidates = row
+    .map((value, index) => ({ value: String(value || "").trim(), index, column: table.columns[index] || "" }))
+    .filter(({ value, index, column }) => {
+      if (!value || index === priceIndex || isInternalColorColumn(column) || isLikelyRowColorValue(value)) return false;
+      if (isSoldText(value, { strict: true }) || isBusinessStatusRemarkValue(value) || isFaceValueColumnName(column)) return false;
+      const price = extractSalePriceText(value, { minPrice: 1000 });
+      if (!price) return false;
+      const tail = index >= Math.max(0, table.columns.length - 3);
+      return tail || isRemarkColumnName(column) || isDeliveryColumnName(column) || isGenericPriceColumnName(column);
+    })
+    .sort((a, b) => b.index - a.index);
+  const source = candidates[0];
+  if (!source) return false;
+  const price = extractSalePriceText(source.value, { minPrice: 1000 });
+  if (!price) return false;
+  row[priceIndex] = price;
+  const remainder = stripExtractedValueFromText(source.value, price)
+    .replace(/[\/\\|_\-—–~～.。,:：;；!！?？■□▪▫●○◆◇*]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  row[source.index] = remainder;
+  changed = true;
+  return changed;
+}
+
+function repairRightShiftedMergedTicketRow(table, row) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(row)) return false;
+  while (row.length < table.columns.length) row.push("");
+  const columns = table.columns || [];
+  const statusIndex = findStatusColumnIndex(columns);
+  const dateIndex = findColumnIndex(columns, DATE_COLUMN_NAMES);
+  const typeIndex = findSeatTypeColumnIndex(columns);
+  const zoneIndex = findColumnIndex(columns, ["区域", "区", "block", "section", "구역"]);
+  const rowIndex = findSeatRowColumnIndexes(columns)[0] ?? -1;
+  const seatIndex = findSeatNumberColumnIndexes(columns)[0] ?? -1;
+  const remarkIndex = findColumnIndex(columns, ["备注", "remark", "note", "说明"]);
+  if ([dateIndex, typeIndex, zoneIndex, rowIndex, seatIndex, remarkIndex].some((index) => index < 0)) return false;
+
+  const shiftedStatus = String(row[zoneIndex] || "").trim();
+  const shiftedDate = String(row[rowIndex] || "").trim();
+  const shiftedType = String(row[seatIndex] || "").trim();
+  if (!isLikelyTicketStatusOrTypeValue(shiftedStatus) || !isLikelyDateValue(shiftedDate) || !isVenueSeatTypeValue(shiftedType)) return false;
+
+  let changed = false;
+  if (statusIndex >= 0 && (!String(row[statusIndex] || "").trim() || !isLikelyTicketStatusOrTypeValue(row[statusIndex]))) {
+    row[statusIndex] = shiftedStatus;
+    changed = true;
+  }
+  if (!String(row[dateIndex] || "").trim() || !isLikelyDateValue(row[dateIndex])) {
+    row[dateIndex] = shiftedDate;
+    changed = true;
+  }
+  if (!String(row[typeIndex] || "").trim() || !isVenueSeatTypeValue(row[typeIndex])) {
+    row[typeIndex] = shiftedType;
+    changed = true;
+  }
+
+  const priceIndex = findSalePriceColumnIndex(columns);
+  const locationText = row
+    .map((value, index) => ({ value: String(value || "").trim(), index }))
+    .filter(({ value, index }) => {
+      if (!value) return false;
+      if (index <= seatIndex) return false;
+      if (index === priceIndex) return false;
+      if (isLikelySalePriceValue(value, { minPrice: 1000 })) return false;
+      return true;
+    })
+    .map(({ value }) => value)
+    .join(" / ");
+  const parsed = parseShiftedLocationCell(locationText);
+  if (parsed?.zone) {
+    row[zoneIndex] = parsed.zone;
+    changed = true;
+  } else if (row[zoneIndex] !== "") {
+    row[zoneIndex] = "";
+    changed = true;
+  }
+  if (parsed?.row) {
+    row[rowIndex] = parsed.row;
+    changed = true;
+  } else if (row[rowIndex] !== "") {
+    row[rowIndex] = "";
+    changed = true;
+  }
+  if (parsed?.seat) {
+    row[seatIndex] = parsed.seat;
+    changed = true;
+  } else if (row[seatIndex] !== "") {
+    row[seatIndex] = "";
+    changed = true;
+  }
+  if (parsed?.note !== undefined && row[remarkIndex] !== parsed.note) {
+    row[remarkIndex] = parsed.note || "";
+    changed = true;
+  }
+  row.forEach((value, index) => {
+    if (index <= seatIndex || index === remarkIndex || index === priceIndex) return;
+    if (!String(value || "").trim()) return;
+    row[index] = "";
+    changed = true;
+  });
+  return changed;
+}
+
+function shouldInheritMergedSeatContext(previousContext, currentContext) {
+  if (!previousContext || !previousContext.seat || !rowTextHasLinkedSeats(previousContext.remark)) return false;
+  if (!currentContext.date || !previousContext.date || currentContext.date !== previousContext.date) return false;
+  if (!currentContext.zone || !previousContext.zone || cleanZoneToken(currentContext.zone) !== cleanZoneToken(previousContext.zone)) return false;
+  if (!currentContext.row || !previousContext.row || normalize(currentContext.row) !== normalize(previousContext.row)) return false;
+  if (currentContext.price && previousContext.price && currentContext.price !== previousContext.price) return false;
+  return true;
+}
+
+function getMergedSeatContextForRow(table, row, rowIndexValue) {
+  const dateIndex = findColumnIndex(table.columns, DATE_COLUMN_NAMES);
+  const zoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
+  const seatRowIndex = findSeatRowColumnIndexes(table.columns)[0] ?? -1;
+  const seatIndex = findSeatNumberColumnIndexes(table.columns)[0] ?? -1;
+  const remarkIndex = findColumnIndex(table.columns, ["备注", "remark", "note", "说明"]);
+  return {
+    index: rowIndexValue,
+    date: dateIndex >= 0 ? String(row[dateIndex] || "").trim() : "",
+    zone: zoneIndex >= 0 ? cleanZoneToken(row[zoneIndex]) : "",
+    row: seatRowIndex >= 0 ? String(row[seatRowIndex] || "").trim() : "",
+    seat: seatIndex >= 0 ? String(row[seatIndex] || "").trim() : "",
+    remark: remarkIndex >= 0 ? cleanMergedSeatRemark(row[remarkIndex]) : "",
+    price: normalizeComparablePrice(getTicketSalePriceValue({ table, row, index: rowIndexValue })),
+    seatIndex,
+    remarkIndex,
+  };
+}
+
+function mergedSeatContextsMatch(a, b) {
+  if (!a || !b) return false;
+  if (!a.date || !b.date || a.date !== b.date) return false;
+  if (!a.zone || !b.zone || cleanZoneToken(a.zone) !== cleanZoneToken(b.zone)) return false;
+  if (!a.row || !b.row || normalize(a.row) !== normalize(b.row)) return false;
+  if (a.price && b.price && a.price !== b.price) return false;
+  return true;
+}
+
+function findMergedSeatNeighborContexts(contexts, index) {
+  const current = contexts[index];
+  if (!current) return [];
+  const neighbors = [];
+  for (const direction of [-1, 1]) {
+    for (let step = 1; step <= 4; step += 1) {
+      const next = contexts[index + direction * step];
+      if (!mergedSeatContextsMatch(current, next)) break;
+      neighbors.push(next);
+    }
+  }
+  return neighbors;
+}
+
+function repairMergedSeatContextAcrossRows(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  let changed = false;
+  const contexts = table.rows.map((row, index) => getMergedSeatContextForRow(table, row, index));
+  contexts.forEach((context, index) => {
+    if (table.userEditedRows?.[index]) return;
+    const group = [context, ...findMergedSeatNeighborContexts(contexts, index)];
+    const hasLinkedSeatRemark = group.some((item) => rowTextHasLinkedSeats(item.remark));
+    if (!hasLinkedSeatRemark) return;
+    const seatSource = group.find((item) => isLikelySeatNumberValue(item.seat));
+    const remarkSource = group.find((item) => rowTextHasLinkedSeats(item.remark));
+    const row = table.rows[index];
+    if (
+      seatSource?.seat &&
+      context.seatIndex >= 0 &&
+      (!context.seat || !isLikelySeatNumberValue(context.seat) || isMergedCellArtifact(context.seat))
+    ) {
+      row[context.seatIndex] = seatSource.seat;
+      context.seat = seatSource.seat;
+      changed = true;
+    }
+    if (
+      remarkSource?.remark &&
+      context.remarkIndex >= 0 &&
+      shouldReplaceMergedRemarkWithLinkedRemark(context.remark)
+    ) {
+      row[context.remarkIndex] = remarkSource.remark;
+      context.remark = remarkSource.remark;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 function repairMergedContextValues(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
   let changed = false;
@@ -4764,16 +5126,54 @@ function repairMergedContextValues(table) {
   const zoneIndex = findColumnIndex(table.columns, ["区域", "区", "block", "section", "구역"]);
   const rowIndex = ensureSeatRowColumn(table);
   const seatIndex = ensureSeatNumberColumn(table);
+  const seatTypeIndex = findSeatTypeColumnIndex(table.columns);
+  const remarkIndex = ensureNamedColumn(table, "备注", ["备注", "remark", "note", "说明"]);
   let lastDate = "";
   let lastZone = "";
+  let previousContext = null;
 
   table.rows.forEach((row, index) => {
     while (row.length < table.columns.length) row.push("");
+    if (table.userEditedRows?.[index]) return;
+
+    const rowCell = String(row[rowIndex] || "").trim();
+    const seatCell = String(row[seatIndex] || "").trim();
+    if (dateIndex >= 0 && rowCell && isLikelyDateValue(rowCell)) {
+      if (!String(row[dateIndex] || "").trim()) row[dateIndex] = rowCell;
+      row[rowIndex] = "";
+      changed = true;
+    } else if (isVenueSeatTypeValue(rowCell)) {
+      if (seatTypeIndex >= 0 && !String(row[seatTypeIndex] || "").trim()) row[seatTypeIndex] = rowCell;
+      row[rowIndex] = "";
+      changed = true;
+    }
+
+    if (seatCell && isLikelyDateValue(seatCell)) {
+      if (dateIndex >= 0 && !String(row[dateIndex] || "").trim()) row[dateIndex] = seatCell;
+      row[seatIndex] = "";
+      changed = true;
+    } else if (seatCell && isVenueSeatTypeValue(seatCell)) {
+      if (seatTypeIndex >= 0 && !String(row[seatTypeIndex] || "").trim()) row[seatTypeIndex] = seatCell;
+      row[seatIndex] = "";
+      changed = true;
+    }
+
     const rowValue = String(row[rowIndex] || "").trim();
     const seatValue = String(row[seatIndex] || "").trim();
+    const bestSeatRow = findBestSeatRowInRow(table, row, rowIndex);
+    if (bestSeatRow && isBetterSeatRowCandidate(bestSeatRow, rowValue)) {
+      row[rowIndex] = bestSeatRow;
+      changed = true;
+    }
+    const bestSeatNumber = findBestSeatNumberInRow(table, row, seatIndex);
+    if (bestSeatNumber && isBetterSeatNumberCandidate(bestSeatNumber, seatValue)) {
+      row[seatIndex] = bestSeatNumber;
+      changed = true;
+    }
+
     const hasInheritedTicketContent =
-      isLikelySeatRowValue(rowValue) ||
-      isLikelySeatNumberValue(seatValue) ||
+      isLikelySeatRowValue(row[rowIndex]) ||
+      isLikelySeatNumberValue(row[seatIndex]) ||
       hasTicketSalePrice({ table, row, index: -1 });
     if (dateIndex >= 0) {
       const currentDate = String(row[dateIndex] || "").trim();
@@ -4793,14 +5193,10 @@ function repairMergedContextValues(table) {
       }
     }
 
-    if (zoneIndex < 0) return;
-    const currentZone = cleanZoneToken(row[zoneIndex]);
+    const currentZone = zoneIndex >= 0 ? cleanZoneToken(row[zoneIndex]) : "";
     if (isLikelyZoneCode(currentZone)) {
       lastZone = currentZone;
-      return;
     }
-
-    if (table.userEditedRows?.[index]) return;
 
     if (lastZone && currentZone && isLikelySeatRowValue(currentZone)) {
       if (!rowValue || !isLikelySeatRowValue(rowValue) || isLikelySalePriceValue(rowValue)) {
@@ -4809,14 +5205,51 @@ function repairMergedContextValues(table) {
       }
       row[zoneIndex] = lastZone;
       changed = true;
-      return;
     }
 
-    if (lastZone && !currentZone && hasInheritedTicketContent) {
+    if (zoneIndex >= 0 && lastZone && !currentZone && hasInheritedTicketContent) {
       row[zoneIndex] = lastZone;
       changed = true;
     }
+
+    const currentContext = {
+      date: dateIndex >= 0 ? String(row[dateIndex] || "").trim() : "",
+      zone: zoneIndex >= 0 ? cleanZoneToken(row[zoneIndex]) : "",
+      row: String(row[rowIndex] || "").trim(),
+      seat: String(row[seatIndex] || "").trim(),
+      remark: cleanMergedSeatRemark(row[remarkIndex]),
+      price: normalizeComparablePrice(getVisibleTicketSalePriceValue({ table, row, index })),
+    };
+    if (
+      shouldInheritMergedSeatContext(previousContext, currentContext) &&
+      (!currentContext.seat || !isLikelySeatNumberValue(currentContext.seat) || isMergedCellArtifact(currentContext.seat))
+    ) {
+      row[seatIndex] = previousContext.seat;
+      currentContext.seat = previousContext.seat;
+      changed = true;
+    }
+    const shouldInheritRemark =
+      shouldInheritMergedSeatContext(previousContext, currentContext) &&
+      previousContext.remark &&
+      shouldReplaceMergedRemarkWithLinkedRemark(currentContext.remark);
+    if (shouldInheritRemark) {
+      row[remarkIndex] = previousContext.remark;
+      currentContext.remark = previousContext.remark;
+      changed = true;
+    }
+
+    if (currentContext.date && currentContext.zone && currentContext.row) {
+      previousContext = {
+        date: currentContext.date,
+        zone: currentContext.zone,
+        row: currentContext.row,
+        seat: isLikelySeatNumberValue(currentContext.seat) ? currentContext.seat : "",
+        remark: currentContext.remark,
+        price: currentContext.price,
+      };
+    }
   });
+  if (repairMergedSeatContextAcrossRows(table)) changed = true;
   return changed;
 }
 
@@ -4842,6 +5275,8 @@ function normalizePendingTableColumns(table) {
 
   table.rows.forEach((row, rowIndex) => {
     if (table.userEditedRows?.[rowIndex]) return;
+    if (repairTailSalePriceShiftedIntoRemark(table, row)) changed = true;
+    if (repairRightShiftedMergedTicketRow(table, row)) changed = true;
     if (repairCompactShiftedTicketRow(table, row)) changed = true;
   });
 
@@ -4878,6 +5313,15 @@ function normalizePendingTableColumns(table) {
     }
 
     if (!manuallyEdited) {
+      if (repairTailSalePriceShiftedIntoRemark(table, row)) {
+        changed = true;
+        priceIndex = findSalePriceColumnIndex(table.columns);
+      }
+      if (repairRightShiftedMergedTicketRow(table, row)) {
+        changed = true;
+        quantityIndex = findQuantityColumnIndex(table.columns);
+        priceIndex = findSalePriceColumnIndex(table.columns);
+      }
       const repairedComposite = repairCompositeSeatInfoFromCandidateColumns(table, row);
       const repairedCompositeAnyCell = repairCompositeSeatInfoFromAnyCell(table, row);
       const repairedSeparatedPosition = repairSeparatedSeatPositionFields(table, row);
