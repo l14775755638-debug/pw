@@ -2323,7 +2323,7 @@ async function runTicketOcrBatch(job, source, maxPages) {
     } else {
       job.status = text ? "done" : "error";
       job.message = text
-        ? `已本地逐页识别 ${job.pagesProcessed} 页，其中 ${job.results.filter((item) => item.text).length} 页有票源内容；OpenCV 行底色只作为待确认参考，不自动下架${job.errors.length ? `，${job.errors.length} 页失败可单独补扫` : ""}。`
+        ? `已本地逐页识别 ${job.pagesProcessed} 页，其中 ${job.results.filter((item) => item.text).length} 页有票源内容；生成确认表时会按同表白底参照自动设非白底为不发布${job.errors.length ? `，${job.errors.length} 页失败可单独补扫` : ""}。`
         : `已扫描 ${job.pagesProcessed} 页，但没有识别到可用表格内容。`;
     }
   } catch (error) {

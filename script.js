@@ -1,8 +1,8 @@
 const REVIEW_FLAGS_VERSION = 35;
-const ROW_COLOR_LOGIC_VERSION = 91;
+const ROW_COLOR_LOGIC_VERSION = 92;
 const PUBLISH_DECISION_LOGIC_VERSION = 5;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
-const COLUMN_NORMALIZATION_VERSION = 5;
+const COLUMN_NORMALIZATION_VERSION = 6;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = false;
@@ -3121,6 +3121,7 @@ function isLikelyZoneCode(value) {
   if (composite?.zone) return true;
   const text = cleanZoneToken(value);
   if (!text || isSoldText(text, { strict: true }) || isLikelyRowColorValue(text)) return false;
+  if (isReservedSerialZoneToken(text)) return false;
   if (/^\d{1,2}$/.test(text)) return false;
   if (/^\d{3}[a-z]?$/i.test(text)) return true;
   if (/^[a-z]{1,3}\d+[a-z]?$/i.test(text)) return true;
@@ -3911,11 +3912,21 @@ function chooseBetterZoneToken(...values) {
     .sort((a, b) => zoneTokenSpecificityScore(b) - zoneTokenSpecificityScore(a))[0] || "";
 }
 
+function isReservedSerialZoneToken(value) {
+  const text = cleanZoneToken(value);
+  if (!text) return false;
+  return /^(?:add|new|item|ticket|no)\d+$/i.test(text);
+}
+
 function extractZoneTokenFromText(value) {
   const text = normalizeSeatText(value);
   if (!text || isSoldText(text, { strict: true }) || isLikelySalePriceValue(text)) return "";
   const compactText = text.replace(/\s+/g, "");
+  const sideZone =
+    text.match(/(?:^|[^A-Z0-9])(?:\d+(?:st|nd|rd|th)?\s*floor\s*)?([A-Z]{0,3}\d{1,4}[A-Z]?|[A-Z]\d?)\s*Side\b/i) ||
+    compactText.match(/(?:^|floor|층|层)([A-Z]{0,3}\d{1,4}[A-Z]?|[A-Z]\d?)Side/i);
   const rowAttachedZone =
+    sideZone ||
     compactText.match(/((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})\d+[A-Z]?|\d{2,4}[A-Z]?)(?=(?:区|區|구역|구)?(?:[A-Z]|\d{1,3}|[一二三四五六七八九十]+)?(?:排|row|열))/i) ||
     compactText.match(/(?:看台|看臺|内场|內場|场内|場內|floor|层|층)((?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})?\d{1,4}[A-Z]?|[A-Z]\d?|FE|FW)(?=(?:[A-Z]|\d{1,3}|[一二三四五六七八九十]+)?(?:排|row|열|区|區))/i);
   const explicitZone =
@@ -3931,6 +3942,7 @@ function extractZoneTokenFromText(value) {
     text.match(/(?:^|[^A-Z0-9])([A-Z]{0,3}\d{2,4}[A-Z]?|[A-Z]\d?)\s*side\b/i);
   const token = normalizeExtractedZoneToken(englishZone?.[1] || "", text);
   if (!token || isLikelyDateValue(token) || isLikelySalePriceValue(token)) return "";
+  if (isReservedSerialZoneToken(token)) return "";
   if (/^\d{1,2}$/.test(token) || /^2F|3F$/i.test(token)) return "";
   return token;
 }
@@ -4101,6 +4113,38 @@ function normalizeCompositeSeatValue(value) {
     .replace(/\s*([.。,:：])\s*/g, "$1 ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function parseCompressedForeignSeatInfo(value) {
+  const source = String(value || "").normalize("NFKC").trim();
+  if (!source) return null;
+  const compact = source
+    .replace(/[‐‑‒–—―～~]/g, "-")
+    .replace(/\s+/g, "")
+    .replace(/구역|區|区/gi, "g")
+    .replace(/열|排/gi, "row")
+    .replace(/좌석|座位号?|座号|号段|号码|號碼|号|號/gi, "seat")
+    .replace(/ｘ/gi, "x");
+  if (!/(?:floor|side|row|seat|층|g)/i.test(compact)) return null;
+  const zonePattern = "(?:PB|PC|PD|PE|PEN|R|Z|E|B|D|M|A|F|I{1,3})\\d+[A-Z]?|\\d{2,4}[A-Z]?|FE|FW";
+  const rowPattern = "[A-Z]?\\d{1,3}|[A-Z]";
+  const seatPattern = "(?:\\d+)?X|X|\\d{1,4}(?:[-到至]\\d{1,4})?";
+  const patterns = [
+    new RegExp(`(?:floor|\\d+(?:st|nd|rd|th)?floor|\\d+층)?(?:row)?(${zonePattern})(?:side|g)(${rowPattern})(?:row)?(?:seat)?(${seatPattern})?`, "i"),
+    new RegExp(`(?:floor|\\d+(?:st|nd|rd|th)?floor|\\d+층)?(${zonePattern})side(${rowPattern})row(?:seat)?(${seatPattern})?`, "i"),
+    new RegExp(`(${zonePattern})(?:구역|g)(${rowPattern})(?:열|row)(?:seat)?(${seatPattern})?`, "i"),
+  ];
+  const match = patterns.map((pattern) => compact.match(pattern)).find(Boolean);
+  if (!match) return null;
+  const zone = normalizeExtractedZoneToken(match[1], source);
+  if (!zone || !isLikelyZoneCode(zone)) return null;
+  const row = String(match[2] || "").trim().toUpperCase();
+  const seat = String(match[3] || "").replace(/\s+/g, "").toUpperCase();
+  return {
+    zone,
+    row: row ? `${row}排` : "",
+    seat,
+  };
 }
 
 function parseEnglishCompositeSeatInfo(value) {
@@ -4290,6 +4334,7 @@ function parseCompositeSeatInfo(value) {
     .replace(/\s+/g, " ")
     .trim();
   const parsedLocation =
+    parseCompressedForeignSeatInfo(withoutDate) ||
     parseEnglishSideRowPosition(withoutDate) ||
     parseKoreanCompositeSeatInfo(withoutDate) ||
     parseHybridCompositeSeatInfo(withoutDate) ||
@@ -6190,9 +6235,19 @@ function hasHighConfidenceLocalNonWhiteAutoSkipSource(table) {
   return getHighConfidenceLocalNonWhiteAutoSkipRows(table).length > 0;
 }
 
+function hasManualReviewRowColorAutoSkipSource(table) {
+  if (!hasOpenCvRowColorPreview(table) || table?.rowColorSource === "ai_row_color") return false;
+  return (
+    hasHighConfidenceLocalNonWhiteAutoSkipSource(table) ||
+    hasVerifiedWhiteAndNonWhiteRowColorHold(table) ||
+    hasCountMatchedMixedRowColorAutoSkipSource(table) ||
+    hasRowLevelMixedOpenCvColorConflict(table)
+  );
+}
+
 function hasActionableOpenCvColorSource(table) {
   if (!hasOpenCvRowColorPreview(table) || !Array.isArray(table.rows) || !table.rows.length) return false;
-  if (table.rowColorManualReviewOnly === true) return hasHighConfidenceLocalNonWhiteAutoSkipSource(table);
+  if (table.rowColorManualReviewOnly === true) return hasManualReviewRowColorAutoSkipSource(table);
   if (hasCountMatchedMixedRowColorAutoSkipSource(table)) return true;
   if (hasRowLevelMixedOpenCvColorConflict(table)) return true;
   if (
@@ -7073,15 +7128,16 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const hasCountMatchedMixedColorConflict = hasCountMatchedMixedRowColorAutoSkipSource(table);
   const hasRowLevelMixedColorConflict = hasRowLevelMixedOpenCvColorConflict(table);
   const hasVerifiedRowColorConflict = hasVerifiedWhiteAndNonWhiteRowColorHold(table);
+  const hasManualReviewMixedColorConflict = manualReviewOnly && hasManualReviewRowColorAutoSkipSource(table);
   table.rowColorActionableConflict = Boolean(
-    !manualReviewOnly &&
-      ((table.rowColorReliable && hasColorConflict) ||
-        hasVerifiedRowColorConflict ||
-        hasCountMatchedMixedColorConflict ||
-        hasRowLevelMixedColorConflict),
+    hasManualReviewMixedColorConflict ||
+      (!manualReviewOnly &&
+        ((table.rowColorReliable && hasColorConflict) ||
+          hasVerifiedRowColorConflict ||
+          hasCountMatchedMixedColorConflict ||
+          hasRowLevelMixedColorConflict)),
   );
-  const hasHighConfidenceLocalAutoSkip = hasHighConfidenceLocalNonWhiteAutoSkipSource(table);
-  if (!manualReviewOnly || hasHighConfidenceLocalAutoSkip) applyOpenCvWhiteVsColoredAutoDecision(table);
+  if (!manualReviewOnly || hasManualReviewMixedColorConflict) applyOpenCvWhiteVsColoredAutoDecision(table);
   const actionableColorState = table.rowColorActionableConflict ? getOpenCvEffectiveColorState(table) : colorState;
   const hasActionableColorConflict = actionableColorState.hasWhite && actionableColorState.hasNonWhite;
   const untrustedColorMapping =
