@@ -600,6 +600,7 @@ let pendingSeatmap = null;
 const uploadedTables = [];
 const pendingTables = [];
 let selectedPendingTableId = null;
+let uploadRecordWindowStart = 0;
 const STORAGE_KEY = "ticket-admin-state-v1";
 const OPERATION_ARCHIVE_KEY = "ticket-admin-operation-archives-v1";
 const APP_STATE_BACKUP_DB = "ticket-admin-state-backup-v1";
@@ -11658,6 +11659,42 @@ async function refreshAiStatus() {
   zoneMarkingStatus.textContent = describeRecognitionStatus();
 }
 
+function getCurrentUploadRecordPendingTables() {
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
+  return manualReviewOnly ? allCurrentPending.filter((table) => table.needsManualReview) : allCurrentPending;
+}
+
+function getUploadRecordWindowStart(currentPending = getCurrentUploadRecordPendingTables()) {
+  if (!currentPending.length || currentPending.length <= MAX_UPLOAD_RECORDS_RENDERED) {
+    uploadRecordWindowStart = 0;
+    return 0;
+  }
+  const maxStart = Math.floor((currentPending.length - 1) / MAX_UPLOAD_RECORDS_RENDERED) * MAX_UPLOAD_RECORDS_RENDERED;
+  const selectedIndex = currentPending.findIndex((table) => table.id === selectedPendingTableId);
+  let start = Math.max(0, Math.min(Number(uploadRecordWindowStart || 0), maxStart));
+  if (selectedIndex >= 0 && (selectedIndex < start || selectedIndex >= start + MAX_UPLOAD_RECORDS_RENDERED)) {
+    start = Math.floor(selectedIndex / MAX_UPLOAD_RECORDS_RENDERED) * MAX_UPLOAD_RECORDS_RENDERED;
+  }
+  uploadRecordWindowStart = start;
+  return start;
+}
+
+function selectUploadRecordWindow(direction) {
+  const currentPending = getCurrentUploadRecordPendingTables();
+  if (!currentPending.length) return false;
+  const windowStart = getUploadRecordWindowStart(currentPending);
+  const maxStart = Math.floor((currentPending.length - 1) / MAX_UPLOAD_RECORDS_RENDERED) * MAX_UPLOAD_RECORDS_RENDERED;
+  const nextStart =
+    direction < 0
+      ? Math.max(0, windowStart - MAX_UPLOAD_RECORDS_RENDERED)
+      : Math.min(maxStart, windowStart + MAX_UPLOAD_RECORDS_RENDERED);
+  const nextIndex = Math.min(currentPending.length - 1, nextStart);
+  const target = currentPending[nextIndex];
+  if (!target || (target.id === selectedPendingTableId && nextStart === windowStart)) return false;
+  uploadRecordWindowStart = nextStart;
+  return selectPendingTable(target.id, { scroll: true });
+}
+
 function renderUploadRecords({ save = true, normalize = true } = {}) {
   if (normalize) normalizePendingTablesInMemory({ save });
   const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
@@ -11687,25 +11724,17 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
     `;
     return;
   }
-  const selectedIndex = Math.max(0, currentPending.findIndex((table) => table.id === selectedPendingTableId));
   const shouldWindowRecords = currentPending.length > MAX_UPLOAD_RECORDS_RENDERED;
-  const windowStart = shouldWindowRecords
-    ? Math.min(
-        Math.max(selectedIndex - Math.floor(MAX_UPLOAD_RECORDS_RENDERED / 2), 0),
-        Math.max(0, currentPending.length - MAX_UPLOAD_RECORDS_RENDERED),
-      )
-    : 0;
+  const windowStart = shouldWindowRecords ? getUploadRecordWindowStart(currentPending) : 0;
   const visiblePending = shouldWindowRecords ? currentPending.slice(windowStart, windowStart + MAX_UPLOAD_RECORDS_RENDERED) : currentPending;
   const windowEnd = windowStart + visiblePending.length;
   const primaryVisibleTable = visiblePending.find((table) => table.id === selectedPendingTableId) || visiblePending[0] || currentPending[0];
   const windowNote = shouldWindowRecords
     ? `<div class="upload-record-window-note">
-        <span>为避免页面卡顿，只显示当前附近第 ${windowStart + 1}-${windowEnd} / ${currentPending.length} 张待确认表；上一页/下一页仍可切到全部页面。</span>
-        ${
-          primaryVisibleTable
-            ? `<button class="small-button" type="button" data-review-table="${escapeHtml(primaryVisibleTable.id)}">打开当前页</button>`
-            : ""
-        }
+        <span>为避免页面卡顿，只显示当前附近第 ${windowStart + 1}-${windowEnd} / ${currentPending.length} 张待确认表。</span>
+        <button class="small-button ghost" type="button" data-review-list-window="prev" ${windowStart > 0 ? "" : "disabled"}>上一组</button>
+        <button class="small-button ghost" type="button" data-review-list-window="next" ${windowEnd < currentPending.length ? "" : "disabled"}>下一组</button>
+        ${primaryVisibleTable ? `<button class="small-button" type="button" data-review-table="${escapeHtml(primaryVisibleTable.id)}">打开当前页</button>` : ""}
       </div>`
     : "";
 
@@ -11733,6 +11762,7 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
         },
       )
       .join("")}
+    ${windowNote}
   `;
 }
 
@@ -17351,6 +17381,11 @@ copyEnvTemplateButton.addEventListener("click", async () => {
 });
 
 uploadRecords.addEventListener("click", (event) => {
+  const listWindowButton = event.target.closest("[data-review-list-window]");
+  if (listWindowButton) {
+    selectUploadRecordWindow(listWindowButton.dataset.reviewListWindow === "prev" ? -1 : 1);
+    return;
+  }
   const button = event.target.closest("[data-review-table]");
   if (!button) return;
   selectPendingTable(button.dataset.reviewTable, { scroll: true });

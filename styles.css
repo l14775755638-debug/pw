@@ -1950,6 +1950,7 @@ tr.hit-row td {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 8px 10px;
   color: #48666b;
