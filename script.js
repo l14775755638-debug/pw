@@ -14171,7 +14171,7 @@ async function createQuickManualUploadedTablesInBatches(parsedTables, existingPa
   for (let start = 0; start < groups.length; start += batchSize) {
     const chunkGroups = groups.slice(start, start + batchSize);
     const chunkParsedTables = chunkGroups.flatMap((group) => group.tables);
-    const chunkTables = createUploadedTables(chunkParsedTables, {}, { skipRowColor: true, quickManualMode: true })
+    const chunkTables = createUploadedTables(chunkParsedTables, lastTicketOcrJobSnapshot?.rowColorAnalyses || {}, { quickManualMode: true })
       .filter((table) => table.rows.length)
       .filter((table) => !existingPageKeys.has(getQuickManualPageKey(sourceKey, table.sourcePage)));
     tables.push(...chunkTables);
