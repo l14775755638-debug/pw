@@ -14079,6 +14079,69 @@ async function getUploadImageRowColorAnalysesSafely(parsedTables) {
   }
 }
 
+function isCurrentUploadPdfSource() {
+  return uploadedSource?.type === "application/pdf" || uploadedSource?.name?.toLowerCase().endsWith(".pdf");
+}
+
+function getParsedPdfPageNumbers(parsedTables = []) {
+  if (!isCurrentUploadPdfSource()) return [];
+  return uniqueCleanValues(
+    mergeParsedTablesByPdfPage(parsedTables)
+      .map((table, index) => Number(table?.sourcePage || 0) || index + 1)
+      .filter((page) => Number.isInteger(page) && page > 0),
+  ).map(Number);
+}
+
+function hasUsableUploadRowColorAnalysis(analysis) {
+  return Boolean(
+    analysis &&
+      typeof analysis === "object" &&
+      Array.isArray(analysis.rows) &&
+      analysis.rows.length > 0 &&
+      analysis.rows.some((row) => row && (row.label || row.rawLabel || Number(row.confidence || 0) > 0 || Number(row.coloredRatio || 0) > 0 || Number(row.whiteRatio || 0) > 0)),
+  );
+}
+
+function getMissingUploadRowColorPages(parsedTables = [], rowColorAnalyses = {}) {
+  if (!isCurrentUploadPdfSource()) return [];
+  const analyses = rowColorAnalyses && typeof rowColorAnalyses === "object" ? rowColorAnalyses : {};
+  return getParsedPdfPageNumbers(parsedTables).filter((page) => !hasUsableUploadRowColorAnalysis(analyses[String(page)] || analyses[page]));
+}
+
+function formatMissingRowColorPages(pages = []) {
+  const normalized = pages.map((page) => Number(page)).filter((page) => Number.isInteger(page) && page > 0).sort((a, b) => a - b);
+  if (!normalized.length) return "";
+  if (normalized.length <= 12) return normalized.join("、");
+  return `${normalized.slice(0, 12).join("、")} 等 ${normalized.length} 页`;
+}
+
+async function ensureUploadPdfRowColorAnalyses(parsedTables, rowColorAnalyses = {}) {
+  if (!isCurrentUploadPdfSource()) return rowColorAnalyses || {};
+  let analyses = rowColorAnalyses && typeof rowColorAnalyses === "object" ? { ...rowColorAnalyses } : {};
+  let missingPages = getMissingUploadRowColorPages(parsedTables, analyses);
+  if (!missingPages.length) return analyses;
+
+  const jobId = activeTicketOcrJobId || lastTicketOcrJobSnapshot?.id || "";
+  if (jobId) {
+    try {
+      setUploadStatus(`正在刷新 OCR 行底色结果：PDF 第 ${formatMissingRowColorPages(missingPages)} 页...`, "loading");
+      const snapshot = await refreshTicketOcrJobSnapshot(jobId);
+      if (snapshot?.rowColorAnalyses && typeof snapshot.rowColorAnalyses === "object") {
+        analyses = { ...analyses, ...snapshot.rowColorAnalyses };
+      }
+      missingPages = getMissingUploadRowColorPages(parsedTables, analyses);
+    } catch (error) {
+      console.warn("Failed to refresh row-color analyses before generating pending tables.", error);
+    }
+  }
+
+  if (missingPages.length) {
+    const pageText = formatMissingRowColorPages(missingPages);
+    throw new Error(`PDF 第 ${pageText} 页还没有行底色检测结果。请等 OCR 进度完成后再点“生成待确认表”，或用快速人工生成逐页处理。`);
+  }
+  return analyses;
+}
+
 function setPublishUploadBusy(isBusy) {
   uploadPendingGenerationBusy = isBusy;
   publishUploadButton.disabled = isBusy;
@@ -14206,7 +14269,8 @@ async function publishUploadInner() {
     showToast("上传失败：表格内容不完整。", "error");
     return;
   }
-  const rowColorAnalyses = await getUploadImageRowColorAnalysesSafely(parsedTables);
+  let rowColorAnalyses = await getUploadImageRowColorAnalysesSafely(parsedTables);
+  rowColorAnalyses = await ensureUploadPdfRowColorAnalyses(parsedTables, rowColorAnalyses);
   const rawTables = createUploadedTables(parsedTables, rowColorAnalyses);
   const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
   const tables = rawTables.filter((table) => table.rows.length);
