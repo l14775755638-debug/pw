@@ -1011,6 +1011,7 @@ function isStandaloneLogisticsValue(value = "") {
 function isLikelyDataColumnName(column = "") {
   const text = String(column || "").trim();
   if (!text) return false;
+  if (isVenueSeatTypeColumnName(text)) return false;
   if (isLikelyDateValue(text) || isLikelyDateColumnValue(text)) return true;
   if (isSoldText(text, { strict: true }) || isLikelyStatusValue(text)) return true;
   if (isStandaloneLogisticsValue(text) || isGenericFaceValue(text)) return true;
@@ -2945,6 +2946,12 @@ function isFaceValueColumnName(column = "") {
   return ["票面", "票价", "价位", "面值", "席位", "席别", "席別", "座席", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"].some((name) =>
     text.includes(normalize(name)),
   );
+}
+
+function isVenueSeatTypeColumnName(column = "") {
+  const text = normalize(column);
+  if (!text) return false;
+  return ["席位", "席别", "席別", "座席", "席种", "票种", "seat type", "ticket type"].some((name) => text === normalize(name));
 }
 
 function findFaceValueColumnIndexes(columns = []) {
@@ -7433,6 +7440,8 @@ function updatePendingTableReviewFlags(table) {
 
 function markPendingTableReviewFlagsLightly(table) {
   if (!table) return table;
+  repairMisreadDataHeaderTable(table);
+  normalizePendingTableColumns(table);
   const risk = analyzePendingTableRiskLightly(table);
   const forcedReviewReasons = table.returnedForReview ? ["从已发布退回校对"] : [];
   table.lightReviewFlags = true;
@@ -7441,6 +7450,48 @@ function markPendingTableReviewFlagsLightly(table) {
   table.reviewReasons = [...forcedReviewReasons, ...risk.reasons.filter((reason) => !forcedReviewReasons.includes(reason))];
   table.reviewFlagsVersion = REVIEW_FLAGS_VERSION;
   return table;
+}
+
+function rowLooksRightShiftedMergedTicket(table, row) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(row)) return false;
+  const columns = table.columns || [];
+  const zoneIndex = findColumnIndex(columns, ["区域", "区", "block", "section", "구역"]);
+  const rowIndex = findSeatRowColumnIndexes(columns)[0] ?? -1;
+  const seatIndex = findSeatNumberColumnIndexes(columns)[0] ?? -1;
+  if (zoneIndex < 0 || rowIndex < 0 || seatIndex < 0) return false;
+  return (
+    isLikelyTicketStatusOrTypeValue(row[zoneIndex]) &&
+    isLikelyDateValue(row[rowIndex]) &&
+    isVenueSeatTypeValue(row[seatIndex])
+  );
+}
+
+function tableHasReviewDisplayOffset(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  if ((table.columns || []).filter((column) => isRemarkColumnName(column)).length > 1) return true;
+  return table.rows.some((row, index) => !table.userEditedRows?.[index] && rowLooksRightShiftedMergedTicket(table, row));
+}
+
+function ensureReviewTableCanonicalRows(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  const expectedVersion = `${COLUMN_NORMALIZATION_VERSION}:${REVIEW_FLAGS_VERSION}`;
+  const needsRepair =
+    table._reviewDisplayRepairVersion !== expectedVersion ||
+    Number(table._columnNormalizationVersion || 0) !== COLUMN_NORMALIZATION_VERSION ||
+    tableHasReviewDisplayOffset(table) ||
+    (Number(table.sourcePage || 0) > 0 && table._forceCanonicalDisplay !== true);
+  if (!needsRepair) return false;
+  const beforeSignature = getPendingTableRuntimeSignature(table);
+  delete table._normalizedColumnsSignature;
+  delete table._columnNormalizationVersion;
+  repairMisreadDataHeaderTable(table);
+  normalizePendingTableColumns(table);
+  ensurePendingTableSourceRowIndexes(table);
+  if (Number(table.sourcePage || 0) > 0) forceCanonicalOriginalDisplay(table);
+  table._reviewDisplayRepairVersion = expectedVersion;
+  const afterSignature = getPendingTableRuntimeSignature(table);
+  if (beforeSignature !== afterSignature) table._columnRepairChanged = true;
+  return beforeSignature !== afterSignature;
 }
 
 function getCachedMissingPriceReviewCount(table) {
@@ -9823,6 +9874,13 @@ function valueMatchesCurrentSeatmapZone(value) {
   return Boolean(currentEvent?.zones?.some((zone) => zoneTokenMatches(value, zone)));
 }
 
+function formatVenueSeatTypeDisplayValue(value) {
+  return String(value || "")
+    .trim()
+    .replace(/Floor\s*([RS])\s*席?/i, "Floor $1席")
+    .replace(/\s+/g, " ");
+}
+
 function normalizeOriginalDisplayFields(ticket, field, { preserveOriginal = true } = {}) {
   const label = String(field.label || "").trim();
   const value = String(field.value || "").trim();
@@ -9858,6 +9916,9 @@ function normalizeOriginalDisplayFields(ticket, field, { preserveOriginal = true
     return [{ label: "售价", value: price }];
   }
 
+  if (!preserveOriginal && isFaceValueColumnName(label) && isVenueSeatTypeValue(value)) {
+    return [{ label: "席位", value: formatVenueSeatTypeDisplayValue(value) }];
+  }
   const parsedComposite = parseCompositeSeatInfo(value);
   if (isFaceValueColumnName(label) && isGenericFaceValue(value) && !parsedComposite) {
     return [{ label: preserveOriginal ? label : "票面", value }];
@@ -9935,6 +9996,7 @@ function getCanonicalDisplayFieldLabel(label = "") {
   const normalized = normalize(text);
   if (!normalized) return "";
   if (hasHeaderHint(text, ["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"])) return "日期";
+  if (isVenueSeatTypeColumnName(text)) return "席位";
   if (isFaceValueColumnName(text)) return "票面";
   if (/(区域|^区$|區|block|section|zone|area|구역|구)/i.test(text)) return "区域";
   if (isSeatRowColumnName(text) || /^(排|排数|行|行数|row|열)$/i.test(text)) return "排";
@@ -12241,6 +12303,8 @@ function renderReviewEditPanelHtml(table, rowIndex) {
 }
 
 function renderStandardReviewRowCard(table, rowIndex, aiDecisionByRow = null) {
+  if (!table) return "";
+  ensureReviewTableCanonicalRows(table);
   const currentRow = table?.rows?.[rowIndex];
   if (!table || !currentRow) return "";
   const aiDecision = aiDecisionByRow?.get?.(rowIndex + 1) || null;
