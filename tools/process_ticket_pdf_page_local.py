@@ -91,6 +91,11 @@ def looks_like_table_header(text):
     return header_hits >= 3
 
 
+def has_ascii_letter_and_digit(value):
+    text = str(value or "")
+    return any(("a" <= ch.lower() <= "z") for ch in text) and any(ch.isdigit() for ch in text)
+
+
 def looks_like_ticket_data_line(text):
     raw = str(text or "").strip()
     if not raw or looks_like_table_header(raw):
@@ -102,10 +107,18 @@ def looks_like_ticket_data_line(text):
     has_price_or_sold_mask = any(cell in {"****", "大大大大", "*****"} for cell in cells) or any(
         any(ch.isdigit() for ch in cell) and 3 <= sum(1 for ch in cell if ch.isdigit()) <= 6 for cell in cells
     )
-    has_ticket_shape = any(any(ch.isalpha() for ch in cell) and any(ch.isdigit() for ch in cell) for cell in cells) or any(
-        "排" in cell or "区" in cell or "层" in cell for cell in cells
-    )
+    has_ticket_shape = any(has_ascii_letter_and_digit(cell) for cell in cells) or any("排" in cell or "区" in cell or "层" in cell for cell in cells)
     has_date = "月" in joined or "/" in joined or "." in joined
+    compact_ticket_shape = bool(
+        has_ticket_shape
+        and len(cells) >= 2
+        and (
+            any("区" in cell or "排" in cell or "层" in cell for cell in cells)
+            or any(has_ascii_letter_and_digit(cell) for cell in cells)
+        )
+    )
+    if compact_ticket_shape:
+        return True
     return bool(has_price_or_sold_mask and (has_ticket_shape or has_date or len(cells) >= 4))
 
 

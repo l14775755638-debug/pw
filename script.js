@@ -9024,7 +9024,7 @@ function getVisibleTicketSalePriceValue(ticket) {
   const fields = getOriginalTicketFields(ticket, { preserveOriginal: false });
   return (
     fields
-      .map((field) => (isSalePriceColumnName(field.label) ? extractSalePriceText(field.value, { minPrice: 100 }) || field.value : ""))
+      .map((field) => (isSalePriceColumnName(field.label) ? extractSalePriceText(field.value, { minPrice: 100 }) : ""))
       .find(Boolean) ||
     getExplicitCurrencySalePriceFromFields(fields) ||
     ""
@@ -9117,7 +9117,8 @@ function hasTicketSalePrice(ticket) {
 function hasTicketSalePriceUncached(ticket) {
   const value = String(getVisibleTicketSalePriceValue(ticket) || "").trim();
   const missingLike = !value || value === "/" || value === "-" || /^无$/i.test(value);
-  if (!missingLike && !isSoldText(value, { strict: true }) && extractNumber(value) !== null) return true;
+  const priceText = extractSalePriceText(value, { minPrice: 100 });
+  if (!missingLike && !isSoldText(value, { strict: true }) && priceText && extractNumber(priceText) !== null) return true;
   return Boolean(getExplicitCurrencySalePriceFromTicket(ticket));
 }
 
@@ -9144,6 +9145,19 @@ function isNonTicketPlaceholderRow(ticket) {
   return false;
 }
 
+function hasTicketIdentityForColorDecision(ticket) {
+  if (!ticket?.table || !Array.isArray(ticket.row)) return false;
+  const rowText = getTicketRowPlainText(ticket);
+  if (!rowText || isPlaceholderOrSeparatorText(rowText)) return false;
+  if (hasTicketSalePrice(ticket)) return true;
+  const zoneValue = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["区域", "区", "位置", "票面", "zone", "area", "section"]);
+  const rowValue = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["排", "排数", "行", "row"]);
+  const seatValue = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["座位号", "座位", "号段", "seat"]);
+  if (zoneValue && (rowValue || seatValue)) return true;
+  if (findCompositeSeatInfoInTicket(ticket)) return true;
+  return /[A-Z]{1,3}\d{0,4}\s*(?:区|區)?[^，,\n]*(?:\d+\s*排|[A-Z]\s*排|row)/i.test(rowText);
+}
+
 function isEffectiveTicketRowForColorDecision(ticket) {
   const table = ticket?.table;
   const rowIndex = Number(ticket?.index);
@@ -9152,11 +9166,11 @@ function isEffectiveTicketRowForColorDecision(ticket) {
     const cacheKey = `${rowIndex}:${(table.columns || []).length}:${ticket.row.join("\u0001")}`;
     const cached = table._rowColorEffectiveTicketCache[rowIndex];
     if (cached?.key === cacheKey) return cached.value;
-    const value = hasTicketSalePrice(ticket) && !isNonTicketPlaceholderRow(ticket);
+    const value = hasTicketIdentityForColorDecision(ticket);
     table._rowColorEffectiveTicketCache[rowIndex] = { key: cacheKey, value };
     return value;
   }
-  return hasTicketSalePrice(ticket) && !isNonTicketPlaceholderRow(ticket);
+  return hasTicketIdentityForColorDecision(ticket);
 }
 
 function getFirstNonEmptyColumnValue(table, row, names) {
