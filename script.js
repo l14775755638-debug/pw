@@ -5,13 +5,14 @@ const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 4;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
+const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = false;
 const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 180;
 const MAX_ANCHOR_ROWS_PER_TABLE = 260;
 const MAX_ANCHOR_BATCH_PAGES_PER_REQUEST = 4;
 const MAX_REVIEW_ROWS_RENDERED = 240;
 const MAX_UPLOAD_RECORDS_RENDERED = 36;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
-const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = true;
+const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
 const DATE_COLUMN_NAMES = ["日期", "演出日期", "门票时间", "票期", "场次日期", "date", "day", "일자"];
 const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
@@ -13724,6 +13725,10 @@ function getUploadRowColorSourcePayload() {
 
 async function getUploadPdfRowColorAnalyses(parsedTables) {
   const baseAnalyses = { ...(lastTicketOcrJobSnapshot?.rowColorAnalyses || {}) };
+  if (!AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD) {
+    setUploadStatus("已跳过文字锚点二次定位；使用本地 OCR 逐页返回的 OpenCV 底色参考生成确认表。", "loading");
+    return baseAnalyses;
+  }
   const sourcePayload = getUploadRowColorSourcePayload();
   if (!sourcePayload) return baseAnalyses;
   const uploadTables = mergeParsedTablesByPdfPage(parsedTables);
