@@ -11491,6 +11491,7 @@ function getTicketLinkedSeatRemark(ticket) {
   if (!ticket?.table || !Array.isArray(ticket.row)) return "";
   const table = ticket.table;
   const row = ticket.row;
+  const sourceIndex = getRowSourceIndexForMergedContext(table, ticket.index);
   const sourceRows = [
     { columns: table.columns || [], row },
     {
@@ -11499,7 +11500,7 @@ function getTicketLinkedSeatRemark(ticket) {
     },
     {
       columns: table.sourceTextColumns || table.originalColumns || [],
-      row: Array.isArray(table.sourceTextRows) && table.sourceTextRows[ticket.index] ? table.sourceTextRows[ticket.index] : null,
+      row: Array.isArray(table.sourceTextRows) && table.sourceTextRows[sourceIndex] ? table.sourceTextRows[sourceIndex] : null,
     },
   ].filter((source) => Array.isArray(source.columns) && Array.isArray(source.row));
   const noteNames = [
@@ -11546,6 +11547,71 @@ function getLinkedDuplicateTicketKey(ticket) {
   const salePrice = getTicketSalePriceValue(ticket);
   if (![date, zone, rowValue, seat, salePrice].every((value) => String(value || "").trim())) return "";
   return [date, face, floor, zone, rowValue, seat, salePrice].map(normalizeLinkedDuplicateKeyValue).join("|");
+}
+
+function getLinkedRemarkColumnIndexes(columns = []) {
+  return findColumnIndexes(columns, [
+    "备注",
+    "remark",
+    "note",
+    "说明",
+    "座位情况",
+    "座位状态",
+    "座席情况",
+    "seat condition",
+    "seat status",
+    "连坐",
+    "连坐数量",
+    "연석",
+  ]);
+}
+
+function getLinkedRemarkCells(row = []) {
+  return (row || [])
+    .map((value, index) => ({ value: String(value || "").trim(), index }))
+    .filter(({ value }) => extractLinkedSeatRemark(value));
+}
+
+function isBlankMergedPeerCellValue(value) {
+  const text = String(value || "").trim();
+  return !text || text === "/" || isMergedCellArtifact(text);
+}
+
+function getSourceLinkedDuplicateContext(table, row, rowIndex) {
+  const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+  const sourceColumns = Array.isArray(table?.sourceTextColumns) && table.sourceTextColumns.length ? table.sourceTextColumns : table.originalColumns;
+  const sourceRows = Array.isArray(table?.sourceTextRows) && table.sourceTextRows.length ? table.sourceTextRows : table.originalRows;
+  const hasSourceRow = Number.isInteger(sourceIndex) && Array.isArray(sourceRows?.[sourceIndex]);
+  const contextTable = hasSourceRow
+    ? {
+        ...table,
+        columns: sourceColumns || table.columns || [],
+        rows: sourceRows,
+        originalColumns: sourceColumns || table.columns || [],
+        originalRows: sourceRows,
+        sourceTextColumns: sourceColumns || table.columns || [],
+        sourceTextRows: sourceRows,
+      }
+    : table;
+  const contextRow = hasSourceRow ? sourceRows[sourceIndex] : row;
+  return {
+    sourceIndex,
+    key: getLinkedDuplicateTicketKey({ table: contextTable, row: contextRow, index: hasSourceRow ? sourceIndex : rowIndex }),
+    row: contextRow,
+    linkedCells: getLinkedRemarkCells(contextRow),
+  };
+}
+
+function getMergedLinkedRemarkBetweenRows(table, leftRow, leftIndex, rightRow, rightIndex) {
+  const left = getSourceLinkedDuplicateContext(table, leftRow, leftIndex);
+  const right = getSourceLinkedDuplicateContext(table, rightRow, rightIndex);
+  if (!left.key || left.key !== right.key) return "";
+  if (!Number.isInteger(left.sourceIndex) || !Number.isInteger(right.sourceIndex) || Math.abs(left.sourceIndex - right.sourceIndex) !== 1) return "";
+  const leftSharedCell = left.linkedCells.find(({ index }) => isBlankMergedPeerCellValue(right.row?.[index]));
+  if (leftSharedCell) return leftSharedCell.value;
+  const rightSharedCell = right.linkedCells.find(({ index }) => isBlankMergedPeerCellValue(left.row?.[index]));
+  if (rightSharedCell) return rightSharedCell.value;
+  return "";
 }
 
 function mergeLinkedRemarkIntoTableRow(table, rowIndex, remark) {
@@ -11599,12 +11665,18 @@ function repairCollapsedLinkedRemarkFromSourceRows(table) {
   };
   const linkedRemarkByKey = new Map();
   sourceRows.forEach((sourceRow, sourceIndex) => {
-    if (!Array.isArray(sourceRow)) return;
-    const ticket = { table: sourceTable, row: sourceRow, index: sourceIndex };
-    const key = getLinkedDuplicateTicketKey(ticket);
-    if (!key || linkedRemarkByKey.has(key)) return;
-    const remark = getTicketLinkedSeatRemark(ticket);
-    if (remark) linkedRemarkByKey.set(key, remark);
+    if (!Array.isArray(sourceRow) || sourceIndex <= 0) return;
+    const previousRow = sourceRows[sourceIndex - 1];
+    if (!Array.isArray(previousRow)) return;
+    const remark = getMergedLinkedRemarkBetweenRows(sourceTable, previousRow, sourceIndex - 1, sourceRow, sourceIndex);
+    if (!remark) return;
+    const keys = [
+      getLinkedDuplicateTicketKey({ table: sourceTable, row: previousRow, index: sourceIndex - 1 }),
+      getLinkedDuplicateTicketKey({ table: sourceTable, row: sourceRow, index: sourceIndex }),
+    ].filter(Boolean);
+    keys.forEach((key) => {
+      if (!linkedRemarkByKey.has(key)) linkedRemarkByKey.set(key, remark);
+    });
   });
   if (!linkedRemarkByKey.size) return false;
   let changed = false;
@@ -11626,16 +11698,15 @@ function collapseLinkedDuplicateRowsFromTable(table) {
     const ticket = { table, row, index: rowIndex };
     const key = getLinkedDuplicateTicketKey(ticket);
     if (!key) return;
-    const linkedRemark = getTicketLinkedSeatRemark(ticket);
     const previous = seen.get(key);
     if (!previous) {
-      seen.set(key, { rowIndex, linkedRemark });
+      seen.set(key, { rowIndex });
       return;
     }
-    if (!previous.linkedRemark && !linkedRemark) return;
-    const mergedRemark = previous.linkedRemark || linkedRemark;
+    const previousRow = table.rows[previous.rowIndex];
+    const mergedRemark = getMergedLinkedRemarkBetweenRows(table, previousRow, previous.rowIndex, row, rowIndex);
+    if (!mergedRemark) return;
     if (mergedRemark && mergeLinkedRemarkIntoTableRow(table, previous.rowIndex, mergedRemark)) changed = true;
-    if (!previous.linkedRemark && linkedRemark) previous.linkedRemark = linkedRemark;
     removeIndexes.add(rowIndex);
   });
   const removed = removeRowsFromTable(table, (_row, rowIndex) => removeIndexes.has(rowIndex));
@@ -11655,7 +11726,6 @@ function collapseLinkedDuplicateTicketsForDisplay(tickets = []) {
   const positions = new Map();
   tickets.forEach((ticket) => {
     const key = getLinkedDuplicateTicketKey(ticket);
-    const linkedRemark = getTicketLinkedSeatRemark(ticket);
     if (!key) {
       kept.push(ticket);
       return;
@@ -11667,11 +11737,12 @@ function collapseLinkedDuplicateTicketsForDisplay(tickets = []) {
       return;
     }
     const existing = kept[existingIndex];
-    const existingRemark = getTicketLinkedSeatRemark(existing);
-    if (existingRemark || linkedRemark) {
-      if (!existingRemark && linkedRemark) kept[existingIndex] = ticket;
+    if (existing.table !== ticket.table) {
+      kept.push(ticket);
       return;
     }
+    const mergedRemark = getMergedLinkedRemarkBetweenRows(existing.table, existing.row, existing.index, ticket.row, ticket.index);
+    if (mergedRemark) return;
     kept.push(ticket);
   });
   return kept;
