@@ -11497,6 +11497,10 @@ function getTicketLinkedSeatRemark(ticket) {
       columns: table.originalColumns || [],
       row: Array.isArray(table.originalRows) && table.originalRows[ticket.index] ? table.originalRows[ticket.index] : null,
     },
+    {
+      columns: table.sourceTextColumns || table.originalColumns || [],
+      row: Array.isArray(table.sourceTextRows) && table.sourceTextRows[ticket.index] ? table.sourceTextRows[ticket.index] : null,
+    },
   ].filter((source) => Array.isArray(source.columns) && Array.isArray(source.row));
   const noteNames = [
     "备注",
@@ -11579,6 +11583,39 @@ function moveLinkedSeatConditionValuesToRemark(table) {
   return changed;
 }
 
+function repairCollapsedLinkedRemarkFromSourceRows(table) {
+  if (!table?.rows?.length) return false;
+  const sourceRows = Array.isArray(table.sourceTextRows) && table.sourceTextRows.length > table.rows.length ? table.sourceTextRows : table.originalRows;
+  const sourceColumns = Array.isArray(table.sourceTextColumns) && table.sourceTextColumns.length ? table.sourceTextColumns : table.originalColumns;
+  if (!Array.isArray(sourceRows) || !Array.isArray(sourceColumns) || sourceRows.length <= table.rows.length) return false;
+  const sourceTable = {
+    ...table,
+    columns: sourceColumns,
+    rows: sourceRows,
+    originalColumns: sourceColumns,
+    originalRows: sourceRows,
+    sourceTextColumns: sourceColumns,
+    sourceTextRows: sourceRows,
+  };
+  const linkedRemarkByKey = new Map();
+  sourceRows.forEach((sourceRow, sourceIndex) => {
+    if (!Array.isArray(sourceRow)) return;
+    const ticket = { table: sourceTable, row: sourceRow, index: sourceIndex };
+    const key = getLinkedDuplicateTicketKey(ticket);
+    if (!key || linkedRemarkByKey.has(key)) return;
+    const remark = getTicketLinkedSeatRemark(ticket);
+    if (remark) linkedRemarkByKey.set(key, remark);
+  });
+  if (!linkedRemarkByKey.size) return false;
+  let changed = false;
+  table.rows.forEach((row, rowIndex) => {
+    const key = getLinkedDuplicateTicketKey({ table, row, index: rowIndex });
+    const remark = key ? linkedRemarkByKey.get(key) : "";
+    if (remark && mergeLinkedRemarkIntoTableRow(table, rowIndex, remark)) changed = true;
+  });
+  return changed;
+}
+
 function collapseLinkedDuplicateRowsFromTable(table) {
   if (!table?.rows?.length) return 0;
   const seen = new Map();
@@ -11602,6 +11639,7 @@ function collapseLinkedDuplicateRowsFromTable(table) {
     removeIndexes.add(rowIndex);
   });
   const removed = removeRowsFromTable(table, (_row, rowIndex) => removeIndexes.has(rowIndex));
+  if (repairCollapsedLinkedRemarkFromSourceRows(table)) changed = true;
   if (moveLinkedSeatConditionValuesToRemark(table)) changed = true;
   if (removed || changed) {
     delete table._soldTicketCache;
@@ -11683,20 +11721,23 @@ function removeSoldRowsFromTable(table) {
         isNonTicketFooterRow(table, row),
   );
   const collapsedLinkedRows = collapseLinkedDuplicateRowsFromTable(table);
+  const repairedLinkedRemarks = repairCollapsedLinkedRemarkFromSourceRows(table);
   const movedLinkedRemarks = moveLinkedSeatConditionValuesToRemark(table);
-  if (removed || collapsedLinkedRows || movedLinkedRemarks) {
+  if (removed || collapsedLinkedRows || repairedLinkedRemarks || movedLinkedRemarks) {
     let changedAfterRemove = false;
     if (repairRowsFromBoundSourceText(table)) changedAfterRemove = true;
     if (repairMergedContextFromRowColorSourceAnchors(table)) changedAfterRemove = true;
     if (repairMergedDateBlocks(table, mergedDateAnchors)) changedAfterRemove = true;
     if (repairMergedFaceBlocks(table)) changedAfterRemove = true;
     if (changedAfterRemove) normalizePendingTableColumns(table);
+    repairCollapsedLinkedRemarkFromSourceRows(table);
     moveLinkedSeatConditionValuesToRemark(table);
     if (table.lightReviewFlags) {
       markPendingTableReviewFlagsLightly(table);
     } else {
       updatePendingTableReviewFlags(table);
     }
+    repairCollapsedLinkedRemarkFromSourceRows(table);
     moveLinkedSeatConditionValuesToRemark(table);
   }
   return removed;
