@@ -74,7 +74,7 @@ const paddleCpuThreads = Math.max(
   1,
   Math.min(readPositiveIntegerEnv("PADDLE_CPU_THREADS", Math.max(1, Math.floor(serverCpuCount / batchOcrConcurrency))), serverCpuCount),
 );
-const rowColorLogicVersion = 95;
+const rowColorLogicVersion = 111;
 const maxAnchorRowsPerTable = Math.max(40, readPositiveIntegerEnv("TICKET_ANCHOR_MAX_ROWS_PER_TABLE", 260));
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
@@ -796,28 +796,253 @@ function createPendingGenerationVmContext(payload) {
   return context;
 }
 
-function generatePendingTablesWithClientRules(payload) {
-  const scriptPath = path.join(root, "script.js");
-  const clientScript = fs.readFileSync(scriptPath, "utf8");
-  const context = createPendingGenerationVmContext(payload);
-  vm.runInContext(clientScript, context, { filename: "script.js", timeout: 60000 });
-  const resultText = vm.runInContext(
-    `
-      currentEvent = serverPayload.currentEvent || currentEvent;
-      uploadedSource = serverPayload.uploadedSource || {};
-      uploadTableTitle.value = serverPayload.tableTitle || uploadedSource.name || "";
-      uploadTableText.value = serverPayload.recognizedText || "";
-      lastTicketOcrJobSnapshot = { rowColorAnalyses: serverPayload.rowColorAnalyses || {} };
-      const parsedTables = splitRecognizedTables(uploadTableText.value);
-      const rawTables = createUploadedTables(parsedTables, serverPayload.rowColorAnalyses || {}, serverPayload.options || {});
-      const removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
-      const tables = rawTables.filter((table) => table.rows.length);
-      JSON.stringify({ parsedTableCount: parsedTables.length, tables, removedSoldRows });
-    `,
-    context,
-    { filename: "pending-generate.vm", timeout: 120000 },
+let pendingGenerationClientScriptCache = { mtimeMs: 0, source: "" };
+const PENDING_GENERATION_VM_TIMEOUT_MS = 180000;
+const PENDING_GENERATION_BATCH_TIMEOUT_MS = 240000;
+
+function findJavascriptArrayEnd(source, startIndex) {
+  if (source[startIndex] !== "[") return -1;
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+  for (let index = startIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "[") depth += 1;
+    if (char === "]") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function replaceConstArrayLiteral(source, name, replacement = "[]") {
+  const declaration = `const ${name} =`;
+  const startIndex = source.indexOf(declaration);
+  if (startIndex < 0) return source;
+  const arrayStart = source.indexOf("[", startIndex + declaration.length);
+  if (arrayStart < 0) return source;
+  const arrayEnd = findJavascriptArrayEnd(source, arrayStart);
+  if (arrayEnd < 0) return source;
+  let after = arrayEnd + 1;
+  while (/\s/.test(source[after] || "")) after += 1;
+  if (source[after] === ";") after += 1;
+  return `${source.slice(0, startIndex)}${declaration} ${replacement};${source.slice(after)}`;
+}
+
+function preparePendingGenerationClientScript(rawScript) {
+  const startupMarker = "\nmodeButtons.forEach((button)";
+  const startupIndex = rawScript.indexOf(startupMarker);
+  let source = startupIndex > 0 ? `${rawScript.slice(0, startupIndex)}\n` : rawScript;
+  [
+    "LAIZI_SEATMAP_TEMPLATE_ZONES",
+    "ITZY_VENETIAN_TEMPLATE_ZONES",
+    "WEEKND_GOYANG_TEMPLATE_ZONES",
+    "EXO_ENCORE_TEMPLATE_ZONES",
+    "events",
+  ].forEach((name) => {
+    source = replaceConstArrayLiteral(source, name);
+  });
+  source = source.replace(
+    "let currentEvent = events[0];",
+    'let currentEvent = { id: "server-event", name: "服务器生成", dateOptions: [], zones: [], tables: [] };',
   );
-  return JSON.parse(resultText);
+  return source;
+}
+
+function getPendingGenerationClientScript() {
+  const scriptPath = path.join(root, "script.js");
+  const stat = fs.statSync(scriptPath);
+  if (pendingGenerationClientScriptCache.source && pendingGenerationClientScriptCache.mtimeMs === stat.mtimeMs) {
+    return pendingGenerationClientScriptCache.source;
+  }
+  const rawScript = fs.readFileSync(scriptPath, "utf8");
+  const source = preparePendingGenerationClientScript(rawScript);
+  pendingGenerationClientScriptCache = { mtimeMs: stat.mtimeMs, source };
+  return source;
+}
+
+function formatPendingGenerationErrorMessage(error) {
+  const raw = String(error?.message || error?.stderr || "");
+  if (error?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT" || /Script execution timed out/i.test(raw)) {
+    const stageText = error?.stage ? `（${error.stage}${error.pageRange ? ` ${error.pageRange}` : ""}）` : "";
+    return `服务器生成待确认表超时${stageText}：OCR 已保留，请点“用已识别页生成确认表”重试，或先用较少页数测试。`;
+  }
+  return formatErrorMessage(error);
+}
+
+function decoratePendingGenerationError(error, extra = {}) {
+  if (error && typeof error === "object") {
+    Object.assign(error, extra);
+    return error;
+  }
+  return Object.assign(new Error(String(error || "服务器生成待确认表失败。")), extra);
+}
+
+function countRecognizedPageMarkers(text = "") {
+  const pages = new Set();
+  String(text || "")
+    .split(/\r?\n/)
+    .forEach((line) => {
+      const value = String(line || "").trim();
+      if (!value) return;
+      const match = value.match(/(?:PDF\s*)?第\s*(\d{1,4})\s*页/i) || value.match(/\bpage\s*(\d{1,4})\b/i);
+      if (!match) return;
+      const hasPdfCue = /PDF/i.test(value);
+      const isBarePageMarker = /^[-—_\s·•|]*第\s*\d{1,4}\s*页[-—_\s·•|]*$/i.test(value);
+      const isDashPdfMarker = /^[-—_\s·•|]*PDF\s*第\s*\d{1,4}\s*页[-—_\s·•|]*$/i.test(value);
+      if (!hasPdfCue && !isBarePageMarker && !isDashPdfMarker) return;
+      const page = Number(match[1] || 0);
+      if (Number.isInteger(page) && page > 0) pages.add(page);
+    });
+  return pages.size;
+}
+
+function generatePendingTablesWithClientRules(payload) {
+  const clientScript = getPendingGenerationClientScript();
+  const context = createPendingGenerationVmContext(payload);
+  const timingStartedAt = Date.now();
+  const timings = {};
+  try {
+    vm.runInContext(clientScript, context, { filename: "script.js", timeout: PENDING_GENERATION_VM_TIMEOUT_MS });
+  } catch (error) {
+    throw decoratePendingGenerationError(error, { stage: "加载生成规则" });
+  }
+  timings.loadRulesMs = Date.now() - timingStartedAt;
+  let setupText = "";
+  try {
+    setupText = vm.runInContext(
+      `
+        currentEvent = {
+          id: "server-event",
+          name: "服务器生成",
+          dateOptions: [],
+          zones: [],
+          tables: [],
+          ...(serverPayload.currentEvent || {}),
+        };
+        if (!Array.isArray(currentEvent.dateOptions)) currentEvent.dateOptions = [];
+        if (!Array.isArray(currentEvent.zones)) currentEvent.zones = [];
+        if (!Array.isArray(currentEvent.tables)) currentEvent.tables = [];
+        uploadedSource = serverPayload.uploadedSource || {};
+        uploadTableTitle.value = serverPayload.tableTitle || uploadedSource.name || "";
+        uploadTableText.value = serverPayload.recognizedText || "";
+        lastTicketOcrJobSnapshot = { rowColorAnalyses: serverPayload.rowColorAnalyses || {} };
+        const parsedTables = splitRecognizedTables(uploadTableText.value);
+        const serverPendingGroups = groupParsedTablesByPage(parsedTables);
+        JSON.stringify({ parsedTableCount: parsedTables.length, groupCount: serverPendingGroups.length });
+      `,
+      context,
+      { filename: "pending-generate.vm", timeout: PENDING_GENERATION_VM_TIMEOUT_MS },
+    );
+  } catch (error) {
+    throw decoratePendingGenerationError(error, { stage: "解析 OCR 文本" });
+  }
+  timings.parseTablesMs = Date.now() - timingStartedAt - timings.loadRulesMs;
+  const setup = JSON.parse(setupText);
+  // Keep server generation deterministic for large OCR/PDF jobs: one PDF page per VM
+  // batch. Larger batches are faster when everything is perfect, but a single
+  // expensive page can time out the whole request and make the browser think the
+  // OCR/color logic failed.
+  const batchSize = 1;
+  const tables = [];
+  let removedSoldRows = 0;
+  const batchTimings = [];
+  const failedBatches = [];
+  for (let start = 0; start < setup.groupCount; start += batchSize) {
+    const batchStartedAt = Date.now();
+    context.serverPendingBatchStart = start;
+    context.serverPendingBatchEnd = Math.min(start + batchSize, setup.groupCount);
+    try {
+      const batchText = vm.runInContext(
+        `
+          (function () {
+            var chunkParsedTables = serverPendingGroups
+              .slice(serverPendingBatchStart, serverPendingBatchEnd)
+              .flatMap((group) => group.tables);
+            var createOptions = {
+              ...(serverPayload.options || {}),
+              totalPageCount: serverPendingGroups.length,
+              forceLightReviewFlags: serverPendingGroups.length > 12 || (serverPayload.options || {}).forceLightReviewFlags === true,
+            };
+            var effectiveRowColorAnalyses = serverPayload.rowColorAnalyses || {};
+            var analysisKeys = Object.keys(effectiveRowColorAnalyses).filter((key) => effectiveRowColorAnalyses[key]);
+            if (analysisKeys.length === 1) {
+              var onlyAnalysis = effectiveRowColorAnalyses[analysisKeys[0]];
+              var parsedPages = Array.from(new Set(
+                chunkParsedTables
+                  .map((table, index) => Number(table && table.sourcePage || 0) || index + 1)
+                  .filter((page) => Number.isInteger(page) && page > 0)
+              ));
+              var optionPage = Number((serverPayload.options || {}).sourcePage || (serverPayload.options || {}).page || 0) || 0;
+              effectiveRowColorAnalyses = { ...effectiveRowColorAnalyses };
+              if (parsedPages.length === 1 && !effectiveRowColorAnalyses[String(parsedPages[0])]) {
+                effectiveRowColorAnalyses[String(parsedPages[0])] = onlyAnalysis;
+              }
+              if (optionPage && !effectiveRowColorAnalyses[String(optionPage)]) {
+                effectiveRowColorAnalyses[String(optionPage)] = onlyAnalysis;
+              }
+              if (parsedPages.length === 1 && parsedPages[0] === 1 && !effectiveRowColorAnalyses["1"]) {
+                effectiveRowColorAnalyses["1"] = onlyAnalysis;
+              }
+            }
+            var rawTables = createUploadedTables(chunkParsedTables, effectiveRowColorAnalyses, createOptions);
+            rawTables = (Array.isArray(rawTables) ? rawTables : []).filter((table) => table && Array.isArray(table.rows));
+            var removedSoldRows = rawTables.reduce((count, table) => count + removeSoldRowsFromTable(table), 0);
+            var tables = rawTables.filter((table) => Array.isArray(table.rows) && table.rows.length);
+            return JSON.stringify({ tables, removedSoldRows });
+          })();
+        `,
+        context,
+        { filename: "pending-generate-batch.vm", timeout: PENDING_GENERATION_BATCH_TIMEOUT_MS },
+      );
+      const batch = JSON.parse(batchText);
+      batchTimings.push({
+        start,
+        end: context.serverPendingBatchEnd,
+        durationMs: Date.now() - batchStartedAt,
+        tableCount: Array.isArray(batch.tables) ? batch.tables.length : 0,
+      });
+      removedSoldRows += Number(batch.removedSoldRows || 0);
+      if (Array.isArray(batch.tables)) tables.push(...batch.tables);
+    } catch (error) {
+      const pageRange = `${start + 1}-${context.serverPendingBatchEnd}`;
+      const message = formatPendingGenerationErrorMessage(decoratePendingGenerationError(error, { stage: "生成单页确认表", pageRange }));
+      console.error("Pending table generation batch failed", { start, end: context.serverPendingBatchEnd, message, stack: error?.stack || "" });
+      failedBatches.push({
+        start,
+        end: context.serverPendingBatchEnd,
+        pageRange,
+        message,
+      });
+    }
+  }
+  if (!tables.length && failedBatches.length) {
+    const firstFailure = failedBatches[0];
+    const error = new Error(firstFailure.message || "服务器生成待确认表失败。");
+    error.stage = "生成单页确认表";
+    error.pageRange = firstFailure.pageRange;
+    throw error;
+  }
+  timings.batchMs = batchTimings.reduce((sum, item) => sum + item.durationMs, 0);
+  timings.totalMs = Date.now() - timingStartedAt;
+  return { parsedTableCount: setup.parsedTableCount, tables, removedSoldRows, failedBatches, timings: { ...timings, batches: batchTimings } };
 }
 
 async function generatePendingTables(request, response) {
@@ -832,10 +1057,25 @@ async function generatePendingTables(request, response) {
     sendJson(response, 400, { error: "Missing source", message: "缺少上传文件信息，无法生成待确认表。" });
     return;
   }
+  const recognizedPageCount = countRecognizedPageMarkers(recognizedText);
+  if (recognizedPageCount > 8 && payload.options?.allowLargeServerBatch !== true) {
+    sendJson(response, 413, {
+      error: "OCR text is too large for one request",
+      message: `这次 OCR 识别到 ${recognizedPageCount} 页，不能一次性生成。请点“用已识别页生成确认表”，系统会自动逐页请求服务器，避免超时。`,
+      recognizedPageCount,
+    });
+    return;
+  }
+  const uploadedSourceUrl = String(payload.uploadedSource.url || "");
+  const uploadedSource = {
+    name: String(payload.uploadedSource.name || ""),
+    type: String(payload.uploadedSource.type || ""),
+    url: uploadedSourceUrl.startsWith("uploads/") ? uploadedSourceUrl : "",
+  };
   const startedAt = Date.now();
   const result = generatePendingTablesWithClientRules({
     recognizedText,
-    uploadedSource: payload.uploadedSource,
+    uploadedSource,
     currentEvent: payload.currentEvent || {},
     tableTitle: payload.tableTitle || "",
     rowColorAnalyses: payload.rowColorAnalyses || {},
@@ -1471,7 +1711,7 @@ async function analyzeTicketRowColorsFromPdfPath(pdfPath, page, expectedRows) {
   if (!fs.existsSync(pdfRowColorScriptPath)) {
     return { source: "pdf_vector", reliable: false, error: "PDF 原始颜色脚本不存在", rows: [] };
   }
-  const python = fs.existsSync(depsPythonPath) ? depsPythonPath : pythonPath;
+  const python = pythonPath;
   try {
     const { stdout } = await runFile(python, [
       pdfRowColorScriptPath,
@@ -2003,13 +2243,16 @@ function publicTicketOcrJob(job, options = {}) {
   const includeDetails = options.includeDetails !== false;
   const text = includeDetails ? getTicketOcrText(job) : "";
   const failedPages = job.errors.map((item) => item.page);
-  const aiColorErrors = job.results
-    .filter((item) => item.rowColorAnalysis?.aiFallbackError)
-    .map((item) => ({
-      page: item.page,
-      message: item.rowColorAnalysis.aiFallbackError,
-    }))
-    .sort((a, b) => a.page - b.page);
+  const exposeLegacyAiRowColorStatus = ocrRowColorDuringScanEnabled === true;
+  const aiColorErrors = exposeLegacyAiRowColorStatus
+    ? job.results
+        .filter((item) => item.rowColorAnalysis?.aiFallbackError)
+        .map((item) => ({
+          page: item.page,
+          message: item.rowColorAnalysis.aiFallbackError,
+        }))
+        .sort((a, b) => a.page - b.page)
+    : [];
   const rowColorAnalyses = includeDetails
     ? Object.fromEntries(
         job.results
@@ -2039,9 +2282,9 @@ function publicTicketOcrJob(job, options = {}) {
     canPause: job.status === "running" || job.status === "queued",
     canResume: job.status === "paused" || job.status === "pausing",
     canCancel: ["queued", "running", "pausing", "paused"].includes(job.status),
-    aiColorPagesQueued: job.aiColorPagesQueued || 0,
-    aiColorPagesProcessed: job.aiColorPagesProcessed || 0,
-    aiColorPagesFailed: job.aiColorPagesFailed || 0,
+    aiColorPagesQueued: exposeLegacyAiRowColorStatus ? job.aiColorPagesQueued || 0 : 0,
+    aiColorPagesProcessed: exposeLegacyAiRowColorStatus ? job.aiColorPagesProcessed || 0 : 0,
+    aiColorPagesFailed: exposeLegacyAiRowColorStatus ? job.aiColorPagesFailed || 0 : 0,
     aiColorErrors,
     ppStructurePagesQueued: job.ppStructurePagesQueued || 0,
     ppStructurePagesProcessed: job.ppStructurePagesProcessed || 0,
@@ -2447,6 +2690,7 @@ async function analyzeTicketRowColors(request, response) {
     if (mimeType === "application/pdf") {
       if (expectedRows) {
         const vectorAnalysis = await analyzeTicketRowColorsFromPdfPath(sourcePath, sourcePage, expectedRows);
+        vectorAnalysis.rowColorLogicVersion = rowColorLogicVersion;
         if (vectorAnalysis.reliable && vectorAnalysis.exactRowAligned === true) {
           sendJson(response, 200, { rowColorAnalysis: vectorAnalysis });
           return;
@@ -2461,6 +2705,7 @@ async function analyzeTicketRowColors(request, response) {
   if (image.startsWith("data:application/pdf")) {
     if (expectedRows) {
       const vectorAnalysis = await analyzeTicketRowColorsFromPdfDataUrl(image, sourcePage, expectedRows);
+      vectorAnalysis.rowColorLogicVersion = rowColorLogicVersion;
       if (vectorAnalysis.reliable && vectorAnalysis.exactRowAligned === true) {
         sendJson(response, 200, { rowColorAnalysis: vectorAnalysis });
         return;
@@ -2472,7 +2717,10 @@ async function analyzeTicketRowColors(request, response) {
     sendJson(response, 400, { error: "Missing image", message: "请提供要检测行底色的图片。" });
     return;
   }
-  const analysis = await analyzeTicketRowColorsFromDataUrl(image, expectedRows);
+  const analysis = {
+    ...(await analyzeTicketRowColorsFromDataUrl(image, expectedRows)),
+    rowColorLogicVersion,
+  };
   sendJson(response, 200, { rowColorAnalysis: analysis });
 }
 
@@ -3424,7 +3672,7 @@ const server = http.createServer((request, response) => {
   if (request.method === "POST" && request.url === "/api/pending/generate") {
     generatePendingTables(request, response).catch((error) => {
       console.error("Pending table generation failed", error);
-      const message = formatErrorMessage(error);
+      const message = formatPendingGenerationErrorMessage(error);
       sendJson(response, error.status || 500, { error: message, message });
     });
     return;

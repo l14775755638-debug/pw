@@ -1444,9 +1444,9 @@ tr.hit-row td {
 
 .template-library {
   display: grid;
-  gap: 8px;
-  margin: 12px 0;
-  padding: 10px;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px;
   border: 1px solid #ece9e1;
   border-radius: 8px;
   background: #fffdf8;
@@ -1456,7 +1456,7 @@ tr.hit-row td {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .template-library-head strong,
@@ -1468,7 +1468,7 @@ tr.hit-row td {
 
 .template-library-head span,
 .template-item small {
-  margin-top: 2px;
+  margin-top: 1px;
   color: var(--muted);
   font-size: 11px;
   font-weight: 800;
@@ -1479,13 +1479,19 @@ tr.hit-row td {
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
   justify-content: flex-end;
+}
+
+.template-library-actions .small-button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 12px;
 }
 
 .template-list {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   max-height: 608px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1500,9 +1506,9 @@ tr.hit-row td {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 68px;
-  padding: 8px 10px;
+  gap: 6px;
+  min-height: 48px;
+  padding: 6px 8px;
   border: 1px solid #ece9e1;
   border-radius: 8px;
   background: #fff;
@@ -1519,7 +1525,7 @@ tr.hit-row td {
 
 .template-item-main b {
   overflow: hidden;
-  font-size: 18px;
+  font-size: 15px;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1531,7 +1537,13 @@ tr.hit-row td {
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 5px;
+}
+
+.template-item-actions .small-button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 12px;
 }
 
 .small-button.danger {
@@ -1546,9 +1558,9 @@ tr.hit-row td {
 }
 
 .template-lock {
-  padding: 7px 9px;
+  padding: 6px 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   border: 1px solid #ece9e1;
   border-radius: 8px;
@@ -1865,6 +1877,13 @@ tr.hit-row td {
   background: #f8fcfc;
 }
 
+.ocr-task-panel[data-status="interrupted"],
+.ocr-task-panel[data-status="expired"],
+.ocr-task-panel[data-status="local_saved"] {
+  border-color: rgba(171, 61, 39, 0.26);
+  background: #fff8f5;
+}
+
 .ocr-task-panel.hidden {
   display: none;
 }
@@ -2123,9 +2142,10 @@ tr.hit-row td {
 .review-layout {
   display: grid;
   grid-template-columns: minmax(560px, 1.05fr) minmax(420px, 0.95fr);
-  align-items: start;
+  align-items: stretch;
   gap: 16px;
   margin-top: 14px;
+  min-height: 0;
 }
 
 .review-layout.quick-manual-review-layout {
@@ -2253,7 +2273,8 @@ tr.hit-row td {
   gap: 10px;
   align-content: start;
   position: sticky;
-  top: 12px;
+  top: 76px;
+  max-height: calc(100vh - 96px);
   min-height: 420px;
   padding: 12px;
   overflow: hidden;
@@ -2303,10 +2324,13 @@ tr.hit-row td {
   position: relative;
   display: grid;
   overflow: auto;
-  max-height: 760px;
+  min-height: 0;
+  max-height: min(760px, calc(100vh - 190px));
   border: 1px solid #ece9e1;
   border-radius: 8px;
   background: #faf8f2;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
 }
 
 .quick-manual-review-layout .review-source-with-actions {
@@ -2316,6 +2340,7 @@ tr.hit-row td {
 .source-action-review-layout .review-source-with-actions,
 .quick-manual-review-layout .review-source-with-actions {
   max-height: min(1180px, calc(100vh - 190px));
+  overflow: auto;
 }
 
 .source-action-review-layout .review-source-action-layer,
@@ -2481,29 +2506,58 @@ tr.hit-row td {
 
 .review-ticket-list {
   display: grid;
-  gap: 10px;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+}
+
+.review-layout:not(.quick-manual-review-layout):not(.source-action-review-layout) .review-ticket-list,
+.quick-manual-fallback-review-layout .review-ticket-list {
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .review-ticket-list-head {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid #ece9e1;
   border-radius: 8px;
   background: #fff;
 }
 
+.review-ticket-list-head > div:first-child {
+  display: flex;
+  flex: 1 1 220px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
 .review-ticket-list-head strong {
   color: var(--ink);
-  font-size: 16px;
+  font-size: 15px;
+  white-space: nowrap;
 }
 
 .review-ticket-list-head span {
   color: var(--muted);
-  font-size: 13px;
-  text-align: right;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.review-ticket-help {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .review-table-nav {
@@ -2539,17 +2593,24 @@ tr.hit-row td {
   flex: 0 0 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 5px;
+  min-width: 0;
+}
+
+.review-bulk-actions .small-button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 12px;
 }
 
 [data-review-draft-status] {
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  margin-top: 6px;
-  padding: 4px 8px;
+  margin-top: 0;
+  padding: 3px 7px;
   color: #146c75;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   border: 1px solid rgba(20, 108, 117, 0.2);
   border-radius: 999px;
@@ -2809,8 +2870,8 @@ tr.hit-row td {
 
 .review-ticket-card {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid #ece9e1;
   border-radius: 8px;
   background: #fff;
@@ -2831,22 +2892,26 @@ tr.hit-row td {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+}
+
+.review-ticket-top strong {
+  font-size: 15px;
 }
 
 .publish-choice {
   display: inline-grid;
-  grid-template-columns: repeat(2, minmax(112px, 1fr));
-  gap: 6px;
-  padding: 4px;
+  grid-template-columns: repeat(2, minmax(74px, 1fr));
+  gap: 4px;
+  padding: 3px;
   border: 1px solid #ece9e1;
   border-radius: 8px;
   background: #faf8f2;
 }
 
 .choice-button {
-  min-height: 34px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 8px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
@@ -2880,7 +2945,7 @@ tr.hit-row td {
 }
 
 .review-ticket-status {
-  padding: 5px 8px;
+  padding: 4px 7px;
   font-size: 12px;
   font-weight: 900;
   border-radius: 999px;
@@ -2898,7 +2963,7 @@ tr.hit-row td {
 }
 
 .review-ticket-warning {
-  padding: 8px 10px;
+  padding: 7px 8px;
   color: #9b1c12;
   font-size: 12px;
   font-weight: 900;
@@ -3050,13 +3115,13 @@ tr.hit-row td {
 
 .review-ticket-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 6px;
 }
 
 .review-ticket-field {
   min-width: 0;
-  padding: 9px 10px;
+  padding: 7px 8px;
   border: 1px solid #ece9e1;
   border-radius: 7px;
   background: #faf8f2;
@@ -3076,10 +3141,10 @@ tr.hit-row td {
 
 .review-ticket-field strong {
   overflow-wrap: anywhere;
-  margin-top: 3px;
+  margin-top: 2px;
   color: var(--ink);
-  font-size: 14px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.28;
 }
 
 .review-price-editor {
@@ -3179,10 +3244,10 @@ tr.hit-row td {
 }
 
 .row-action-button {
-  min-height: 30px;
-  padding: 0 9px;
+  min-height: 28px;
+  padding: 0 8px;
   color: var(--accent-strong);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   border: 1px solid rgba(20, 108, 117, 0.24);
   border-radius: 7px;
@@ -3329,14 +3394,37 @@ tr.hit-row td {
 
   .review-source-panel {
     position: static;
+    max-height: none;
   }
 
-  .review-ticket-list-head,
+  .review-source-with-actions,
+  .review-layout:not(.quick-manual-review-layout):not(.source-action-review-layout) .review-ticket-list,
+  .quick-manual-fallback-review-layout .review-ticket-list {
+    max-height: none;
+    overflow: visible;
+  }
+
   .review-table-nav,
   .review-ticket-top,
   .review-ticket-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .review-ticket-list-head {
+    grid-template-columns: 1fr;
+  }
+
+  .review-ticket-help {
+    display: none;
+  }
+
+  .review-bulk-actions {
+    justify-content: stretch;
+  }
+
+  .review-bulk-actions .small-button {
+    flex: 1 1 96px;
   }
 
   .publish-choice {

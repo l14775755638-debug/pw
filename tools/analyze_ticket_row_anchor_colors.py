@@ -295,7 +295,9 @@ def create_paddle_ocr():
     ):
         try:
             return PaddleOCR(**kwargs)
-        except TypeError:
+        except (TypeError, AttributeError):
+            if kwargs.get("enable_mkldnn"):
+                continue
             continue
     return PaddleOCR()
 

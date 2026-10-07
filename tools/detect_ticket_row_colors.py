@@ -816,6 +816,248 @@ def detect_dense_grid_row_intervals(image, expected_rows):
     return [], ""
 
 
+def projection_line_centers(mask, axis, min_count, gap=3, max_thickness=18):
+    projection = np.count_nonzero(mask, axis=axis)
+    points = np.where(projection >= min_count)[0]
+    centers = []
+    for run in merge_runs(points, gap=gap):
+        if int(run[1]) - int(run[0]) > max_thickness:
+            continue
+        centers.append(int(round((int(run[0]) + int(run[1])) / 2)))
+    return sorted(set(centers))
+
+
+def detect_table_grid_geometry(image):
+    """Find spreadsheet grid lines and physical row/cell boundaries.
+
+    This is the fast path for long ticket sheets. It reads the visible table
+    structure directly from local OpenCV line detection, so row colors keep
+    working even when OCR text rows and pixel intervals drift apart.
+    """
+    height, width = image.shape[:2]
+    if height < 180 or width < 260:
+        return None
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 35, 120)
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(28, width // 18), 1))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(18, height // 80)))
+    horizontal = cv2.morphologyEx(edges, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
+    vertical = cv2.morphologyEx(edges, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
+
+    y_centers = projection_line_centers(
+        horizontal,
+        axis=1,
+        min_count=max(42, int(width * 0.18)),
+        gap=3,
+        max_thickness=max(10, int(height * 0.008)),
+    )
+    x_centers = projection_line_centers(
+        vertical,
+        axis=0,
+        min_count=max(28, int(height * 0.035)),
+        gap=4,
+        max_thickness=max(10, int(width * 0.014)),
+    )
+    if len(y_centers) < 4 or len(x_centers) < 4:
+        return None
+
+    gaps = [y_centers[index + 1] - y_centers[index] for index in range(len(y_centers) - 1)]
+    usable = [
+        index
+        for index, gap in enumerate(gaps)
+        if 12 <= gap <= max(92, int(height * 0.055))
+    ]
+    if len(usable) < 3:
+        return None
+
+    groups = []
+    current = [usable[0]]
+    for index in usable[1:]:
+        if index == current[-1] + 1:
+            current.append(index)
+        else:
+            groups.append(current)
+            current = [index]
+    groups.append(current)
+    group = max(groups, key=len)
+    if len(group) < 3:
+        return None
+
+    intervals = []
+    for gap_index in group:
+        upper = y_centers[gap_index]
+        lower = y_centers[gap_index + 1]
+        pad = max(1, min(5, int((lower - upper) * 0.08)))
+        y1 = max(0, min(height - 1, upper + pad))
+        y2 = max(y1 + 8, min(height, lower - pad))
+        band_gray = gray[y1:y2, :]
+        dark_density = float(np.count_nonzero(band_gray < 150)) / max(1, band_gray.size)
+        intervals.append(
+            {
+                "y1": int(y1),
+                "y2": int(y2),
+                "height": int(y2 - y1),
+                "darkDensity": round(dark_density, 4),
+                "verticalLines": int(len(x_centers)),
+            }
+        )
+
+    left = max(0, min(x_centers))
+    right = min(width, max(x_centers))
+    if right - left < width * 0.28:
+        left, right = int(width * 0.04), int(width * 0.96)
+
+    return {
+        "intervals": intervals,
+        "xCenters": x_centers,
+        "x1": int(left),
+        "x2": int(right),
+    }
+
+
+def classify_rightmost_grid_cell(image, interval, x_centers):
+    height, width = image.shape[:2]
+    xs = [int(x) for x in x_centers if 0 <= int(x) <= width]
+    if len(xs) >= 2:
+        left, right = xs[-2], xs[-1]
+    else:
+        left, right = find_x_bounds(image, interval["y1"], interval["y2"])
+    if right - left < 8:
+        return None
+    y1, y2 = int(interval["y1"]), int(interval["y2"])
+    cell_width = right - left
+    row_height = y2 - y1
+    trim_x = max(2, min(14, int(cell_width * 0.1)))
+    trim_y = max(1, min(9, int(row_height * 0.3)))
+    cell_x1 = min(right - 1, left + trim_x)
+    cell_x2 = max(cell_x1 + 1, right - trim_x)
+    cell_y1 = min(y2 - 1, y1 + trim_y)
+    cell_y2 = max(cell_y1 + 1, y2 - trim_y)
+    result = classify_pixels(image[cell_y1:cell_y2, cell_x1:cell_x2])
+    result["x1"] = int(left)
+    result["x2"] = int(right)
+    result["width"] = int(right - left)
+    return result
+
+
+def enrich_row_with_price_cell(row, price_cell):
+    if not price_cell:
+        return row
+    label = price_cell.get("label") or price_cell.get("rawLabel") or ""
+    white_ratio = float(price_cell.get("whiteRatio", 0) or 0)
+    colored_ratio = float(price_cell.get("coloredRatio", 0) or 0)
+    row["rightmostCellLabel"] = label
+    row["rightmostCellWhite"] = bool(
+        label == COLOR_NAMES["white"]
+        or (white_ratio >= 0.3 and colored_ratio <= max(0.34, white_ratio * 1.2))
+    )
+    row["rightmostCellColoredRatio"] = round(colored_ratio, 3)
+    row["rightmostCellWhiteRatio"] = round(white_ratio, 3)
+    row["rightmostCellReason"] = price_cell.get("reason", "")
+    cells = list(row.get("cellResults") or [])
+    if not cells or int(cells[-1].get("x2", 0) or 0) <= int(price_cell.get("x1", 0) or 0):
+        cells.append(
+            {
+                "label": price_cell.get("label") or "",
+                "rawLabel": price_cell.get("rawLabel") or "",
+                "coloredRatio": price_cell.get("coloredRatio", 0),
+                "whiteRatio": price_cell.get("whiteRatio", 0),
+                "confidence": price_cell.get("confidence", 0),
+                "reason": price_cell.get("reason", ""),
+                "x1": price_cell.get("x1", 0),
+                "x2": price_cell.get("x2", 0),
+            }
+        )
+    row["cellResults"] = cells
+    return row
+
+
+def analyze_physical_grid(image, expected_rows):
+    geometry = detect_table_grid_geometry(image)
+    if not geometry:
+        return None
+    intervals = geometry["intervals"]
+    if not intervals:
+        return None
+
+    selected = intervals
+    selection_mode = "physical_grid"
+    if expected_rows > 0:
+        if len(intervals) < expected_rows:
+            return None
+        extra = len(intervals) - expected_rows
+        # Most ticket sheets have title/notice/header bands before data rows.
+        # Drop only leading extra rows so the backend returns a true 1:1 row
+        # sequence and the frontend does not disable color decisions.
+        max_extra = max(6, int(np.ceil(expected_rows * 0.35)))
+        if extra > max_extra:
+            return None
+        selected = intervals[extra : extra + expected_rows]
+        selection_mode = "physical_grid_exact" if len(selected) == expected_rows else "physical_grid"
+
+    rows = []
+    for index, interval in enumerate(selected):
+        row = classify_interval(image, interval)
+        price_cell = classify_rightmost_grid_cell(image, interval, geometry["xCenters"])
+        enrich_row_with_price_cell(row, price_cell)
+        row["index"] = index
+        row["sourceIndex"] = index
+        row["gridRowIndex"] = index
+        rows.append(row)
+
+    if not rows:
+        return None
+    labels = sorted(set(row.get("label") for row in rows if row.get("label")))
+    price_labels = [
+        row.get("rightmostCellLabel") or ""
+        for row in rows
+        if row.get("rightmostCellLabel") or row.get("rightmostCellColoredRatio") or row.get("rightmostCellWhiteRatio")
+    ]
+    low_confidence_rows = [
+        index
+        for index, row in enumerate(rows)
+        if float(row.get("confidence", 0) or 0) < 0.25
+        and float(row.get("rightmostCellColoredRatio", 0) or 0) < 0.22
+        and float(row.get("rightmostCellWhiteRatio", 0) or 0) < 0.22
+    ]
+    exact_rows = expected_rows <= 0 or len(rows) == expected_rows
+    has_price_white = any(
+        row.get("rightmostCellWhite") is True
+        or (
+            float(row.get("rightmostCellWhiteRatio", 0) or 0) >= 0.3
+            and float(row.get("rightmostCellColoredRatio", 0) or 0) <= max(0.34, float(row.get("rightmostCellWhiteRatio", 0) or 0) * 1.2)
+        )
+        for row in rows
+    )
+    has_price_color = any(
+        (row.get("rightmostCellLabel") or "") not in ("", COLOR_NAMES["white"], COLOR_NAMES["gray"], COLOR_NAMES["black"])
+        and float(row.get("rightmostCellColoredRatio", 0) or 0) >= 0.28
+        and float(row.get("rightmostCellColoredRatio", 0) or 0) >= float(row.get("rightmostCellWhiteRatio", 0) or 0) + 0.08
+        for row in rows
+    )
+    reliable = bool(rows and exact_rows and selection_mode.endswith("_exact") and not low_confidence_rows and (labels or price_labels))
+    return {
+        "source": "opencv",
+        "imageWidth": int(image.shape[1]),
+        "imageHeight": int(image.shape[0]),
+        "expectedRows": int(expected_rows or 0),
+        "detectedRows": len(rows),
+        "selectionMode": selection_mode,
+        "reliable": reliable,
+        "exactRowAligned": bool(exact_rows and selection_mode.endswith("_exact")),
+        "contiguous": True,
+        "maxRowGap": 0,
+        "lowConfidenceRows": low_confidence_rows,
+        "unreliableReasons": [] if reliable else (["row_count_mismatch"] if not exact_rows else []),
+        "warningReasons": [] if not (has_price_white and has_price_color) else ["price_cell_mixed_color_reference"],
+        "removedSeparatorRows": [],
+        "labels": labels,
+        "rowActionTextRows": [],
+        "rows": rows,
+    }
+
+
 def find_x_bounds(image, y1, y2):
     height, width = image.shape[:2]
     inner_y1 = min(y2, y1 + max(1, int((y2 - y1) * 0.2)))
@@ -987,6 +1229,7 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
     unknown_cells = 0
     for result in cell_results:
         label = result.get("label") or ""
+        raw_label = result.get("rawLabel") or ""
         colored_ratio = float(result.get("coloredRatio", 0) or 0)
         white_ratio = float(result.get("whiteRatio", 0) or 0)
         confidence = float(result.get("confidence", 0) or 0)
@@ -996,6 +1239,19 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
             white_cells += 1
         elif label and label not in (COLOR_NAMES["gray"], COLOR_NAMES["black"]) and colored_ratio >= 0.22 and confidence >= 0.32:
             nonwhite_cells.append(label)
+        elif (
+            raw_label
+            and raw_label not in (COLOR_NAMES["white"], COLOR_NAMES["gray"], COLOR_NAMES["black"])
+            and white_ratio <= 0.12
+            and colored_ratio >= 0.16
+            and confidence >= 0.55
+            and coverage_ratio <= 0.5
+        ):
+            # Some PDF table fills are pale or anti-aliased enough that a
+            # single cell is classified as a weak raw color, but if several
+            # cells on the same ticket row all agree and there is no white
+            # evidence, the whole row is still a non-white sold marker.
+            nonwhite_cells.append(raw_label)
         else:
             unknown_cells += 1
 
@@ -1043,7 +1299,8 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
         "rightmostCellWhiteRatio": round(float(rightmost_cell.get("whiteRatio", 0) or 0), 3),
         "cellResults": cell_summaries,
     }
-    if nonwhite_count >= max(2, int(np.ceil(len(cell_results) * 0.42))) and nonwhite_count >= white_cells + 1:
+    weak_full_row_fill = nonwhite_count >= 2 and white_cells == 0 and color_cell_ratio >= 0.4
+    if (nonwhite_count >= max(2, int(np.ceil(len(cell_results) * 0.42))) and nonwhite_count >= white_cells + 1) or weak_full_row_fill:
         return {
             "label": dominant_nonwhite,
             "rawLabel": dominant_nonwhite,
@@ -1058,7 +1315,7 @@ def classify_interval_by_cells(image, y1, y2, x1, x2):
             "coloredCellCount": int(nonwhite_count),
             "whiteCellCount": int(white_cells),
             "strong": True,
-            "reason": "cell_majority_color",
+            "reason": "cell_majority_color" if not weak_full_row_fill else "cell_consistent_nonwhite_no_white",
             **common,
         }
 
@@ -1464,6 +1721,9 @@ def analyze(image_path, expected_rows=0):
     image = cv2.imread(image_path, cv2.IMREAD_COLOR)
     if image is None:
         raise RuntimeError("image cannot be read")
+    physical_grid_result = analyze_physical_grid(image, expected_rows)
+    if physical_grid_result and physical_grid_result.get("exactRowAligned") is True and physical_grid_result.get("rows"):
+        return physical_grid_result
     intervals = detect_horizontal_intervals(image)
     line_selected, line_selection_mode = choose_data_intervals(intervals, expected_rows)
     dense_selected, dense_selection_mode = detect_dense_grid_row_intervals(image, expected_rows)
@@ -1573,6 +1833,7 @@ def analyze(image_path, expected_rows=0):
         "first_group_drop_2_filtered",
         "compact_color_anchor_exact",
         "dense_grid_exact",
+        "physical_grid_exact",
     }
     if selection_mode.startswith("group_") and (selection_mode.endswith("_exact") or selection_mode.endswith("_exact_filtered")):
         safe_selection_modes.add(selection_mode)

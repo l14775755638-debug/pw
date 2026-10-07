@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>票务搜索管理模拟页</title>
-    <link rel="stylesheet" href="styles.css?v=20261003-review-list-window-1" />
+    <link rel="stylesheet" href="styles.css?v=20261004-compact-admin-preview-1" />
   </head>
   <body>
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
@@ -298,12 +298,12 @@
             <div class="template-library" id="seatmapTemplateLibrary">
               <div class="template-library-head">
                 <div>
-                  <strong>座位图模板库</strong>
-                  <span id="templateLibrarySummary">模板会保存座位图底图和精准热区，新演出可一键套用。</span>
+                  <strong>座位图模板</strong>
+                  <span id="templateLibrarySummary">底图 + 热区，可复用。</span>
                 </div>
                 <div class="template-library-actions">
-                  <button class="small-button ghost" id="saveSeatmapTemplateButton" type="button">保存整套模板</button>
-                  <button class="small-button ghost" id="applyMatchedTemplateButton" type="button">套用匹配模板</button>
+                  <button class="small-button ghost" id="saveSeatmapTemplateButton" type="button">保存模板</button>
+                  <button class="small-button ghost" id="applyMatchedTemplateButton" type="button">匹配套用</button>
                   <button class="small-button ghost" id="toggleTemplateLibraryButton" type="button">模板大全</button>
                 </div>
               </div>
@@ -369,11 +369,11 @@
                   </div>
                 </div>
                 <div class="ocr-task-actions">
-                  <button class="small-button ghost" id="pauseOcrJobButton" type="button">暂停</button>
-                  <button class="small-button ghost" id="resumeOcrJobButton" type="button">继续</button>
-                  <button class="small-button ghost" id="generatePartialOcrButton" type="button">用已识别页生成确认表</button>
-                  <button class="small-button danger ghost" id="cancelOcrJobButton" type="button">停止任务</button>
-                  <button class="small-button danger ghost" id="deleteOcrJobButton" type="button">清除重来</button>
+                  <button class="small-button ghost" id="pauseOcrJobButton" type="button" disabled>暂停</button>
+                  <button class="small-button ghost" id="resumeOcrJobButton" type="button" disabled>继续</button>
+                  <button class="small-button ghost" id="generatePartialOcrButton" type="button" disabled>用已识别页生成确认表</button>
+                  <button class="small-button danger ghost" id="cancelOcrJobButton" type="button" disabled>停止任务</button>
+                  <button class="small-button danger ghost" id="deleteOcrJobButton" type="button" disabled>清除重来</button>
                 </div>
               </div>
             </form>
@@ -475,6 +475,6 @@
       </main>
     </div>
 
-    <script src="script.js?v=20261004-rowcolor-repair-1"></script>
+    <script src="script.js?v=20261006-rowcolor-align-1"></script>
   </body>
 </html>
