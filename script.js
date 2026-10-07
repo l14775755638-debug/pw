@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 116;
+const ROW_COLOR_LOGIC_VERSION = 117;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 29;
@@ -4611,7 +4611,7 @@ function getGridContextAnchorForIndex(anchors, sourceIndex, sourceRows = [], blo
   );
 }
 
-function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = [], blockKey = "") {
+function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = [], blockKey = "", options = {}) {
   if (!Number.isInteger(sourceIndex) || !Array.isArray(anchors) || !anchors.length) return null;
   const sorted = anchors
     .map((anchor) => ({
@@ -4629,6 +4629,7 @@ function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = 
     const next = sorted[index + 1];
     if (sourceIndex >= next.index) continue;
     const sequenceBreakStart = getStrongSourceSequenceBreakStart(sourceRows, current.index, next.index);
+    if (!Number.isInteger(sequenceBreakStart) && options.requireSequenceBoundary === true) return current;
     const boundary = Number.isInteger(sequenceBreakStart) ? sequenceBreakStart : (current.index + next.index) / 2;
     return sourceIndex >= boundary ? next : current;
   }
@@ -4637,7 +4638,7 @@ function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = 
 
 function getRowColorSourceContextAnchors(table) {
   const context = table?.rowColorSourceContextAnchors;
-  if (!context || typeof context !== "object") return { dateAnchors: [], faceAnchors: [], sourceRows: [] };
+  if (!context || typeof context !== "object") return { dateAnchors: [], faceAnchors: [], sourceRows: [], requireSequenceBoundary: false };
   const normalizeAnchor = (anchor, key) => {
     const index = Number(anchor?.index);
     const value = String(anchor?.[key] || anchor?.value || "").trim();
@@ -4660,6 +4661,7 @@ function getRowColorSourceContextAnchors(table) {
     dateAnchors: Array.isArray(context.dateAnchors) ? context.dateAnchors.map((anchor) => normalizeAnchor(anchor, "date")).filter(Boolean) : [],
     faceAnchors: Array.isArray(context.faceAnchors) ? context.faceAnchors.map((anchor) => normalizeAnchor(anchor, "face")).filter(Boolean) : [],
     sourceRows: Array.isArray(context.sourceRows) ? context.sourceRows.map(normalizeSourceRow).filter(Boolean) : [],
+    requireSequenceBoundary: context.requireSequenceBoundary === true,
   };
 }
 
@@ -4695,10 +4697,52 @@ function extractRowColorSourceContextAnchorsFromRows(rows = []) {
   return { dateAnchors, faceAnchors, sourceRows };
 }
 
+function extractSourceContextAnchorsFromTableRows(rows = [], columns = []) {
+  const dateAnchors = [];
+  const faceAnchors = [];
+  const sourceRows = [];
+  (Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    if (!Array.isArray(row)) return;
+    const values = row.map((cell) => String(cell || "").trim());
+    const parsed = parseBoundTicketSourceRowByFields(values, columns) || {};
+    const serial = String(parsed["序号"] || values[0] || "").trim();
+    const date = String(parsed["日期"] || "").trim();
+    const face = String(parsed["票面"] || "").trim();
+    sourceRows.push({
+      index,
+      serial,
+      date,
+      face,
+      text: values.filter(Boolean).join("\t"),
+      dateBlockStart: false,
+      faceBlockStart: false,
+    });
+    if (date) dateAnchors.push({ index, date, value: date });
+    if (face) faceAnchors.push({ index, face, value: face });
+  });
+  return { dateAnchors, faceAnchors, sourceRows };
+}
+
+function ensureTextSourceContextAnchors(table) {
+  if (!table || !Array.isArray(table.rows)) return false;
+  const existing = getRowColorSourceContextAnchors(table);
+  if (existing.dateAnchors.length || existing.faceAnchors.length) return false;
+  const rawRows = Array.isArray(table.sourceTextRows) && table.sourceTextRows.length ? table.sourceTextRows : null;
+  if (!rawRows || rawRows.length !== table.rows.length) return false;
+  const context = extractSourceContextAnchorsFromTableRows(rawRows, table.originalColumns || table.columns || []);
+  if (!context.dateAnchors.length && !context.faceAnchors.length) return false;
+  table.rowColorSourceContextAnchors = context;
+  table.rowColorSourceContextAnchors.requireSequenceBoundary = true;
+  if (!Array.isArray(table.rowColorSourceIndexes) || table.rowColorSourceIndexes.length !== table.rows.length) {
+    table.rowColorSourceIndexes = table.rows.map((_, index) => index);
+  }
+  return true;
+}
+
 function repairMergedContextFromRowColorSourceAnchors(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
   if (!Array.isArray(table.rowColorSourceIndexes) || table.rowColorSourceIndexes.length !== table.rows.length) return false;
-  const { dateAnchors, faceAnchors, sourceRows } = getRowColorSourceContextAnchors(table);
+  const { dateAnchors, faceAnchors, sourceRows, requireSequenceBoundary } = getRowColorSourceContextAnchors(table);
   const sourceRowByIndex = new Map(sourceRows.map((row) => [Number(row.index), row]));
   if (!dateAnchors.length && !faceAnchors.length) return false;
   const dateIndex = findColumnIndex(table.columns, DATE_COLUMN_NAMES);
@@ -4710,7 +4754,7 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
     const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
     const sourceContext = sourceRowByIndex.get(sourceIndex) || null;
     if (dateIndex >= 0 && rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex)) {
-      const dateAnchor = getBoundSourceContextAnchorForIndex(dateAnchors, sourceIndex, sourceRows, "dateBlockStart");
+      const dateAnchor = getBoundSourceContextAnchorForIndex(dateAnchors, sourceIndex, sourceRows, "dateBlockStart", { requireSequenceBoundary });
       const targetDate = dateAnchor?.value || "";
       const currentDate = String(row[dateIndex] || "").trim();
       const sourceHasExplicitDate = Boolean(sourceContext?.date);
@@ -4729,7 +4773,7 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
       }
     }
     if (faceIndex >= 0 && rowShouldReceiveMergedFace(table, row, rowIndex, faceIndex)) {
-      const faceAnchor = getBoundSourceContextAnchorForIndex(faceAnchors, sourceIndex, sourceRows, "faceBlockStart");
+      const faceAnchor = getBoundSourceContextAnchorForIndex(faceAnchors, sourceIndex, sourceRows, "faceBlockStart", { requireSequenceBoundary });
       const targetFace = faceAnchor?.value || "";
       const currentFace = String(row[faceIndex] || "").trim();
       const sourceHasExplicitFace = Boolean(sourceContext?.face);
@@ -17975,7 +18019,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
     const sourcePart = isPdf ? 1 : Number(parsedTable.sourcePart || 0) || index + 1;
     const pageText = isPdf ? `PDF 第 ${sourcePage} 页` : `第 ${sourcePart} 张表`;
     const baseTitle = uploadTableTitle.value.trim() || uploadedSource.name;
-    const table = {
+  const table = {
       id: `uploaded-${Date.now()}-${index}`,
       title: count > 1 ? `${baseTitle} · ${pageText}` : baseTitle,
       originalImage: uploadedSource.url,
@@ -17988,6 +18032,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
       columns: parsedTable.columns,
       originalColumns: Array.isArray(parsedTable.originalColumns) ? parsedTable.originalColumns : [...parsedTable.columns],
       originalRows: Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
+      sourceTextRows: cloneRows(parsedTable.rows),
       rows: parsedTable.rows,
       quickManualMode,
       rowColorPageRowOffset: Math.max(0, Math.floor(Number(parsedTable.rowColorPageRowOffset || 0) || 0)),
@@ -17995,6 +18040,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
     };
     repairMisreadDataHeaderTable(table);
     ensurePendingTableSourceRowIndexes(table);
+    ensureTextSourceContextAnchors(table);
     if (isPdf) forceCanonicalOriginalDisplay(table);
     const colorAnalysis = colorAnalyses[String(sourcePage)] || colorAnalyses[sourcePage] || null;
     const ppStructureAnalysis = skipRowColor ? null : getLastPpStructureAnalysisForPage(sourcePage);
