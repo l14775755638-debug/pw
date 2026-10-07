@@ -1,8 +1,8 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 118;
+const ROW_COLOR_LOGIC_VERSION = 119;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
-const COLUMN_NORMALIZATION_VERSION = 29;
+const COLUMN_NORMALIZATION_VERSION = 30;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = false;
@@ -948,6 +948,24 @@ function alignSparseRecognizedRowByTrustedColumns(row = [], sourceColumns = [], 
   return mapped.some((item) => String(item || "").trim()) ? mapped : null;
 }
 
+function getTicketFieldMappingScore(row = [], columns = []) {
+  if (!Array.isArray(row) || !Array.isArray(columns)) return 0;
+  const valueForField = (field) => {
+    const index = findFirstColumnIndexByField(columns, field);
+    return index >= 0 ? String(row[index] || "").trim() : "";
+  };
+  let score = 0;
+  if (isLikelySerialValue(valueForField("序号"))) score += 1;
+  if (isLikelyDateValue(valueForField("日期")) || isLikelyDateColumnValue(valueForField("日期"))) score += 1;
+  if (isNumericTicketFaceValue(valueForField("票面")) || isLikelyFaceValue(valueForField("票面")) || isGenericFaceValue(valueForField("票面"))) score += 1;
+  if (isLikelyFloorLevelValue(valueForField("楼层"))) score += 2;
+  if (parseCompositeSeatInfo(valueForField("区域"))?.zone || extractZoneTokenFromText(valueForField("区域")) || isLikelyZoneCode(valueForField("区域"))) score += 2;
+  if (extractSeatRowFromText(valueForField("排"), { allowBareRange: true }) || isLikelySeatRowValue(valueForField("排"))) score += 2;
+  if (extractSeatNumberFromText(valueForField("座位号"), { allowBareRange: true }) || isLikelySeatNumberValue(valueForField("座位号"))) score += 2;
+  if (hasPriceOrSoldValue(valueForField("售价"))) score += 1;
+  return score;
+}
+
 function mapRecognizedRowToColumns(row, sourceColumns, targetColumns) {
   if (!Array.isArray(row)) return [];
   const mapped = Array.from({ length: targetColumns.length }, () => "");
@@ -958,7 +976,13 @@ function mapRecognizedRowToColumns(row, sourceColumns, targetColumns) {
   const trustSourceColumns = shouldTrustSourceColumnsForPositionMapping(effectiveSourceColumns);
   if (trustSourceColumns) {
     const sparseMapped = alignSparseRecognizedRowByTrustedColumns(row, effectiveSourceColumns, targetColumns);
-    if (sparseMapped) return sparseMapped;
+    if (sparseMapped) {
+      const compactMapped = alignCompactTicketRowToColumns(row, targetColumns);
+      if (compactMapped && getTicketFieldMappingScore(compactMapped, targetColumns) > getTicketFieldMappingScore(sparseMapped, targetColumns)) {
+        return compactMapped;
+      }
+      return sparseMapped;
+    }
   }
   if (!trustSourceColumns) {
     const compactMapped = alignCompactTicketRowToColumns(row, targetColumns);
@@ -1059,6 +1083,7 @@ function alignCompactTicketRowToColumns(row, columns) {
   const dateIndex = findFirstColumnIndexByField(columns, "日期");
   const zoneIndex = findFirstColumnIndexByField(columns, "区域");
   const faceIndex = findFirstColumnIndexByField(columns, "票面");
+  const floorIndex = findFirstColumnIndexByField(columns, "楼层");
   const rowIndex = findFirstColumnIndexByField(columns, "排");
   const seatIndex = findFirstColumnIndexByField(columns, "座位号");
   const quantityIndex = findQuantityColumnIndex(columns);
@@ -1078,6 +1103,10 @@ function alignCompactTicketRowToColumns(row, columns) {
   }
 
   let remaining = rest.slice(cursor);
+  if (floorIndex >= 0 && remaining.length >= 2 && isLikelyFloorLevelValue(remaining[0])) {
+    putMappedCell(mapped, floorIndex, remaining[0], "楼层");
+    remaining = remaining.slice(1);
+  }
   if (seatTypeIndex >= 0 && remaining.length >= 2 && isVenueSeatTypeValue(remaining[0])) {
     putMappedCell(mapped, seatTypeIndex, remaining[0], getDefaultFieldForHeader(columns[seatTypeIndex]) || "票面");
     remaining = remaining.slice(1);
@@ -1226,7 +1255,7 @@ function parseTableText(text) {
     const rows = [...getPreHeaderDateAnchorRows(lines, dataStartIndex, columns), ...dataRows];
     extendColumnsForOverflowRows(columns, rows);
     if (!columns.some(Boolean) || !rows.length) return null;
-    return { columns, rows, sourceTextRows: cloneRows(rows), headerless: true };
+    return { columns, rows, sourceTextColumns: [...columns], sourceTextRows: cloneRows(rows), headerless: true };
   }
 
   if (headerIndex < 0) return null;
@@ -1250,7 +1279,7 @@ function parseTableText(text) {
   removeEmptyDecorativeColumns(columns, rows);
   extendColumnsForOverflowRows(columns, rows);
   if (!columns.some(Boolean) || !rows.length) return null;
-  return { columns, rows, sourceTextRows, headerless: false };
+  return { columns, rows, sourceTextColumns: [...columns], sourceTextRows, headerless: false };
 }
 
 function parseContinuationRows(text, columns) {
@@ -2477,6 +2506,7 @@ function createMappedTableFromDraft(draft, sourceTable = null) {
   return {
     columns,
     rows,
+    sourceTextColumns: Array.isArray(sourceTable?.sourceTextColumns) ? [...sourceTable.sourceTextColumns] : [...sourceColumns],
     originalColumns: [...sourceColumns],
     originalRows: sourceRows.map((row) => sourceColumns.map((_, index) => row[index] || "")),
   };
@@ -4907,7 +4937,9 @@ function parseBoundTicketSourceRowByFields(sourceRow = [], sourceColumns = []) {
       if (field === "楼层" && isLikelyFloorLevelValue(value)) setParsedBoundField(parsed, field, value);
       if (field === "区域" && (extractZoneTokenFromText(value) || isLikelyZoneCode(value))) setParsedBoundField(parsed, field, extractZoneTokenFromText(value) || value);
       if (field === "排" && isLikelySeatRowValue(value)) setParsedBoundField(parsed, field, extractSeatRowFromText(value, { allowBareRange: true }) || value);
-      if (field === "座位号" && isLikelySeatNumberValue(value) && !isLikelySeatRowValue(value)) setParsedBoundField(parsed, field, extractSeatNumberFromText(value, { allowBareRange: true }) || value);
+      if (field === "座位号" && (extractSeatNumberFromText(value, { allowBareRange: true }) || isLikelySeatNumberValue(value))) {
+        setParsedBoundField(parsed, field, extractSeatNumberFromText(value, { allowBareRange: true }) || value);
+      }
       if (field === "售价" && hasPriceOrSoldValue(value)) setParsedBoundField(parsed, field, value);
       if ((field === "备注" || field === "座位情况") && !hasPriceOrSoldValue(value)) setParsedBoundField(parsed, field, value);
     });
@@ -4973,17 +5005,76 @@ function parsedBoundFieldsToMappedRow(parsed, targetColumns = []) {
   return mapped.some((value) => String(value || "").trim()) ? mapped : null;
 }
 
+function ensureParsedBoundFieldColumns(table, parsed) {
+  if (!table || !parsed || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  let changed = false;
+  ["座位号", "备注", "座位情况", "排", "区域", "楼层", "售价"].forEach((field) => {
+    if (!String(parsed[field] || "").trim()) return;
+    if (findFirstColumnIndexByField(table.columns, field) >= 0) return;
+    table.columns.push(field);
+    table.rows.forEach((item) => {
+      if (Array.isArray(item)) item.push("");
+    });
+    if (Array.isArray(table.originalColumns)) table.originalColumns.push(field);
+    if (Array.isArray(table.originalRows)) {
+      table.originalRows.forEach((item) => {
+        if (Array.isArray(item)) item.push("");
+      });
+    }
+    changed = true;
+  });
+  return changed;
+}
+
+function ensureSourceTextFieldColumns(table, sourceRow = [], sourceColumns = []) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows) || !Array.isArray(sourceRow) || !Array.isArray(sourceColumns)) return false;
+  let changed = false;
+  sourceColumns.forEach((column, index) => {
+    const field = getDefaultFieldForHeader(column);
+    if (!["座位号", "备注", "座位情况", "排", "区域", "楼层", "售价"].includes(field)) return;
+    if (!String(sourceRow[index] || "").trim()) return;
+    if (findFirstColumnIndexByField(table.columns, field) >= 0) return;
+    table.columns.push(field);
+    table.rows.forEach((item) => {
+      if (Array.isArray(item)) item.push("");
+    });
+    if (Array.isArray(table.originalColumns)) table.originalColumns.push(field);
+    if (Array.isArray(table.originalRows)) {
+      table.originalRows.forEach((item) => {
+        if (Array.isArray(item)) item.push("");
+      });
+    }
+    changed = true;
+  });
+  return changed;
+}
+
 function repairTicketRowFromBoundSourceText(table, row, rowIndex) {
   if (!table || !Array.isArray(row) || table.userEditedRows?.[rowIndex]) return false;
   const item = Array.isArray(table.rowColorRows) ? table.rowColorRows[rowIndex] : null;
-  const rawText = String(item?.matchedText || item?.rowText || "").trim();
+  const resolvedSourceIndex = Number.isInteger(Number(item?.sourceIndex)) ? Number(item.sourceIndex) : getRowSourceIndexForMergedContext(table, rowIndex);
+  const sourceIndex = Number.isInteger(resolvedSourceIndex) && resolvedSourceIndex >= 0 ? resolvedSourceIndex : rowIndex;
+  const sourceTextRow = Number.isInteger(sourceIndex) && Array.isArray(table.sourceTextRows?.[sourceIndex])
+    ? table.sourceTextRows[sourceIndex].join("\t")
+    : "";
+  const rawText = String(item?.matchedText || item?.rowText || sourceTextRow || "").trim();
   if (!rawText || !rawText.includes("\t")) return false;
-  const sourceColumns = Array.isArray(table.originalColumns) && table.originalColumns.length ? table.originalColumns : table.columns;
+  const sourceColumns = Array.isArray(table.sourceTextColumns) && table.sourceTextColumns.length
+    ? table.sourceTextColumns
+    : Array.isArray(table.originalColumns) && table.originalColumns.length
+      ? table.originalColumns
+      : table.columns;
   const sourceRow = rawText.split("\t").map((cell) => cell.trim());
+  let changed = ensureSourceTextFieldColumns(table, sourceRow, sourceColumns);
   const parsed = parseBoundTicketSourceRowByFields(sourceRow, sourceColumns);
-  const mapped = parsedBoundFieldsToMappedRow(parsed, table.columns) || alignSparseRecognizedRowByTrustedColumns(sourceRow, sourceColumns, table.columns);
+  if (ensureParsedBoundFieldColumns(table, parsed)) changed = true;
+  const parsedMapped = parsedBoundFieldsToMappedRow(parsed, table.columns);
+  const sparseMapped = alignSparseRecognizedRowByTrustedColumns(sourceRow, sourceColumns, table.columns);
+  const directMapped = mapRecognizedRowToColumns(sourceRow, sourceColumns, table.columns);
+  const mapped = [parsedMapped, sparseMapped, directMapped]
+    .filter(Boolean)
+    .sort((left, right) => getTicketFieldMappingScore(right, table.columns) - getTicketFieldMappingScore(left, table.columns))[0];
   if (!mapped) return false;
-  let changed = false;
   table.columns.forEach((column, index) => {
     const field = getDefaultFieldForHeader(column);
     if (!["序号", "日期", "票面", "楼层", "区域", "排", "座位号", "售价", "备注", "座位情况"].includes(field)) return;
@@ -5008,7 +5099,8 @@ function repairTicketRowFromBoundSourceText(table, row, rowIndex) {
 }
 
 function repairRowsFromBoundSourceText(table) {
-  if (!table || !Array.isArray(table.rows) || !Array.isArray(table.rowColorRows)) return false;
+  if (!table || !Array.isArray(table.rows)) return false;
+  if (!Array.isArray(table.rowColorRows) && !Array.isArray(table.sourceTextRows)) return false;
   let changed = false;
   table.rows.forEach((row, rowIndex) => {
     if (repairTicketRowFromBoundSourceText(table, row, rowIndex)) changed = true;
@@ -6963,6 +7055,7 @@ function normalizePendingTableColumns(table) {
   ensureOriginalTableSnapshot(table);
   const mergedDateAnchors = rememberMergedDateSourceAnchors(table);
   let changed = false;
+  if (repairRowsFromBoundSourceText(table)) changed = true;
   if (repairMergedContextFromRowColorSourceAnchors(table)) changed = true;
   if (repairTailSalePriceAndExplicitRowColumns(table)) changed = true;
   table.rows.forEach((row) => {
@@ -7150,6 +7243,9 @@ function normalizePendingTableColumns(table) {
     changed = true;
   }
   if (repairVenueFaceValueFromRemark(table)) {
+    changed = true;
+  }
+  if (repairRowsFromBoundSourceText(table)) {
     changed = true;
   }
 
@@ -18087,6 +18183,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
       columns: parsedTable.columns,
       originalColumns: Array.isArray(parsedTable.originalColumns) ? parsedTable.originalColumns : [...parsedTable.columns],
       originalRows: Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
+      sourceTextColumns: Array.isArray(parsedTable.sourceTextColumns) ? [...parsedTable.sourceTextColumns] : Array.isArray(parsedTable.originalColumns) ? [...parsedTable.originalColumns] : [...parsedTable.columns],
       sourceTextRows: Array.isArray(parsedTable.sourceTextRows) ? cloneRows(parsedTable.sourceTextRows) : Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
       rows: parsedTable.rows,
       quickManualMode,
