@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 115;
+const ROW_COLOR_LOGIC_VERSION = 116;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 29;
@@ -10679,7 +10679,7 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable._rowColorRepairDone = false;
     normalizedTable._rowColorRepairTried = false;
   }
-  if (hasStaleRowColorLogic && isPdfTableSource(normalizedTable) && normalizedTable.originalImage && normalizedTable.rows.length) {
+  if (hasStaleRowColorLogic && isPdfTableSource(normalizedTable) && normalizedTable.rows.length) {
     markLoadedPdfTableForRegeneration(
       normalizedTable,
       "旧版 PDF 确认表已作废，不能继续用于发布；请点“清空确认表重来”，再点“用已识别页生成确认表”。",
