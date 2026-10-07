@@ -9695,11 +9695,58 @@ function makeDateKeys(year, month, day) {
   return keys;
 }
 
+function makeEventDayKeys(dayNumber) {
+  const number = Number(dayNumber);
+  return Number.isInteger(number) && number > 0 ? [`event-day-${number}`] : [];
+}
+
+function getKoreanDateAliasKeys(compactText = "") {
+  const text = String(compactText || "").toLowerCase();
+  const keys = [];
+  if (/^(?:첫날|첫째날|첫공연|첫콘|1일차|1회차)$/.test(text)) keys.push(...makeEventDayKeys(1));
+  if (/^(?:둘째날|두번째날|두번째공연|둘콘|2일차|2회차)$/.test(text)) keys.push(...makeEventDayKeys(2));
+  if (/^(?:셋째날|세번째날|세번째공연|3일차|3회차)$/.test(text)) keys.push(...makeEventDayKeys(3));
+  if (/^(?:막콘|막날|마지막날|마지막공연)$/.test(text)) keys.push("event-day-last");
+  return keys;
+}
+
+function getChineseDateAliasKeys(compactText = "") {
+  const text = String(compactText || "").toLowerCase();
+  const keys = [];
+  if (/^(?:第一天|第1天|一日目|首日|第一场|第1场|一场)$/.test(text)) keys.push(...makeEventDayKeys(1));
+  if (/^(?:第二天|第2天|二日目|次日|第二场|第2场|二场)$/.test(text)) keys.push(...makeEventDayKeys(2));
+  if (/^(?:第三天|第3天|三日目|第三场|第3场|三场)$/.test(text)) keys.push(...makeEventDayKeys(3));
+  if (/^(?:最后一天|最终日|末日|最后一场|最终场)$/.test(text)) keys.push("event-day-last");
+  return keys;
+}
+
+function normalizeDateSearchText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/點|点|。|·|ㆍ|_|｜|\|/g, ".")
+    .replace(/년/g, "年")
+    .replace(/원/g, "월")
+    .replace(/월/g, "月")
+    .replace(/일/g, "日")
+    .replace(/\s+/g, "");
+}
+
 function getDateKeysFromText(value) {
   const text = String(value || "").trim();
   if (!text) return [];
-  const compactText = text.replace(/\s+/g, "");
+  const rawCompactText = text.normalize("NFKC").replace(/\s+/g, "");
+  const compactText = normalizeDateSearchText(text);
+  const rawAliasText = rawCompactText.replace(/[._/\-]+/g, "");
+  const aliasText = compactText.replace(/[._/\-]+/g, "");
   const keys = [];
+  keys.push(...getKoreanDateAliasKeys(rawAliasText));
+  keys.push(...getChineseDateAliasKeys(aliasText));
+  const eventDayMatches = [
+    ...compactText.matchAll(/(?:^|[^\da-z])d(?:ay)?[._/\-]?\s*(\d{1,2})(?=$|[^\da-z])/gi),
+    ...compactText.matchAll(/(?:^|[^\d])第?(\d{1,2})(?:天|场|場|日目)(?=$|[^\d])/g),
+    ...rawCompactText.matchAll(/(?:^|[^\d])(\d{1,2})(?:일차|회차)(?=$|[^\d])/g),
+  ];
+  eventDayMatches.forEach((match) => keys.push(...makeEventDayKeys(match[1])));
   const extractedDate = extractDateFromCompositeSeatText(text);
   if (extractedDate && extractedDate !== text) {
     keys.push(...getDateKeysFromText(extractedDate));
@@ -9729,6 +9776,29 @@ function getDateKeysFromValues(values) {
   return [...new Set(values.flatMap((value) => getDateKeysFromText(value)))];
 }
 
+function getEventDateOrderKeys(dateOption, dateOptions = []) {
+  if (!dateOption || !Array.isArray(dateOptions)) return [];
+  const index = dateOptions.findIndex((date) => date === dateOption || date.id === dateOption.id);
+  if (index < 0) return [];
+  const keys = makeEventDayKeys(index + 1);
+  if (index === dateOptions.length - 1) keys.push("event-day-last");
+  return keys;
+}
+
+function getDateOptionKeys(dateOption, dateOptions = []) {
+  if (!dateOption) return [];
+  return [
+    ...getDateKeysFromValues([dateOption.id, dateOption.label, ...(dateOption.aliases || [])]),
+    ...getEventDateOrderKeys(dateOption, dateOptions),
+  ];
+}
+
+function getDateOptionForValues(values = [], dateOptions = currentEvent.dateOptions || []) {
+  const rowKeys = new Set(getDateKeysFromValues(values));
+  if (!rowKeys.size || !Array.isArray(dateOptions)) return null;
+  return dateOptions.find((date) => getDateOptionKeys(date, dateOptions).some((key) => rowKeys.has(key))) || null;
+}
+
 function normalizeDateCellValue(value, { allowDayOnly = true } = {}) {
   const text = String(value || "").trim();
   if (!text) return "";
@@ -9752,7 +9822,7 @@ function getSelectedDateDebugInfo() {
   return {
     selectedDateId,
     selectedDateLabel: date.label,
-    targetDateKeys: getDateKeysFromValues([date.id, date.label, ...(date.aliases || [])]),
+    targetDateKeys: getDateOptionKeys(date, currentEvent.dateOptions),
   };
 }
 
@@ -9777,23 +9847,49 @@ function parseDateOptions(text) {
     const [, year, month, day] = match;
     const monthText = String(Number(month));
     const dayText = String(Number(day));
+    const dayNumber = index + 1;
     const compact = `${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
     const dashed = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dotted = `${year}.${String(month).padStart(2, "0")}.${String(day).padStart(2, "0")}`;
     const label = formatStandardDateLabel(year, month, day);
+    const aliases = [
+      label,
+      dashed,
+      dotted,
+      compact,
+      `${monthText}.${dayText}`,
+      `${monthText}-${dayText}`,
+      `${monthText}/${dayText}`,
+      `${monthText}月${dayText}日`,
+      `${monthText}月${dayText}号`,
+      `${dayText}日`,
+      `${dayText}号`,
+      `${dayText}號`,
+      `0${monthText}`.slice(-2) + "." + `0${dayText}`.slice(-2),
+      `0${monthText}`.slice(-2) + "-" + `0${dayText}`.slice(-2),
+      `D${dayNumber}`,
+      `d${dayNumber}`,
+      `D ${dayNumber}`,
+      `D-${dayNumber}`,
+      `D_${dayNumber}`,
+      `D.${dayNumber}`,
+      `Day ${dayNumber}`,
+      `Day${dayNumber}`,
+      `DAY ${dayNumber}`,
+      `${dayNumber}일차`,
+      `${dayNumber}회차`,
+      `第${dayNumber}天`,
+      `第${dayNumber}场`,
+    ];
+    if (dayNumber === 1) aliases.push("首日", "第一天", "第一场", "첫날", "첫째날", "첫콘", "첫 공연");
+    if (dayNumber === 2) aliases.push("次日", "第二天", "第二场", "둘째날", "두번째날", "두 번째 날", "둘콘");
+    if (dayNumber === 3) aliases.push("第三天", "第三场", "셋째날", "세번째날", "세 번째 날");
+    if (index === values.length - 1) aliases.push("最后一天", "最终日", "最后一场", "막콘", "막날", "마지막날", "마지막 공연");
     return {
       id: compact,
       label,
-      aliases: [
-        label,
-        dashed,
-        compact,
-        `${monthText}.${dayText}`,
-        `${monthText}月${dayText}日`,
-        `${dayText}日`,
-        `${dayText}号`,
-        `${dayText}號`,
-        `0${monthText}`.slice(-2) + "." + `0${dayText}`.slice(-2),
-      ],
+      standardDate: dashed,
+      aliases: [...new Set(aliases)],
     };
   });
 }
@@ -11151,7 +11247,7 @@ function dateMatchesTicket(ticket) {
 function dateMatchesValues(values, { strict = false } = {}) {
   const date = getSelectedDate();
   if (!date) return false;
-  const targetDateKeys = new Set(getDateKeysFromValues([date.id, date.label, ...(date.aliases || [])]));
+  const targetDateKeys = new Set(getDateOptionKeys(date, currentEvent.dateOptions));
   const rowDateKeyGroups = values
     .map((cell) => getDateKeysFromText(cell))
     .filter((keys) => keys.length);
@@ -12178,6 +12274,8 @@ function getTicketQuantityValue(ticket) {
 
 function getTicketPrimaryDateValue(ticket) {
   const values = getTicketDateValues(ticket);
+  const matchedDate = getDateOptionForValues(values);
+  if (matchedDate?.label) return matchedDate.label;
   return values.find((value) => getDateKeysFromText(value).length) || "";
 }
 
