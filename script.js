@@ -1,8 +1,8 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 111;
+const ROW_COLOR_LOGIC_VERSION = 112;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
-const COLUMN_NORMALIZATION_VERSION = 27;
+const COLUMN_NORMALIZATION_VERSION = 28;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = false;
@@ -4547,14 +4547,12 @@ function getBoundSourceContextAnchorForIndex(anchors, sourceIndex) {
     .sort((a, b) => a.index - b.index);
   if (!sorted.length) return null;
   if (sourceIndex <= sorted[0].index) return sorted[0];
-  for (let index = 0; index < sorted.length - 1; index += 1) {
-    const current = sorted[index];
-    const next = sorted[index + 1];
-    const midpoint = (current.index + next.index) / 2;
-    if (sourceIndex <= midpoint) return current;
-    if (sourceIndex < next.index) return next;
+  let inherited = sorted[0];
+  for (const anchor of sorted) {
+    if (anchor.index > sourceIndex) break;
+    inherited = anchor;
   }
-  return sorted[sorted.length - 1];
+  return inherited;
 }
 
 function getRowColorSourceContextAnchors(table) {
