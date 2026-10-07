@@ -900,6 +900,8 @@ def detect_table_grid_geometry(image):
                 "height": int(y2 - y1),
                 "darkDensity": round(dark_density, 4),
                 "verticalLines": int(len(x_centers)),
+                "upperLine": int(upper),
+                "lowerLine": int(lower),
             }
         )
 
@@ -913,6 +915,42 @@ def detect_table_grid_geometry(image):
         "xCenters": x_centers,
         "x1": int(left),
         "x2": int(right),
+    }
+
+
+def has_horizontal_rule_in_column(image, y, x1, x2):
+    height, width = image.shape[:2]
+    y = int(round(float(y)))
+    x1 = max(0, min(width - 1, int(round(float(x1)))))
+    x2 = max(x1 + 1, min(width, int(round(float(x2)))))
+    if x2 - x1 < 12 or y < 0 or y >= height:
+        return False
+    y1 = max(0, y - 2)
+    y2 = min(height, y + 3)
+    region = image[y1:y2, x1:x2]
+    if region.size == 0:
+        return False
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 35, 120)
+    dark_ratio = float(np.count_nonzero(gray < 120)) / max(1, gray.size)
+    edge_ratio = float(np.count_nonzero(edges)) / max(1, edges.size)
+    return dark_ratio >= 0.075 or edge_ratio >= 0.04
+
+
+def has_horizontal_rule_near_column(image, y, x1, x2, radius=7):
+    for offset in range(-int(radius), int(radius) + 1):
+        if has_horizontal_rule_in_column(image, int(round(float(y))) + offset, x1, x2):
+            return True
+    return False
+
+
+def get_grid_context_columns(x_centers):
+    xs = sorted(int(x) for x in x_centers)
+    if len(xs) < 4:
+        return None
+    return {
+        "date": (xs[1], xs[2]),
+        "face": (xs[2], xs[3]),
     }
 
 
@@ -997,10 +1035,19 @@ def analyze_physical_grid(image, expected_rows):
         selection_mode = "physical_grid_exact" if len(selected) == expected_rows else "physical_grid"
 
     rows = []
+    context_columns = get_grid_context_columns(geometry["xCenters"])
     for index, interval in enumerate(selected):
         row = classify_interval(image, interval)
         price_cell = classify_rightmost_grid_cell(image, interval, geometry["xCenters"])
         enrich_row_with_price_cell(row, price_cell)
+        if context_columns:
+            date_x1, date_x2 = context_columns["date"]
+            face_x1, face_x2 = context_columns["face"]
+            upper_line = int(interval.get("upperLine", interval.get("y1", 0)))
+            row["dateBlockStart"] = bool(index == 0 or has_horizontal_rule_in_column(image, upper_line, date_x1 + 4, date_x2 - 4))
+            row["faceBlockStart"] = bool(index == 0 or has_horizontal_rule_in_column(image, upper_line, face_x1 + 4, face_x2 - 4))
+            row["dateColumnBox"] = {"x1": int(date_x1), "x2": int(date_x2)}
+            row["faceColumnBox"] = {"x1": int(face_x1), "x2": int(face_x2)}
         row["index"] = index
         row["sourceIndex"] = index
         row["gridRowIndex"] = index
@@ -1669,9 +1716,19 @@ def analyze_ocr_rows(image_path, ocr_rows):
     if image is None:
         raise RuntimeError("image cannot be read")
     intervals = build_ocr_aligned_intervals(image, ocr_rows)
+    geometry = detect_table_grid_geometry(image)
+    context_columns = get_grid_context_columns(geometry["xCenters"]) if geometry else None
     rows = []
     for index, interval in enumerate(intervals):
         row = classify_interval(image, interval)
+        if context_columns:
+            date_x1, date_x2 = context_columns["date"]
+            face_x1, face_x2 = context_columns["face"]
+            upper_line = int(interval.get("y1", 0))
+            row["dateBlockStart"] = bool(index == 0 or has_horizontal_rule_near_column(image, upper_line, date_x1 + 4, date_x2 - 4))
+            row["faceBlockStart"] = bool(index == 0 or has_horizontal_rule_near_column(image, upper_line, face_x1 + 4, face_x2 - 4))
+            row["dateColumnBox"] = {"x1": int(date_x1), "x2": int(date_x2)}
+            row["faceColumnBox"] = {"x1": int(face_x1), "x2": int(face_x2)}
         row["index"] = index
         row["sourceIndex"] = index
         row["ocrIndex"] = interval.get("ocrIndex", index)

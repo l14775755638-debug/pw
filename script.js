@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 113;
+const ROW_COLOR_LOGIC_VERSION = 114;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 29;
@@ -4573,7 +4573,45 @@ function getStrongSourceSequenceBreakStart(sourceRows = [], startIndex = -1, end
   return best?.index ?? null;
 }
 
-function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = []) {
+function getGridContextBlockStartForIndex(sourceRows = [], sourceIndex = -1, blockKey = "") {
+  if (!Array.isArray(sourceRows) || !Number.isInteger(sourceIndex) || !blockKey) return null;
+  const starts = sourceRows
+    .map((row) => ({ index: Number(row?.index), isStart: row?.[blockKey] === true }))
+    .filter((item) => Number.isInteger(item.index) && item.isStart)
+    .map((item) => item.index)
+    .sort((a, b) => a - b);
+  if (!starts.length) return null;
+  let current = starts[0];
+  for (const start of starts) {
+    if (start > sourceIndex) break;
+    current = start;
+  }
+  return current;
+}
+
+function getGridContextAnchorForIndex(anchors, sourceIndex, sourceRows = [], blockKey = "") {
+  if (!Array.isArray(anchors) || !anchors.length || !Array.isArray(sourceRows) || !sourceRows.length || !blockKey) return null;
+  const targetBlockStart = getGridContextBlockStartForIndex(sourceRows, sourceIndex, blockKey);
+  if (!Number.isInteger(targetBlockStart)) return null;
+  const blockAnchors = anchors
+    .map((anchor) => ({
+      ...anchor,
+      index: Number(anchor?.index),
+      value: String(anchor?.value || anchor?.date || anchor?.face || "").trim(),
+    }))
+    .filter((anchor) => Number.isInteger(anchor.index) && anchor.value)
+    .map((anchor) => ({
+      ...anchor,
+      blockStart: getGridContextBlockStartForIndex(sourceRows, anchor.index, blockKey),
+    }))
+    .filter((anchor) => Number.isInteger(anchor.blockStart));
+  return (
+    blockAnchors.find((anchor) => anchor.blockStart === targetBlockStart) ||
+    null
+  );
+}
+
+function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = [], blockKey = "") {
   if (!Number.isInteger(sourceIndex) || !Array.isArray(anchors) || !anchors.length) return null;
   const sorted = anchors
     .map((anchor) => ({
@@ -4583,6 +4621,8 @@ function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = 
     .filter((anchor) => Number.isInteger(anchor.index) && anchor.value)
     .sort((a, b) => a.index - b.index);
   if (!sorted.length) return null;
+  const gridAnchor = getGridContextAnchorForIndex(sorted, sourceIndex, sourceRows, blockKey);
+  if (gridAnchor) return gridAnchor;
   if (sourceIndex <= sorted[0].index) return sorted[0];
   for (let index = 0; index < sorted.length - 1; index += 1) {
     const current = sorted[index];
@@ -4612,6 +4652,8 @@ function getRowColorSourceContextAnchors(table) {
       date: String(row?.date || "").trim(),
       face: String(row?.face || "").trim(),
       text: String(row?.text || "").trim(),
+      dateBlockStart: row?.dateBlockStart === true,
+      faceBlockStart: row?.faceBlockStart === true,
     };
   };
   return {
@@ -4644,6 +4686,8 @@ function extractRowColorSourceContextAnchorsFromRows(rows = []) {
       date,
       face,
       text: rawText,
+      dateBlockStart: item?.dateBlockStart === true,
+      faceBlockStart: item?.faceBlockStart === true,
     });
     if (date) dateAnchors.push({ index: sourceIndex, date, value: date });
     if (face) faceAnchors.push({ index: sourceIndex, face, value: face });
@@ -4666,7 +4710,7 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
     const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
     const sourceContext = sourceRowByIndex.get(sourceIndex) || null;
     if (dateIndex >= 0 && rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex)) {
-      const dateAnchor = getBoundSourceContextAnchorForIndex(dateAnchors, sourceIndex, sourceRows);
+      const dateAnchor = getBoundSourceContextAnchorForIndex(dateAnchors, sourceIndex, sourceRows, "dateBlockStart");
       const targetDate = dateAnchor?.value || "";
       const currentDate = String(row[dateIndex] || "").trim();
       const sourceHasExplicitDate = Boolean(sourceContext?.date);
@@ -4685,7 +4729,7 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
       }
     }
     if (faceIndex >= 0 && rowShouldReceiveMergedFace(table, row, rowIndex, faceIndex)) {
-      const faceAnchor = getBoundSourceContextAnchorForIndex(faceAnchors, sourceIndex, sourceRows);
+      const faceAnchor = getBoundSourceContextAnchorForIndex(faceAnchors, sourceIndex, sourceRows, "faceBlockStart");
       const targetFace = faceAnchor?.value || "";
       const currentFace = String(row[faceIndex] || "").trim();
       const sourceHasExplicitFace = Boolean(sourceContext?.face);
