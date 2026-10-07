@@ -1,11 +1,11 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 119;
+const ROW_COLOR_LOGIC_VERSION = 120;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 30;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
-const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = false;
+const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = true;
 const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 180;
 const MAX_ANCHOR_ROWS_PER_TABLE = 260;
 const MAX_ANCHOR_BATCH_PAGES_PER_REQUEST = 4;
@@ -7658,6 +7658,7 @@ function shouldAutoSkipForRowColor(table, rowIndex, options = {}) {
     typeof options.hasOpenCvPriceSideCellWhiteAndColoredConflict === "boolean"
       ? options.hasOpenCvPriceSideCellWhiteAndColoredConflict
       : hasOpenCvPriceSideCellWhiteAndColoredConflict(table);
+  if (!hasUsableRowColorItemForTicketRow(table, row, rowIndex, item)) return false;
   if (
     hasPriceSideConflict &&
     hasOpenCvNonWhitePriceSideCell(item) &&
@@ -7667,7 +7668,6 @@ function shouldAutoSkipForRowColor(table, rowIndex, options = {}) {
   ) {
     return true;
   }
-  if (!hasUsableRowColorItemForTicketRow(table, row, rowIndex, item)) return false;
   if (hasPriceSideConflict && hasOpenCvNonWhitePriceSideCell(item)) return true;
   if (getBoundLocalNonWhiteAutoSkipLabel(table, rowIndex)) return true;
   if (isHighConfidenceLocalNonWhiteAutoSkipRow(table, rowIndex)) return true;
@@ -11823,7 +11823,7 @@ function removeSoldRowsFromTable(table) {
   const removed = removeRowsFromTable(table, (row, rowIndex) =>
     useLightSoldCleanup
       ? row.some((cell) => isSoldText(cell, { strict: true })) || isNonTicketFooterRow(table, row)
-      : isUnavailableTicket({ table, row, index: rowIndex }) ||
+      : isSoldTicket({ table, row, index: rowIndex }) ||
         !hasTicketSalePrice({ table, row, index: rowIndex }) ||
         isNonTicketFooterRow(table, row),
   );
