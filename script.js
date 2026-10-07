@@ -11611,6 +11611,11 @@ function getMergedLinkedRemarkBetweenRows(table, leftRow, leftIndex, rightRow, r
   if (leftSharedCell) return leftSharedCell.value;
   const rightSharedCell = right.linkedCells.find(({ index }) => isBlankMergedPeerCellValue(left.row?.[index]));
   if (rightSharedCell) return rightSharedCell.value;
+  const repeatedLinkedCell = left.linkedCells.find(({ value, index }) => {
+    const rightValue = String(right.row?.[index] || "").trim();
+    return rightValue && normalize(value) === normalize(rightValue) && extractLinkedSeatRemark(rightValue);
+  });
+  if (repeatedLinkedCell) return repeatedLinkedCell.value;
   return "";
 }
 
