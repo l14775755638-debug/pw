@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 117;
+const ROW_COLOR_LOGIC_VERSION = 118;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 29;
@@ -1226,13 +1226,14 @@ function parseTableText(text) {
     const rows = [...getPreHeaderDateAnchorRows(lines, dataStartIndex, columns), ...dataRows];
     extendColumnsForOverflowRows(columns, rows);
     if (!columns.some(Boolean) || !rows.length) return null;
-    return { columns, rows, headerless: true };
+    return { columns, rows, sourceTextRows: cloneRows(rows), headerless: true };
   }
 
   if (headerIndex < 0) return null;
   const columns = splitTableLine(lines[headerIndex]).map((cell) => cell.trim());
   let activeColumns = [...columns];
   const rows = getPreHeaderDateAnchorRows(lines, headerIndex, columns);
+  const sourceTextRows = cloneRows(rows);
 
   lines.slice(headerIndex + 1).forEach((line) => {
     if (looksLikeRecognizedTableHeader(line)) {
@@ -1243,12 +1244,13 @@ function parseTableText(text) {
     const row = splitTableLineForColumns(line, activeColumns).map((cell) => cell.trim());
     if (!row.some(Boolean) || isNonTicketFooterCells(row, activeColumns)) return;
     rows.push(mapRecognizedRowToColumns(row, activeColumns, columns));
+    sourceTextRows.push(row);
   });
 
   removeEmptyDecorativeColumns(columns, rows);
   extendColumnsForOverflowRows(columns, rows);
   if (!columns.some(Boolean) || !rows.length) return null;
-  return { columns, rows, headerless: false };
+  return { columns, rows, sourceTextRows, headerless: false };
 }
 
 function parseContinuationRows(text, columns) {
@@ -1705,9 +1707,13 @@ function canTreatAsContinuationTable(previous, next) {
   return compatibleLength && continuationRows / rows.length >= 0.5;
 }
 
-function appendContinuationRows(previous, rows = []) {
+function appendContinuationRows(previous, rows = [], sourceRows = []) {
   if (!previous || !rows.length) return;
   previous.rows.push(...adaptRowsToColumns(rows, previous.columns));
+  if (Array.isArray(previous.sourceTextRows)) {
+    const rowsToAppend = Array.isArray(sourceRows) && sourceRows.length === rows.length ? sourceRows : rows;
+    previous.sourceTextRows.push(...cloneRows(rowsToAppend));
+  }
   extendColumnsForOverflowRows(previous.columns, previous.rows);
 }
 
@@ -1778,7 +1784,7 @@ function getRecognizedColumnTargetIndex(columns, column, usedIndexes = new Set()
 function mergeRecognizedTableInto(previous, next) {
   if (!previous || !next) return;
   if (shouldTreatParsedTableAsHeaderless(next)) {
-    appendContinuationRows(previous, next.rows);
+    appendContinuationRows(previous, next.rows, next.sourceTextRows);
     return;
   }
   next.columns.forEach((column) => {
@@ -1803,6 +1809,10 @@ function mergeRecognizedTableInto(previous, next) {
     return mapped;
   });
   previous.rows.push(...mappedRows);
+  if (Array.isArray(previous.sourceTextRows)) {
+    const sourceRows = Array.isArray(next.sourceTextRows) && next.sourceTextRows.length === next.rows.length ? next.sourceTextRows : mappedRows;
+    previous.sourceTextRows.push(...cloneRows(sourceRows));
+  }
   extendColumnsForOverflowRows(previous.columns, previous.rows);
 }
 
@@ -1961,15 +1971,14 @@ function splitRecognizedTables(text) {
       if (previous && previous.sourcePage === sourcePage) {
         const continuationRows = parseContinuationRows(section, previous.columns);
         if (continuationRows.length) {
-          previous.rows.push(...continuationRows);
-          extendColumnsForOverflowRows(previous.columns, previous.rows);
+          appendContinuationRows(previous, continuationRows);
           return;
         }
       }
       if (parsed) {
         const nextTable = { ...parsed, sourcePage };
         if (canTreatAsContinuationTable(previous, nextTable)) {
-          appendContinuationRows(previous, nextTable.rows);
+          appendContinuationRows(previous, nextTable.rows, nextTable.sourceTextRows);
           return;
         }
         if (canMergeRecognizedTables(previous, nextTable)) {
@@ -4605,8 +4614,16 @@ function getGridContextAnchorForIndex(anchors, sourceIndex, sourceRows = [], blo
       blockStart: getGridContextBlockStartForIndex(sourceRows, anchor.index, blockKey),
     }))
     .filter((anchor) => Number.isInteger(anchor.blockStart));
+  const exactBlockAnchors = blockAnchors
+    .filter((anchor) => anchor.blockStart === targetBlockStart)
+    .sort((a, b) => a.index - b.index);
+  if (exactBlockAnchors.length) {
+    return exactBlockAnchors.filter((anchor) => anchor.index <= sourceIndex).pop() || exactBlockAnchors[0];
+  }
   return (
-    blockAnchors.find((anchor) => anchor.blockStart === targetBlockStart) ||
+    blockAnchors
+      .filter((anchor) => anchor.blockStart <= targetBlockStart)
+      .sort((a, b) => b.blockStart - a.blockStart || b.index - a.index)[0] ||
     null
   );
 }
@@ -4681,7 +4698,7 @@ function extractRowColorSourceContextAnchorsFromRows(rows = []) {
     const values = rawText.split(/\t+/).map((cell) => cell.trim()).filter(Boolean);
     const parsed = parseBoundTicketSourceRowByFields(values, []);
     const date = String(parsed?.["日期"] || "").trim();
-    const face = String(parsed?.["票面"] || "").trim();
+    const face = String(parsed?.["票面"] || values.slice(1, -1).find((value) => isNumericTicketFaceValue(value)) || "").trim();
     sourceRows.push({
       index: sourceIndex,
       serial: String(parsed?.["序号"] || values[0] || "").trim(),
@@ -4697,6 +4714,37 @@ function extractRowColorSourceContextAnchorsFromRows(rows = []) {
   return { dateAnchors, faceAnchors, sourceRows };
 }
 
+function mergeSourceContextWithVisualBlockRows(baseContext, visualRows = []) {
+  const dateAnchors = Array.isArray(baseContext?.dateAnchors) ? baseContext.dateAnchors : [];
+  const faceAnchors = Array.isArray(baseContext?.faceAnchors) ? baseContext.faceAnchors : [];
+  const sourceRows = Array.isArray(baseContext?.sourceRows) ? baseContext.sourceRows : [];
+  const visualBySourceIndex = new Map();
+  (Array.isArray(visualRows) ? visualRows : []).forEach((row, fallbackIndex) => {
+    const sourceIndex = Number.isInteger(Number(row?.index))
+      ? Number(row.index)
+      : Number.isInteger(Number(row?.sourceIndex))
+        ? Number(row.sourceIndex)
+        : fallbackIndex;
+    if (!Number.isInteger(sourceIndex)) return;
+    visualBySourceIndex.set(sourceIndex, row);
+  });
+  const mergedSourceRows = sourceRows.map((row) => {
+    const sourceIndex = Number(row?.index);
+    const visual = visualBySourceIndex.get(sourceIndex);
+    return {
+      ...row,
+      dateBlockStart: row?.dateBlockStart === true || visual?.dateBlockStart === true,
+      faceBlockStart: row?.faceBlockStart === true || visual?.faceBlockStart === true,
+    };
+  });
+  return {
+    dateAnchors,
+    faceAnchors,
+    sourceRows: mergedSourceRows,
+    requireSequenceBoundary: baseContext?.requireSequenceBoundary === true,
+  };
+}
+
 function extractSourceContextAnchorsFromTableRows(rows = [], columns = []) {
   const dateAnchors = [];
   const faceAnchors = [];
@@ -4707,7 +4755,7 @@ function extractSourceContextAnchorsFromTableRows(rows = [], columns = []) {
     const parsed = parseBoundTicketSourceRowByFields(values, columns) || {};
     const serial = String(parsed["序号"] || values[0] || "").trim();
     const date = String(parsed["日期"] || "").trim();
-    const face = String(parsed["票面"] || "").trim();
+    const face = String(parsed["票面"] || values.slice(1, -1).find((value) => isNumericTicketFaceValue(value)) || "").trim();
     sourceRows.push({
       index,
       serial,
@@ -8911,6 +8959,7 @@ function hasStableOpenCvActionableAlignment(table, analysis, aligned, availableR
 
 function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   if (!table || !Array.isArray(table.rows)) return 0;
+  const previousSourceContext = getRowColorSourceContextAnchors(table);
   clearRowColorDecisionRuntimeCache(table);
   table.rowColorSource = "none";
   table.rowColorReliable = false;
@@ -8947,7 +8996,13 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorUnreliableReasons = Array.isArray(analysis.unreliableReasons) ? analysis.unreliableReasons : [];
   table.rowColorWarningReasons = Array.isArray(analysis.warningReasons) ? analysis.warningReasons : [];
   const availableRows = Array.isArray(analysis.rows) ? analysis.rows : [];
-  table.rowColorSourceContextAnchors = extractRowColorSourceContextAnchorsFromRows(availableRows);
+  const visualSourceContext = extractRowColorSourceContextAnchorsFromRows(availableRows);
+  const hasVisualTextContext = Boolean(visualSourceContext.dateAnchors.length || visualSourceContext.faceAnchors.length);
+  const hasPreviousTextContext = Boolean(previousSourceContext.dateAnchors.length || previousSourceContext.faceAnchors.length);
+  table.rowColorSourceContextAnchors = mergeSourceContextWithVisualBlockRows(
+    hasVisualTextContext || !hasPreviousTextContext ? visualSourceContext : previousSourceContext,
+    availableRows,
+  );
   const aligned =
     analysis.source === "ai_row_color" || analysis.source === "ticket_row_anchor"
       ? {
@@ -18032,7 +18087,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
       columns: parsedTable.columns,
       originalColumns: Array.isArray(parsedTable.originalColumns) ? parsedTable.originalColumns : [...parsedTable.columns],
       originalRows: Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
-      sourceTextRows: cloneRows(parsedTable.rows),
+      sourceTextRows: Array.isArray(parsedTable.sourceTextRows) ? cloneRows(parsedTable.sourceTextRows) : Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
       rows: parsedTable.rows,
       quickManualMode,
       rowColorPageRowOffset: Math.max(0, Math.floor(Number(parsedTable.rowColorPageRowOffset || 0) || 0)),
