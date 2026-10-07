@@ -6389,7 +6389,9 @@ function isMergedCellArtifact(value) {
 }
 
 function rowTextHasLinkedSeats(value) {
-  return /(连坐|連坐|连座|連座|双连|雙連|两连|兩連|伪连|偽連|假连|假連|\d+\s*连|연석|붙은자리)/i.test(String(value || ""));
+  return /((?:\d+|[一二两兩三四五六七八九十]+)\s*(?:连坐|連坐|连座|連座|连|連)|连坐|連坐|连座|連座|双连|雙連|两连|兩連|伪连|偽連|假连|假連|연석|붙은자리)/i.test(
+    String(value || ""),
+  );
 }
 
 function cleanMergedSeatRemark(value) {
@@ -6500,7 +6502,9 @@ function stripExtractedValueFromText(text, value) {
 
 function extractLinkedSeatRemark(value) {
   const text = String(value || "").trim();
-  const match = text.match(/(\d+\s*连坐|\d+\s*連坐|连坐|連坐|连座|連座|双连|雙連|两连|兩連|연석|붙은자리)/i);
+  const match = text.match(
+    /((?:\d+|[一二两兩三四五六七八九十]+)\s*(?:连坐|連坐|连座|連座|连|連)|连坐|連坐|连座|連座|双连|雙連|两连|兩連|연석|붙은자리)/i,
+  );
   return match ? match[1].replace(/\s+/g, "") : "";
 }
 
@@ -11479,6 +11483,162 @@ function removeRowsFromTable(table, shouldRemove) {
   return removed;
 }
 
+function normalizeLinkedDuplicateKeyValue(value) {
+  return normalize(String(value || "").trim()).replace(/\s+/g, "");
+}
+
+function getTicketLinkedSeatRemark(ticket) {
+  if (!ticket?.table || !Array.isArray(ticket.row)) return "";
+  const table = ticket.table;
+  const row = ticket.row;
+  const sourceRows = [
+    { columns: table.columns || [], row },
+    {
+      columns: table.originalColumns || [],
+      row: Array.isArray(table.originalRows) && table.originalRows[ticket.index] ? table.originalRows[ticket.index] : null,
+    },
+  ].filter((source) => Array.isArray(source.columns) && Array.isArray(source.row));
+  const noteNames = [
+    "备注",
+    "remark",
+    "note",
+    "说明",
+    "座位情况",
+    "座位状态",
+    "座席情况",
+    "seat condition",
+    "seat status",
+    "连坐",
+    "连坐数量",
+    "연석",
+  ];
+  for (const source of sourceRows) {
+    const indexes = findColumnIndexes(source.columns, noteNames);
+    for (const index of indexes) {
+      const value = String(source.row[index] || "").trim();
+      const remark = extractLinkedSeatRemark(value);
+      if (remark) return value;
+    }
+  }
+  for (const source of sourceRows) {
+    const rowText = source.row
+      .map((cell) => String(cell || "").trim())
+      .filter(Boolean)
+      .join(" ");
+    const remark = extractLinkedSeatRemark(rowText);
+    if (remark) return remark;
+  }
+  return "";
+}
+
+function getLinkedDuplicateTicketKey(ticket) {
+  if (!ticket?.table || !Array.isArray(ticket.row)) return "";
+  const date = getTicketPrimaryDateValue(ticket) || getFirstNonEmptyColumnValue(ticket.table, ticket.row, DATE_COLUMN_NAMES);
+  const face = getFirstFaceValueFromTicket(ticket);
+  const floor = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["楼层", "層数", "层数", "楼座", "floor", "tier", "level", "층"]);
+  const zone = getTicketZoneValue(ticket);
+  const rowValue = getTicketRowValue(ticket);
+  const seat = getTicketSeatValue(ticket);
+  const salePrice = getTicketSalePriceValue(ticket);
+  if (![date, zone, rowValue, seat, salePrice].every((value) => String(value || "").trim())) return "";
+  return [date, face, floor, zone, rowValue, seat, salePrice].map(normalizeLinkedDuplicateKeyValue).join("|");
+}
+
+function mergeLinkedRemarkIntoTableRow(table, rowIndex, remark) {
+  const text = String(remark || "").trim();
+  if (!text || !table?.rows?.[rowIndex]) return false;
+  ensureOriginalTableSnapshot(table);
+  const remarkIndex = ensureNamedColumn(table, "备注", ["备注", "remark", "note", "说明"]);
+  const row = table.rows[rowIndex];
+  while (row.length < table.columns.length) row.push("");
+  const current = String(row[remarkIndex] || "").trim();
+  if (current && normalize(current).includes(normalize(text))) return false;
+  row[remarkIndex] = current ? `${current} ${text}`.trim() : text;
+  syncOriginalRowValue(table, rowIndex, remarkIndex, row[remarkIndex], { appendMissing: true });
+  return true;
+}
+
+function moveLinkedSeatConditionValuesToRemark(table) {
+  if (!table?.rows?.length || !Array.isArray(table.columns)) return false;
+  const seatConditionIndexes = findColumnIndexes(table.columns, ["座位情况", "座位状态", "座席情况", "seat condition", "seat status", "连坐", "连坐数量", "연석"]);
+  if (!seatConditionIndexes.length) return false;
+  const remarkIndex = ensureDedicatedColumn(table, "备注");
+  let changed = false;
+  table.rows.forEach((row, rowIndex) => {
+    while (row.length < table.columns.length) row.push("");
+    const linkedText = seatConditionIndexes
+      .map((index) => String(row[index] || "").trim())
+      .find((value) => rowTextHasLinkedSeats(value));
+    if (!linkedText) return;
+    const currentRemark = String(row[remarkIndex] || "").trim();
+    if (currentRemark && currentRemark !== "/" && normalize(currentRemark).includes(normalize(linkedText))) return;
+    row[remarkIndex] = currentRemark && currentRemark !== "/" ? `${currentRemark} ${linkedText}`.trim() : linkedText;
+    syncOriginalRowValue(table, rowIndex, remarkIndex, row[remarkIndex], { appendMissing: true });
+    changed = true;
+  });
+  return changed;
+}
+
+function collapseLinkedDuplicateRowsFromTable(table) {
+  if (!table?.rows?.length) return 0;
+  const seen = new Map();
+  const removeIndexes = new Set();
+  let changed = false;
+  table.rows.forEach((row, rowIndex) => {
+    if (isUnavailableTicket({ table, row, index: rowIndex }) || !hasTicketSalePrice({ table, row, index: rowIndex })) return;
+    const ticket = { table, row, index: rowIndex };
+    const key = getLinkedDuplicateTicketKey(ticket);
+    if (!key) return;
+    const linkedRemark = getTicketLinkedSeatRemark(ticket);
+    const previous = seen.get(key);
+    if (!previous) {
+      seen.set(key, { rowIndex, linkedRemark });
+      return;
+    }
+    if (!previous.linkedRemark && !linkedRemark) return;
+    const mergedRemark = previous.linkedRemark || linkedRemark;
+    if (mergedRemark && mergeLinkedRemarkIntoTableRow(table, previous.rowIndex, mergedRemark)) changed = true;
+    if (!previous.linkedRemark && linkedRemark) previous.linkedRemark = linkedRemark;
+    removeIndexes.add(rowIndex);
+  });
+  const removed = removeRowsFromTable(table, (_row, rowIndex) => removeIndexes.has(rowIndex));
+  if (moveLinkedSeatConditionValuesToRemark(table)) changed = true;
+  if (removed || changed) {
+    delete table._soldTicketCache;
+    delete table._ticketSalePriceCache;
+    delete table._rowColorEffectiveTicketCache;
+    clearRowColorDecisionRuntimeCache(table);
+  }
+  return removed;
+}
+
+function collapseLinkedDuplicateTicketsForDisplay(tickets = []) {
+  const kept = [];
+  const positions = new Map();
+  tickets.forEach((ticket) => {
+    const key = getLinkedDuplicateTicketKey(ticket);
+    const linkedRemark = getTicketLinkedSeatRemark(ticket);
+    if (!key) {
+      kept.push(ticket);
+      return;
+    }
+    const existingIndex = positions.get(key);
+    if (existingIndex === undefined) {
+      positions.set(key, kept.length);
+      kept.push(ticket);
+      return;
+    }
+    const existing = kept[existingIndex];
+    const existingRemark = getTicketLinkedSeatRemark(existing);
+    if (existingRemark || linkedRemark) {
+      if (!existingRemark && linkedRemark) kept[existingIndex] = ticket;
+      return;
+    }
+    kept.push(ticket);
+  });
+  return kept;
+}
+
 function pruneNonTicketRowsFromTable(table) {
   return removeRowsFromTable(table, (row) => isNonTicketFooterRow(table, row));
 }
@@ -11522,18 +11682,22 @@ function removeSoldRowsFromTable(table) {
         !hasTicketSalePrice({ table, row, index: rowIndex }) ||
         isNonTicketFooterRow(table, row),
   );
-  if (removed) {
+  const collapsedLinkedRows = collapseLinkedDuplicateRowsFromTable(table);
+  const movedLinkedRemarks = moveLinkedSeatConditionValuesToRemark(table);
+  if (removed || collapsedLinkedRows || movedLinkedRemarks) {
     let changedAfterRemove = false;
     if (repairRowsFromBoundSourceText(table)) changedAfterRemove = true;
     if (repairMergedContextFromRowColorSourceAnchors(table)) changedAfterRemove = true;
     if (repairMergedDateBlocks(table, mergedDateAnchors)) changedAfterRemove = true;
     if (repairMergedFaceBlocks(table)) changedAfterRemove = true;
     if (changedAfterRemove) normalizePendingTableColumns(table);
+    moveLinkedSeatConditionValuesToRemark(table);
     if (table.lightReviewFlags) {
       markPendingTableReviewFlagsLightly(table);
     } else {
       updatePendingTableReviewFlags(table);
     }
+    moveLinkedSeatConditionValuesToRemark(table);
   }
   return removed;
 }
@@ -11575,7 +11739,7 @@ function cleanupPendingSoldRowsForCurrentEvent() {
 function prepareTickets(tickets) {
   const availableTickets = tickets.filter((ticket) => !isUnavailableTicket(ticket));
   const filtered = selectedDateId ? availableTickets.filter((ticket) => dateMatchesTicket(ticket)) : availableTickets;
-  return sortTickets(filtered);
+  return sortTickets(collapseLinkedDuplicateTicketsForDisplay(filtered));
 }
 
 function getZoneTickets(zone) {
@@ -11600,9 +11764,11 @@ function getSearchTickets(term) {
 function countTicketsForDate(dateId) {
   const previousDateId = selectedDateId;
   selectedDateId = dateId;
-  const count = currentEvent.tables
+  const count = collapseLinkedDuplicateTicketsForDisplay(
+    currentEvent.tables
     .flatMap((table) => table.rows.map((row, index) => ({ table, row, index })))
-    .filter((ticket) => !isUnavailableTicket(ticket) && dateMatchesTicket(ticket)).length;
+      .filter((ticket) => !isUnavailableTicket(ticket) && dateMatchesTicket(ticket)),
+  ).length;
   selectedDateId = previousDateId;
   return count;
 }
@@ -12290,14 +12456,16 @@ function getStandardTicketFields(ticket) {
   const quantity = getTicketQuantityValue(ticket);
   const salePrice = getTicketSalePriceValue(ticket);
   const rawNote = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["备注", "remark", "note", "说明"]);
-  const seatCondition = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["座位情况", "座位状态", "座席情况", "seat condition", "seat status"]);
+  const rawSeatCondition = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["座位情况", "座位状态", "座席情况", "seat condition", "seat status"]);
+  const linkedSeatCondition = rowTextHasLinkedSeats(rawSeatCondition) ? rawSeatCondition : "";
+  const seatCondition = linkedSeatCondition ? "" : rawSeatCondition;
   const fallbackNote = composite?.note || "";
   const parsedRawNote = parseCompositeSeatInfo(rawNote);
   const cleanedRawNote = parsedRawNote?.zone || parsedRawNote?.row || parsedRawNote?.seat ? parsedRawNote.note || "" : rawNote;
   const note =
     salePrice && extractNumber(cleanedRawNote) === extractNumber(salePrice) && isLikelySalePriceValue(cleanedRawNote, { minPrice: 100 })
       ? ""
-      : cleanedRawNote || fallbackNote;
+      : cleanedRawNote || fallbackNote || linkedSeatCondition;
   const visibleFace = String(face || "").trim() && extractNumber(face) !== extractNumber(salePrice) ? face : "";
   return [
     { label: "日期", value: date },
