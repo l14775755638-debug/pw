@@ -1,8 +1,8 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 112;
+const ROW_COLOR_LOGIC_VERSION = 113;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
-const COLUMN_NORMALIZATION_VERSION = 28;
+const COLUMN_NORMALIZATION_VERSION = 29;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = false;
@@ -4536,7 +4536,44 @@ function getMergedFaceAnchorRows(table) {
     .filter(Boolean);
 }
 
-function getBoundSourceContextAnchorForIndex(anchors, sourceIndex) {
+function getSourceRowSerialNumber(row) {
+  const text = String(row?.serial || row?.sequence || row?.no || "").trim();
+  if (/^\d{1,5}$/.test(text)) return Number(text);
+  const rawText = String(row?.text || row?.matchedText || "").trim();
+  const firstCell = rawText.split(/\t+/)[0]?.trim() || "";
+  return /^\d{1,5}$/.test(firstCell) ? Number(firstCell) : null;
+}
+
+function getStrongSourceSequenceBreakStart(sourceRows = [], startIndex = -1, endIndex = -1) {
+  if (!Array.isArray(sourceRows) || startIndex < 0 || endIndex <= startIndex) return null;
+  const rowsByIndex = new Map(
+    sourceRows
+      .map((row) => ({ row, index: Number(row?.index) }))
+      .filter((item) => Number.isInteger(item.index))
+      .map((item) => [item.index, item.row]),
+  );
+  let best = null;
+  for (let index = startIndex + 1; index <= endIndex; index += 1) {
+    const priorSerial = getSourceRowSerialNumber(rowsByIndex.get(index - 2));
+    const previousSerial = getSourceRowSerialNumber(rowsByIndex.get(index - 1));
+    const currentSerial = getSourceRowSerialNumber(rowsByIndex.get(index));
+    if (!Number.isInteger(previousSerial) || !Number.isInteger(currentSerial)) continue;
+    const forwardJump = currentSerial - previousSerial;
+    const priorForwardJump = Number.isInteger(priorSerial) ? previousSerial - priorSerial : 0;
+    const breakIndex = currentSerial < previousSerial && priorForwardJump >= 20 ? index - 1 : index;
+    const score =
+      currentSerial < previousSerial
+        ? previousSerial - currentSerial + 80
+        : forwardJump >= 20
+          ? forwardJump
+          : 0;
+    if (!score) continue;
+    if (!best || score > best.score) best = { index: breakIndex, score };
+  }
+  return best?.index ?? null;
+}
+
+function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = []) {
   if (!Number.isInteger(sourceIndex) || !Array.isArray(anchors) || !anchors.length) return null;
   const sorted = anchors
     .map((anchor) => ({
@@ -4547,31 +4584,47 @@ function getBoundSourceContextAnchorForIndex(anchors, sourceIndex) {
     .sort((a, b) => a.index - b.index);
   if (!sorted.length) return null;
   if (sourceIndex <= sorted[0].index) return sorted[0];
-  let inherited = sorted[0];
-  for (const anchor of sorted) {
-    if (anchor.index > sourceIndex) break;
-    inherited = anchor;
+  for (let index = 0; index < sorted.length - 1; index += 1) {
+    const current = sorted[index];
+    const next = sorted[index + 1];
+    if (sourceIndex >= next.index) continue;
+    const sequenceBreakStart = getStrongSourceSequenceBreakStart(sourceRows, current.index, next.index);
+    const boundary = Number.isInteger(sequenceBreakStart) ? sequenceBreakStart : (current.index + next.index) / 2;
+    return sourceIndex >= boundary ? next : current;
   }
-  return inherited;
+  return sorted[sorted.length - 1];
 }
 
 function getRowColorSourceContextAnchors(table) {
   const context = table?.rowColorSourceContextAnchors;
-  if (!context || typeof context !== "object") return { dateAnchors: [], faceAnchors: [] };
+  if (!context || typeof context !== "object") return { dateAnchors: [], faceAnchors: [], sourceRows: [] };
   const normalizeAnchor = (anchor, key) => {
     const index = Number(anchor?.index);
     const value = String(anchor?.[key] || anchor?.value || "").trim();
     return Number.isInteger(index) && value ? { index, value } : null;
   };
+  const normalizeSourceRow = (row) => {
+    const index = Number(row?.index);
+    if (!Number.isInteger(index)) return null;
+    return {
+      index,
+      serial: String(row?.serial || "").trim(),
+      date: String(row?.date || "").trim(),
+      face: String(row?.face || "").trim(),
+      text: String(row?.text || "").trim(),
+    };
+  };
   return {
     dateAnchors: Array.isArray(context.dateAnchors) ? context.dateAnchors.map((anchor) => normalizeAnchor(anchor, "date")).filter(Boolean) : [],
     faceAnchors: Array.isArray(context.faceAnchors) ? context.faceAnchors.map((anchor) => normalizeAnchor(anchor, "face")).filter(Boolean) : [],
+    sourceRows: Array.isArray(context.sourceRows) ? context.sourceRows.map(normalizeSourceRow).filter(Boolean) : [],
   };
 }
 
 function extractRowColorSourceContextAnchorsFromRows(rows = []) {
   const dateAnchors = [];
   const faceAnchors = [];
+  const sourceRows = [];
   (Array.isArray(rows) ? rows : []).forEach((item, fallbackIndex) => {
     const sourceIndex = Number.isInteger(Number(item?.index))
       ? Number(item.index)
@@ -4585,16 +4638,24 @@ function extractRowColorSourceContextAnchorsFromRows(rows = []) {
     const parsed = parseBoundTicketSourceRowByFields(values, []);
     const date = String(parsed?.["日期"] || "").trim();
     const face = String(parsed?.["票面"] || "").trim();
+    sourceRows.push({
+      index: sourceIndex,
+      serial: String(parsed?.["序号"] || values[0] || "").trim(),
+      date,
+      face,
+      text: rawText,
+    });
     if (date) dateAnchors.push({ index: sourceIndex, date, value: date });
     if (face) faceAnchors.push({ index: sourceIndex, face, value: face });
   });
-  return { dateAnchors, faceAnchors };
+  return { dateAnchors, faceAnchors, sourceRows };
 }
 
 function repairMergedContextFromRowColorSourceAnchors(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
   if (!Array.isArray(table.rowColorSourceIndexes) || table.rowColorSourceIndexes.length !== table.rows.length) return false;
-  const { dateAnchors, faceAnchors } = getRowColorSourceContextAnchors(table);
+  const { dateAnchors, faceAnchors, sourceRows } = getRowColorSourceContextAnchors(table);
+  const sourceRowByIndex = new Map(sourceRows.map((row) => [Number(row.index), row]));
   if (!dateAnchors.length && !faceAnchors.length) return false;
   const dateIndex = findColumnIndex(table.columns, DATE_COLUMN_NAMES);
   const faceIndex = findColumnIndex(table.columns, ["票面", "票价", "面值", "face", "face value", "等级", "档位"]);
@@ -4603,14 +4664,20 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
     if (!Array.isArray(row) || table.userEditedRows?.[rowIndex]) return;
     while (row.length < table.columns.length) row.push("");
     const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+    const sourceContext = sourceRowByIndex.get(sourceIndex) || null;
     if (dateIndex >= 0 && rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex)) {
-      const dateAnchor = getBoundSourceContextAnchorForIndex(dateAnchors, sourceIndex);
+      const dateAnchor = getBoundSourceContextAnchorForIndex(dateAnchors, sourceIndex, sourceRows);
       const targetDate = dateAnchor?.value || "";
       const currentDate = String(row[dateIndex] || "").trim();
+      const sourceHasExplicitDate = Boolean(sourceContext?.date);
       if (
         targetDate &&
         currentDate !== targetDate &&
-        (!currentDate || isLikelyDateColumnValue(currentDate) || !isLikelyDateValue(currentDate) || isPlaceholderOrSeparatorText(currentDate))
+        (!currentDate ||
+          isLikelyDateColumnValue(currentDate) ||
+          !isLikelyDateValue(currentDate) ||
+          isPlaceholderOrSeparatorText(currentDate) ||
+          !sourceHasExplicitDate)
       ) {
         row[dateIndex] = targetDate;
         syncOriginalRowValue(table, rowIndex, dateIndex, targetDate, { appendMissing: true });
@@ -4618,14 +4685,15 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
       }
     }
     if (faceIndex >= 0 && rowShouldReceiveMergedFace(table, row, rowIndex, faceIndex)) {
-      const faceAnchor = getBoundSourceContextAnchorForIndex(faceAnchors, sourceIndex);
+      const faceAnchor = getBoundSourceContextAnchorForIndex(faceAnchors, sourceIndex, sourceRows);
       const targetFace = faceAnchor?.value || "";
       const currentFace = String(row[faceIndex] || "").trim();
+      const sourceHasExplicitFace = Boolean(sourceContext?.face);
       const hasValidFace =
         currentFace &&
         (isNumericTicketFaceValue(currentFace) || isLikelyFaceValue(currentFace) || isGenericFaceValue(currentFace)) &&
         !isPlaceholderOrSeparatorText(currentFace);
-      if (targetFace && !hasValidFace && currentFace !== targetFace) {
+      if (targetFace && currentFace !== targetFace && (!hasValidFace || !sourceHasExplicitFace)) {
         row[faceIndex] = targetFace;
         syncOriginalRowValue(table, rowIndex, faceIndex, targetFace, { appendMissing: true });
         changed = true;
