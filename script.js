@@ -11430,6 +11430,7 @@ function removeRowsFromTable(table, shouldRemove) {
   const nextManualSkipRows = {};
   const nextReviewedRows = {};
   const nextUserEditedRows = {};
+  const nextLinkedSeatPairRows = {};
   const nextRowColorRows = [];
   const nextRowColorSourceIndexes = [];
   const nextRowColorAutoSkipRows = [];
@@ -11453,6 +11454,7 @@ function removeRowsFromTable(table, shouldRemove) {
     if (table.manualSkipRows?.[rowIndex] !== undefined) nextManualSkipRows[nextIndex] = table.manualSkipRows[rowIndex];
     if (table.reviewedRows?.[rowIndex] !== undefined) nextReviewedRows[nextIndex] = table.reviewedRows[rowIndex];
     if (table.userEditedRows?.[rowIndex] !== undefined) nextUserEditedRows[nextIndex] = table.userEditedRows[rowIndex];
+    if (table.linkedSeatPairRows?.[rowIndex] !== undefined) nextLinkedSeatPairRows[nextIndex] = table.linkedSeatPairRows[rowIndex];
     if (Array.isArray(table.rowColorRows) && table.rowColorRows[rowIndex]) nextRowColorRows[nextIndex] = table.rowColorRows[rowIndex];
     if (Array.isArray(table.rowColorSourceIndexes) && table.rowColorSourceIndexes[rowIndex] !== undefined) {
       nextRowColorSourceIndexes[nextIndex] = table.rowColorSourceIndexes[rowIndex];
@@ -11469,6 +11471,7 @@ function removeRowsFromTable(table, shouldRemove) {
     table.manualSkipRows = nextManualSkipRows;
     table.reviewedRows = nextReviewedRows;
     table.userEditedRows = nextUserEditedRows;
+    if (table.linkedSeatPairRows) table.linkedSeatPairRows = nextLinkedSeatPairRows;
     if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
     if (Array.isArray(table.rowColorSourceIndexes)) table.rowColorSourceIndexes = nextRowColorSourceIndexes;
     if (Array.isArray(table.rowColorAutoSkipRows)) {
@@ -11619,6 +11622,29 @@ function getMergedLinkedRemarkBetweenRows(table, leftRow, leftIndex, rightRow, r
   return "";
 }
 
+function markLinkedSeatPairRow(table, rowIndex, remark) {
+  const text = String(remark || "").trim();
+  if (!text || !table) return;
+  table.linkedSeatPairRows = table.linkedSeatPairRows || {};
+  table.linkedSeatPairRows[rowIndex] = text;
+}
+
+function getLinkedSeatPairRemarkForTicket(ticket) {
+  if (!ticket?.table || !Array.isArray(ticket.row)) return "";
+  const tagged = String(ticket.table.linkedSeatPairRows?.[ticket.index] || "").trim();
+  if (tagged) return tagged;
+  const rows = ticket.table.rows || [];
+  const rowIndex = Number(ticket.index);
+  if (!Number.isInteger(rowIndex)) return "";
+  for (const neighborIndex of [rowIndex - 1, rowIndex + 1]) {
+    if (!Array.isArray(rows[neighborIndex])) continue;
+    if (isUnavailableTicket({ table: ticket.table, row: rows[neighborIndex], index: neighborIndex })) continue;
+    const remark = getMergedLinkedRemarkBetweenRows(ticket.table, ticket.row, rowIndex, rows[neighborIndex], neighborIndex);
+    if (remark) return remark;
+  }
+  return "";
+}
+
 function mergeLinkedRemarkIntoTableRow(table, rowIndex, remark) {
   const text = String(remark || "").trim();
   if (!text || !table?.rows?.[rowIndex]) return false;
@@ -11641,6 +11667,8 @@ function moveLinkedSeatConditionValuesToRemark(table) {
   let changed = false;
   table.rows.forEach((row, rowIndex) => {
     while (row.length < table.columns.length) row.push("");
+    const pairRemark = getLinkedSeatPairRemarkForTicket({ table, row, index: rowIndex });
+    if (!pairRemark) return;
     const linkedText = seatConditionIndexes
       .map((index) => String(row[index] || "").trim())
       .find((value) => rowTextHasLinkedSeats(value));
@@ -11688,7 +11716,9 @@ function repairCollapsedLinkedRemarkFromSourceRows(table) {
   table.rows.forEach((row, rowIndex) => {
     const key = getLinkedDuplicateTicketKey({ table, row, index: rowIndex });
     const remark = key ? linkedRemarkByKey.get(key) : "";
-    if (remark && mergeLinkedRemarkIntoTableRow(table, rowIndex, remark)) changed = true;
+    if (!remark) return;
+    markLinkedSeatPairRow(table, rowIndex, remark);
+    if (mergeLinkedRemarkIntoTableRow(table, rowIndex, remark)) changed = true;
   });
   return changed;
 }
@@ -11711,6 +11741,7 @@ function collapseLinkedDuplicateRowsFromTable(table) {
     const previousRow = table.rows[previous.rowIndex];
     const mergedRemark = getMergedLinkedRemarkBetweenRows(table, previousRow, previous.rowIndex, row, rowIndex);
     if (!mergedRemark) return;
+    markLinkedSeatPairRow(table, previous.rowIndex, mergedRemark);
     if (mergedRemark && mergeLinkedRemarkIntoTableRow(table, previous.rowIndex, mergedRemark)) changed = true;
     removeIndexes.add(rowIndex);
   });
