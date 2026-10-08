@@ -16,6 +16,8 @@ const MAX_ANCHOR_BATCH_PAGES_PER_REQUEST = 4;
 const MAX_REVIEW_ROWS_RENDERED = 240;
 const STANDARD_REVIEW_ROW_WINDOW_SIZE = 24;
 const MAX_UPLOAD_RECORDS_RENDERED = 36;
+const MAX_PENDING_TABLES_NORMALIZE_ON_LOAD = 80;
+const MAX_PENDING_ROWS_NORMALIZE_ON_LOAD = 5000;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
 const DATE_COLUMN_NAMES = ["日期", "演出日期", "门票时间", "票期", "场次日期", "date", "day", "일자"];
@@ -636,6 +638,7 @@ let lastTicketOcrJobSnapshot = null;
 let autoPendingGenerationJobId = null;
 let uploadPendingGenerationBusy = false;
 let quickManualGenerationBusy = false;
+let pendingTableNormalizeDeferredOnLoad = false;
 let seatmapTemplates = [];
 let externalSeatmapTemplates = [];
 let templateLibraryOpen = false;
@@ -11096,8 +11099,18 @@ function getPendingTablesNormalizeCacheKey() {
     .join("|");
 }
 
-function normalizePendingTablesInMemory({ save = false } = {}) {
+function pendingTablesTooLargeForImmediateNormalize() {
+  if (pendingTables.length > MAX_PENDING_TABLES_NORMALIZE_ON_LOAD) return true;
+  const rowCount = pendingTables.reduce((count, table) => count + (Array.isArray(table?.rows) ? table.rows.length : 0), 0);
+  return rowCount > MAX_PENDING_ROWS_NORMALIZE_ON_LOAD;
+}
+
+function normalizePendingTablesInMemory({ save = false, force = false } = {}) {
   if (!pendingTables.length) return false;
+  if (!force && pendingTablesTooLargeForImmediateNormalize()) {
+    pendingTablesNormalizeCacheKey = getPendingTablesNormalizeCacheKey();
+    return false;
+  }
   const cacheKey = getPendingTablesNormalizeCacheKey();
   if (cacheKey && cacheKey === pendingTablesNormalizeCacheKey) return false;
   const selectedBefore = pendingTables.find((table) => table.id === selectedPendingTableId) || null;
@@ -11134,9 +11147,13 @@ function applyLoadedAppState(parsed) {
   seatmapTemplates = Array.isArray(parsed.seatmapTemplates) ? parsed.seatmapTemplates : [];
   fieldMappingTemplates = Array.isArray(parsed.fieldMappingTemplates) ? parsed.fieldMappingTemplates : [];
   fieldMappingDraft = parsed.fieldMappingDraft || null;
-  const loadedPendingTables = Array.isArray(parsed.pendingTables)
-    ? mergeFragmentedPendingTables(parsed.pendingTables.map(normalizeLoadedPendingTable))
-    : [];
+  const rawPendingTables = Array.isArray(parsed.pendingTables) ? parsed.pendingTables : [];
+  const rawPendingRows = rawPendingTables.reduce((count, table) => count + (Array.isArray(table?.rows) ? table.rows.length : 0), 0);
+  const shouldDeferPendingNormalize =
+    rawPendingTables.length > MAX_PENDING_TABLES_NORMALIZE_ON_LOAD || rawPendingRows > MAX_PENDING_ROWS_NORMALIZE_ON_LOAD;
+  const normalizedLoadedPending = rawPendingTables.map(normalizeLoadedPendingTable);
+  const loadedPendingTables = shouldDeferPendingNormalize ? normalizedLoadedPending : mergeFragmentedPendingTables(normalizedLoadedPending);
+  pendingTableNormalizeDeferredOnLoad = shouldDeferPendingNormalize;
   pendingTables.splice(0, pendingTables.length, ...loadedPendingTables);
   selectedPendingTableId = parsed.selectedPendingTableId || null;
   uploadedSource = parsed.uploadedSource || null;
@@ -11208,7 +11225,7 @@ function applyLoadedAppState(parsed) {
   const repairedTemplateMismatch = events.reduce((count, event) => count + (repairKnownEventTemplateMismatch(event) ? 1 : 0), 0);
   const syncedBuiltIns = events.reduce((count, event) => count + (syncBuiltInSeatmapTemplate(event) ? 1 : 0), 0);
   currentEvent = events.find((event) => event.id === parsed.currentEventId) || events[0];
-  const removedSoldRows = removeSoldRowsEverywhere();
+  const removedSoldRows = shouldDeferPendingNormalize ? 0 : removeSoldRowsEverywhere();
   const hydrated = hydrateSeatmapTemplatesFromEvents();
   const removed = events.reduce((count, event) => count + removeOversizedZones(event), 0);
   const removedGuides = events.reduce((count, event) => count + removeGuideOnlySeatmapZones(event), 0);
@@ -14612,7 +14629,11 @@ function selectUploadRecordWindow(direction) {
 }
 
 function renderUploadRecords({ save = true, normalize = true } = {}) {
-  if (normalize) normalizePendingTablesInMemory({ save });
+  if (normalize && pendingTableNormalizeDeferredOnLoad) {
+    pendingTableNormalizeDeferredOnLoad = false;
+  } else if (normalize) {
+    normalizePendingTablesInMemory({ save });
+  }
   const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
   const repairedTables = allCurrentPending.filter((table) => table._columnRepairChanged);
   if (repairedTables.length) {
