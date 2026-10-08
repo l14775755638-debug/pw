@@ -22,7 +22,10 @@ const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
 const DATE_COLUMN_NAMES = ["日期", "演出日期", "门票时间", "票期", "场次日期", "date", "day", "일자"];
 const SERIAL_COLUMN_NAMES = ["序号", "编号", "no", "num", "number", "index", "id"];
-const IS_ADMIN_PAGE = new URLSearchParams(window.location.search).get("admin") === "1";
+const URL_PARAMS = new URLSearchParams(window.location.search);
+const IS_ADMIN_PAGE = URL_PARAMS.get("admin") === "1";
+const SKIP_LOCAL_STATE_RESTORE = URL_PARAMS.has("safe") || URL_PARAMS.has("noRestore");
+const CLEAR_LOCAL_STATE_ON_LOAD = URL_PARAMS.has("clearState") || URL_PARAMS.has("resetState");
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
 const LAIZI_SEATMAP_TEMPLATE_ZONES = [
@@ -11236,6 +11239,20 @@ function applyLoadedAppState(parsed) {
 }
 
 function loadAppState({ includeArchives = true } = {}) {
+  if (CLEAR_LOCAL_STATE_ON_LOAD) {
+    if (includeArchives) loadOperationArchives();
+    localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem("ticket-admin-state-backup-restore-attempted");
+    setUploadStatus("已按链接参数清除本机主缓存；OCR 文本如在大容量备份中仍可手动恢复。", "success");
+    renderOperationArchives();
+    return;
+  }
+  if (SKIP_LOCAL_STATE_RESTORE) {
+    if (includeArchives) loadOperationArchives();
+    setUploadStatus("已进入安全模式：本次跳过本机缓存恢复，页面会先保持可操作。", "success");
+    renderOperationArchives();
+    return;
+  }
   if (includeArchives) loadOperationArchives();
   const saved = localStorage.getItem(STORAGE_KEY);
   if (!saved) {
