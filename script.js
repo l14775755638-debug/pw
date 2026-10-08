@@ -1,11 +1,15 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 120;
+const ROW_COLOR_LOGIC_VERSION = 121;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 30;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = true;
+const UPLOAD_ROW_COLOR_MODE_HYBRID = "hybrid";
+const UPLOAD_ROW_COLOR_MODE_ANCHOR = "anchor";
+const UPLOAD_ROW_COLOR_MODE_OPENCV = "opencv";
+const UPLOAD_ROW_COLOR_MODES = [UPLOAD_ROW_COLOR_MODE_HYBRID, UPLOAD_ROW_COLOR_MODE_ANCHOR, UPLOAD_ROW_COLOR_MODE_OPENCV];
 const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 180;
 const MAX_ANCHOR_ROWS_PER_TABLE = 260;
 const MAX_ANCHOR_BATCH_PAGES_PER_REQUEST = 4;
@@ -560,6 +564,7 @@ const selectedSourceName = document.querySelector("#selectedSourceName");
 const uploadTableTitle = document.querySelector("#uploadTableTitle");
 const pdfDetectionStatus = document.querySelector("#pdfDetectionStatus");
 const uploadTableText = document.querySelector("#uploadTableText");
+const uploadRowColorModeSelect = document.querySelector("#uploadRowColorMode");
 const uploadStatus = document.querySelector("#uploadStatus");
 const localSaveStatus = document.querySelector("#localSaveStatus");
 const ocrTaskPanel = document.querySelector("#ocrTaskPanel");
@@ -10090,6 +10095,7 @@ function buildSerializableAppState(serializableEvents, serializablePendingTables
     uploadDraft: {
       tableTitle: uploadTableTitle.value,
       tableText: shouldStoreUploadDraft ? uploadDraftText : "",
+      rowColorMode: getSelectedUploadRowColorMode(),
       status: shouldStoreUploadDraft ? uploadStatus.textContent : "",
       pdfStatus: shouldStoreUploadDraft ? pdfDetectionStatus.textContent : "",
       omittedLargeDraft: !shouldStoreUploadDraft && Boolean(uploadDraftText),
@@ -11151,6 +11157,7 @@ function applyLoadedAppState(parsed) {
     const draftText = String(parsed.uploadDraft.tableText || "");
     uploadTableTitle.value = parsed.uploadDraft.tableTitle || "";
     uploadTableText.value = draftText || recoverableOcrText || "";
+    if (uploadRowColorModeSelect) uploadRowColorModeSelect.value = normalizeUploadRowColorMode(parsed.uploadDraft.rowColorMode);
     uploadStatus.textContent = parsed.uploadDraft.status || uploadStatus.textContent;
     pdfDetectionStatus.textContent = parsed.uploadDraft.pdfStatus || pdfDetectionStatus.textContent;
     if (!draftText && recoverableOcrText) {
@@ -17464,8 +17471,8 @@ function handlePublishedTableAction(tableId) {
   showToast("没有识别到选择，请输入 1 或 2。", "error");
 }
 
-async function getUploadImageRowColorAnalyses(parsedTables) {
-  if (isCurrentUploadPdfSource()) return await getUploadPdfRowColorAnalyses(parsedTables);
+async function getUploadImageRowColorAnalyses(parsedTables, options = {}) {
+  if (isCurrentUploadPdfSource()) return await getUploadPdfRowColorAnalysesByMode(parsedTables, options.mode);
   const isImage = isCurrentUploadImageSource();
   const hasImageSource = hasCurrentUploadImageRowColorSource();
   if (isImage && !hasImageSource) {
@@ -17562,9 +17569,47 @@ function getUploadRowColorSourcePayload() {
   return null;
 }
 
-async function getUploadPdfRowColorAnalyses(parsedTables) {
-  const baseAnalyses = { ...(lastTicketOcrJobSnapshot?.rowColorAnalyses || {}) };
-  if (!AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD) {
+function normalizeUploadRowColorMode(mode) {
+  const value = String(mode || "").trim().toLowerCase();
+  return UPLOAD_ROW_COLOR_MODES.includes(value) ? value : UPLOAD_ROW_COLOR_MODE_HYBRID;
+}
+
+function getSelectedUploadRowColorMode() {
+  return normalizeUploadRowColorMode(uploadRowColorModeSelect?.value || UPLOAD_ROW_COLOR_MODE_HYBRID);
+}
+
+function getUploadRowColorModeLabel(mode) {
+  const normalized = normalizeUploadRowColorMode(mode);
+  if (normalized === UPLOAD_ROW_COLOR_MODE_ANCHOR) return "纯文字锚点";
+  if (normalized === UPLOAD_ROW_COLOR_MODE_OPENCV) return "仅 OpenCV";
+  return "混合模式";
+}
+
+function getUploadRowColorItemLabel(item) {
+  return normalizeRowColorLabel(item?.label || item?.rawLabel || item?.localPixelLabel || "");
+}
+
+function uploadRowNeedsAnchorColorCheck(table, row, rowIndex, item) {
+  const label = getUploadRowColorItemLabel(item);
+  if (!label || isAvailableRowColorLabel(label)) return false;
+  const ticket = { table, row, index: rowIndex };
+  return hasTicketSalePrice(ticket) && !isSoldTicket(ticket);
+}
+
+function shouldRunAnchorRowColorForUploadTable(table, currentAnalysis, mode = UPLOAD_ROW_COLOR_MODE_HYBRID) {
+  if (!table || !Array.isArray(table.rows) || !table.rows.length) return false;
+  if (normalizeUploadRowColorMode(mode) === UPLOAD_ROW_COLOR_MODE_ANCHOR) return true;
+  if (!currentAnalysis || currentAnalysis.source === "ticket_row_anchor") return false;
+  const analysisRows = Array.isArray(currentAnalysis.rows) ? currentAnalysis.rows : [];
+  if (!analysisRows.length) return false;
+  const rowColorStart = Math.max(0, Math.floor(Number(table.rowColorPageRowOffset || 0) || 0));
+  return table.rows.some((row, rowIndex) => uploadRowNeedsAnchorColorCheck(table, row, rowIndex, analysisRows[rowColorStart + rowIndex]));
+}
+
+async function getUploadPdfRowColorAnalyses(parsedTables, existingAnalyses = null, options = {}) {
+  const mode = normalizeUploadRowColorMode(options.mode);
+  const baseAnalyses = { ...((existingAnalyses && typeof existingAnalyses === "object" ? existingAnalyses : null) || lastTicketOcrJobSnapshot?.rowColorAnalyses || {}) };
+  if (!AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD || mode === UPLOAD_ROW_COLOR_MODE_OPENCV) {
     setUploadStatus("已跳过文字锚点二次定位；使用本地 OCR 逐页返回的 OpenCV 底色参考生成确认表。", "loading");
     return baseAnalyses;
   }
@@ -17590,11 +17635,12 @@ async function getUploadPdfRowColorAnalyses(parsedTables) {
     if (currentAnalysis?.rowColorLogicVersion === ROW_COLOR_LOGIC_VERSION && isReusableAnchorRowColorAnalysis(currentAnalysis, rowCount)) {
       return;
     }
+    if (!shouldRunAnchorRowColorForUploadTable(table, currentAnalysis, mode)) return;
     anchorBatchTables.push(table);
   });
   if (anchorBatchTables.length > 1) {
     try {
-      setUploadStatus(`正在批量用文字锚点定位行底色：已完成 0/${anchorBatchTables.length} 页...`, "loading");
+      setUploadStatus(`正在按${getUploadRowColorModeLabel(mode)}批量定位行底色：已完成 0/${anchorBatchTables.length} 页...`, "loading");
       Object.assign(
         anchorBatchAnalyses,
         await requestAnchorRowColorAnalysesForTables(anchorBatchTables, sourcePayload, {
@@ -17609,7 +17655,7 @@ async function getUploadPdfRowColorAnalyses(parsedTables) {
                   : "";
             if (phase === "start") {
               setUploadStatus(
-                `正在批量用文字锚点定位行底色：已完成 ${completed}/${total} 页${pageText ? `，正在处理 PDF 第 ${pageText} 页` : ""}...`,
+                `正在按${getUploadRowColorModeLabel(mode)}定位行底色：已完成 ${completed}/${total} 页${pageText ? `，正在处理 PDF 第 ${pageText} 页` : ""}...`,
                 "loading",
               );
             } else {
@@ -17633,11 +17679,12 @@ async function getUploadPdfRowColorAnalyses(parsedTables) {
     if (currentAnalysis?.rowColorLogicVersion === ROW_COLOR_LOGIC_VERSION && isReusableAnchorRowColorAnalysis(currentAnalysis, rowCount)) {
       continue;
     }
+    if (!shouldRunAnchorRowColorForUploadTable(table, currentAnalysis, mode)) continue;
     repairAttempts.add(pageKey);
     let anchorError = null;
     try {
       const anchorAnalysis = anchorBatchAnalyses[pageKey] || anchorBatchAnalyses[sourcePage];
-      if (!anchorAnalysis) setUploadStatus(`PDF 第 ${sourcePage} 页正在用文字锚点定位行底色...`, "loading");
+      if (!anchorAnalysis) setUploadStatus(`PDF 第 ${sourcePage} 页正在按${getUploadRowColorModeLabel(mode)}定位行底色...`, "loading");
       const effectiveAnchorAnalysis = anchorAnalysis || (await requestAnchorRowColorAnalysisForTable(table, sourcePayload));
       if (isReusableAnchorRowColorAnalysis(effectiveAnchorAnalysis, rowCount)) {
         effectiveAnchorAnalysis.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
@@ -17672,11 +17719,12 @@ async function getUploadPdfRowColorAnalyses(parsedTables) {
   return baseAnalyses;
 }
 
-async function getUploadImageRowColorAnalysesSafely(parsedTables) {
+async function getUploadImageRowColorAnalysesSafely(parsedTables, options = {}) {
   try {
-    return await getUploadImageRowColorAnalyses(parsedTables);
+    return await getUploadImageRowColorAnalyses(parsedTables, options);
   } catch (error) {
     console.warn("Row color analysis skipped during pending table generation.", error);
+    if (isCurrentUploadPdfSource()) throw error;
     showToast("颜色检测暂时不可用，已先生成待确认表。", "warning");
     return {};
   }
@@ -17748,6 +17796,37 @@ function formatMissingRowColorPages(pages = []) {
   return `${normalized.slice(0, 12).join("、")} 等 ${normalized.length} 页`;
 }
 
+function getMissingUploadAnchorRowColorPages(parsedTables = [], rowColorAnalyses = {}) {
+  if (!isCurrentUploadPdfSource()) return [];
+  const analyses = rowColorAnalyses && typeof rowColorAnalyses === "object" ? rowColorAnalyses : {};
+  return getParsedPdfPageNumbers(parsedTables).filter((page) => {
+    const analysis = analyses[String(page)] || analyses[page];
+    return !(hasUsableUploadRowColorAnalysis(analysis) && analysis.source === "ticket_row_anchor");
+  });
+}
+
+async function getUploadPdfRowColorAnalysesByMode(parsedTables, mode = getSelectedUploadRowColorMode()) {
+  const normalizedMode = normalizeUploadRowColorMode(mode);
+  const baseAnalyses = { ...(lastTicketOcrJobSnapshot?.rowColorAnalyses || {}) };
+  if (normalizedMode === UPLOAD_ROW_COLOR_MODE_ANCHOR) {
+    setUploadStatus("已选择纯文字锚点模式，正在按 PDF 每页文字位置重新判断行底色...", "loading");
+    const anchorAnalyses = await getUploadPdfRowColorAnalyses(parsedTables, {}, { mode: UPLOAD_ROW_COLOR_MODE_ANCHOR });
+    const missingAnchorPages = getMissingUploadAnchorRowColorPages(parsedTables, anchorAnalyses);
+    if (missingAnchorPages.length) {
+      const pageText = formatMissingRowColorPages(missingAnchorPages);
+      throw new Error(`纯文字锚点未能稳定匹配 PDF 第 ${pageText} 页；请改用混合模式或先人工确认这些页。`);
+    }
+    return anchorAnalyses;
+  }
+  const opencvAnalyses = await ensureUploadPdfRowColorAnalyses(parsedTables, baseAnalyses);
+  if (normalizedMode === UPLOAD_ROW_COLOR_MODE_OPENCV) {
+    setUploadStatus("已选择仅 OpenCV 模式，跳过文字锚点二次定位。", "loading");
+    return opencvAnalyses;
+  }
+  setUploadStatus("已选择混合模式，正在检查是否有需要文字锚点复核的可疑页...", "loading");
+  return await getUploadPdfRowColorAnalyses(parsedTables, opencvAnalyses, { mode: UPLOAD_ROW_COLOR_MODE_HYBRID });
+}
+
 async function ensureUploadPdfRowColorAnalyses(parsedTables, rowColorAnalyses = {}) {
   if (!isCurrentUploadPdfSource()) return rowColorAnalyses || {};
   let analyses = rowColorAnalyses && typeof rowColorAnalyses === "object" ? { ...rowColorAnalyses } : {};
@@ -17799,6 +17878,7 @@ function setPublishUploadBusy(isBusy) {
     generatePartialOcrButton.disabled = isBusy || quickManualGenerationBusy || !hasRecognizedText;
     generatePartialOcrButton.textContent = isBusy ? "正在生成..." : "用已识别页生成确认表";
   }
+  if (uploadRowColorModeSelect) uploadRowColorModeSelect.disabled = isBusy || quickManualGenerationBusy;
   if (saveOcrTextButton) saveOcrTextButton.disabled = isBusy;
   if (clearGeneratedPendingButton) clearGeneratedPendingButton.disabled = isBusy;
   if (clearOcrTextButton) clearOcrTextButton.disabled = isBusy;
@@ -17815,6 +17895,7 @@ function setQuickManualUploadBusy(isBusy) {
     const hasRecognizedText = Boolean(getRecognizedOcrTextForTask());
     generatePartialOcrButton.disabled = isBusy || uploadPendingGenerationBusy || !hasRecognizedText;
   }
+  if (uploadRowColorModeSelect) uploadRowColorModeSelect.disabled = isBusy || uploadPendingGenerationBusy;
   if (saveOcrTextButton) saveOcrTextButton.disabled = isBusy;
   if (clearGeneratedPendingButton) clearGeneratedPendingButton.disabled = isBusy;
   if (clearOcrTextButton) clearOcrTextButton.disabled = isBusy;
@@ -18148,8 +18229,10 @@ async function publishUploadInner(options = {}) {
     showToast("上传失败：表格内容不完整。", "error");
     return;
   }
-  let rowColorAnalyses = await getUploadImageRowColorAnalysesSafely(parsedTables);
-  rowColorAnalyses = await ensureUploadPdfRowColorAnalyses(parsedTables, rowColorAnalyses);
+  const rowColorMode = getSelectedUploadRowColorMode();
+  setUploadStatus(`正在按${getUploadRowColorModeLabel(rowColorMode)}准备行底色结果...`, "loading");
+  let rowColorAnalyses = await getUploadImageRowColorAnalysesSafely(parsedTables, { mode: rowColorMode });
+  if (!isCurrentUploadPdfSource()) rowColorAnalyses = await ensureUploadPdfRowColorAnalyses(parsedTables, rowColorAnalyses);
   let rawTables = [];
   let removedSoldRows = 0;
   let serverGenerated = false;
@@ -20572,6 +20655,7 @@ uploadTableText.addEventListener("input", () => {
   renderTicketOcrTaskPanel(lastTicketOcrJobSnapshot);
   scheduleAppStateSave(300);
 });
+if (uploadRowColorModeSelect) uploadRowColorModeSelect.addEventListener("change", () => scheduleAppStateSave(300));
 
 publishUploadButton.addEventListener("click", () => {
   publishUpload().catch((error) => {

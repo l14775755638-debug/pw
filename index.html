@@ -354,6 +354,14 @@
                 <button class="small-button danger ghost" id="clearGeneratedPendingButton" type="button">清空确认表重来</button>
                 <button class="small-button danger ghost" id="clearOcrTextButton" type="button">删除 OCR 文本</button>
               </div>
+              <label class="admin-field compact-field">
+                <span>颜色识别模式</span>
+                <select id="uploadRowColorMode">
+                  <option value="hybrid">混合模式</option>
+                  <option value="anchor">纯文字锚点</option>
+                  <option value="opencv">仅 OpenCV</option>
+                </select>
+              </label>
               <p class="upload-status" id="uploadStatus">先选择原始图片/PDF，再生成待确认表。</p>
               <p class="local-save-status" id="localSaveStatus">本地保存：等待操作</p>
               <div class="ocr-task-panel hidden" id="ocrTaskPanel">
