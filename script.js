@@ -11249,7 +11249,7 @@ function loadAppState({ includeArchives = true } = {}) {
   }
   if (SKIP_LOCAL_STATE_RESTORE) {
     if (includeArchives) loadOperationArchives();
-    setUploadStatus("已进入安全模式：本次跳过本机缓存恢复，页面会先保持可操作。", "success");
+    setUploadStatus("已进入安全模式：本次跳过本机缓存恢复。颜色识别模式在生成按钮上方，可选择混合/纯文字锚点/仅 OpenCV。", "success");
     renderOperationArchives();
     return;
   }

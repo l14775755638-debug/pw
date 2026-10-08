@@ -1818,13 +1818,27 @@ tr.hit-row td {
 }
 
 .admin-field input,
-.admin-field textarea {
+.admin-field textarea,
+.admin-field select {
   width: 100%;
   padding: 10px 12px;
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.admin-field select {
+  min-height: 44px;
+  font: inherit;
+  font-weight: 900;
+}
+
+.upload-color-mode-field {
+  padding: 12px;
+  border: 1px solid rgba(20, 108, 117, 0.2);
+  border-radius: 8px;
+  background: #f6fbfb;
 }
 
 .admin-field textarea {
