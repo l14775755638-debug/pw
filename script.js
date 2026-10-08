@@ -2,7 +2,7 @@ const REVIEW_FLAGS_VERSION = 37;
 const ROW_COLOR_LOGIC_VERSION = 121;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
-const COLUMN_NORMALIZATION_VERSION = 30;
+const COLUMN_NORMALIZATION_VERSION = 31;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = true;
@@ -2329,6 +2329,8 @@ function getDefaultFieldForHeader(header = "") {
   const text = normalize(header);
   if (!text) return "";
   if (/座位图|座席图|seatmap/.test(text)) return "";
+  if (/座位\s*[\/／]?\s*序号|座位序号|seat\s*(?:no|num|number|id)|좌석\s*번호/i.test(header) || /座位序号/.test(text)) return "座位号";
+  if (["售价", "价格", "单价", "报价", "金额", "price", "ask", "cny", "rmb", "krw", "usd", "jpy", "가격", "금액", "원"].some((name) => text.includes(normalize(name)))) return "售价";
   if (["序号", "编号", "no", "num", "number", "id"].some((name) => text.includes(normalize(name)))) return "序号";
   if (["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"].some((name) => text.includes(normalize(name)))) return "日期";
   if (isSeatConditionColumnName(header)) return "座位情况";
@@ -2341,7 +2343,6 @@ function getDefaultFieldForHeader(header = "") {
   if (["排数", "排", "行数", "行", "row", "열"].some((name) => text.includes(normalize(name)))) return "排";
   if (["座位号", "座位", "座号", "号数", "大小号", "号", "seat", "번호", "좌석번호"].some((name) => text.includes(normalize(name)))) return "座位号";
   if (["数量", "张数", "连坐", "count", "qty", "매수", "수량", "장수", "연석"].some((name) => text.includes(normalize(name)))) return "数量";
-  if (["售价", "价格", "单价", "报价", "金额", "price", "ask"].some((name) => text.includes(normalize(name)))) return "售价";
   if (["备注", "说明", "remark", "note", "标记", "交付", "取票", "配送", "邮寄", "邮寄票", "快递", "物流", "纸质票", "实体票", "转寄", "转赠", "自取", "面交", "过户", "delivery", "shipping", "ship", "courier", "transfer", "pickup", "비고", "메모", "참고", "배송", "배달", "택배", "양도", "전달", "수령", "현장"].some((name) => text.includes(normalize(name)))) return "备注";
   if (["状态", "售卖状态", "销售状态", "status", "是否售出"].some((name) => text.includes(normalize(name)))) return "状态";
   return "";
@@ -3552,9 +3553,11 @@ function isVenueSeatTypeLiteralValue(value) {
 
 function isSalePriceColumnName(column = "") {
   const text = normalize(column);
-  if (!text || isFaceValueColumnName(column) || isInternalColorColumn(column)) return false;
+  if (!text || isInternalColorColumn(column)) return false;
+  if (/(售价|售價|单价|單價|价格|價格|报价|報價|金额|金額|售\/张|售\/張|price|ask|cny|rmb|krw|usd|jpy|가격|금액|원)/i.test(String(column || ""))) return true;
+  if (isFaceValueColumnName(column)) return false;
   if (["售", "售价", "售價", "单", "單", "单价", "單價", "价", "價格", "价格", "报价", "報價", "金额", "金額"].includes(text)) return true;
-  return /(售价|售價|单价|單價|价格|價格|报价|報價|金额|金額|售\/张|售\/張|price|ask|가격|금액)/i.test(text);
+  return /(售价|售價|单价|單價|价格|價格|报价|報價|金额|金額|售\/张|售\/張|price|ask|cny|rmb|krw|usd|jpy|가격|금액|원)/i.test(text);
 }
 
 function isExplicitSalePriceColumnName(column = "") {
@@ -3581,6 +3584,7 @@ function isQuantityColumnName(column = "") {
 }
 
 function isSeatPositionColumnName(column = "") {
+  if (isSalePriceColumnName(column) || isGenericPriceColumnName(column)) return false;
   if (isSeatConditionColumnName(column)) return false;
   return /(票面|门票|座位|座席)?(位置|排数|排|号段|号码|座位号|座号)|seat\s*(position|row|number)|seatmap|座位图|座席图/i.test(String(column || ""));
 }
@@ -5516,7 +5520,8 @@ function isSeatRowColumnName(column = "") {
 
 function isSeatNumberColumnName(column = "") {
   const text = normalize(column);
-  if (!text || /序号|编号|日期|价格|售价|金额|数量|张数|座位图|座席图|seatmap/.test(text)) return false;
+  if (/座位\s*[\/／]?\s*序号|座位序号|seat\s*(?:no|num|number|id)|좌석\s*번호/i.test(String(column || "")) || /座位序号/.test(text)) return true;
+  if (!text || isSalePriceColumnName(column) || isGenericPriceColumnName(column) || /序号|编号|日期|价格|售价|金额|price|ask|数量|张数|座位图|座席图|seatmap/.test(text)) return false;
   if (isSeatConditionColumnName(column) || /排数号|排數號|排號|排号/.test(text)) return false;
   return /座位号|座位|座号|号数|大小号|号段|号码|seat|number|no|번호|좌석번호/.test(text);
 }
@@ -6109,6 +6114,12 @@ function repairSeparatedSeatPositionFields(table, row) {
   }
 
   const seatCandidate = candidates
+    .filter((item) => {
+      const column = item.column || "";
+      if (isSalePriceColumnName(column) || isGenericPriceColumnName(column)) return false;
+      if (isLikelySalePriceValue(item.value, { minPrice: 100 }) && !isSeatNumberColumnName(column)) return false;
+      return true;
+    })
     .map((item) => ({
       ...item,
       parsed: extractSeatNumberFromText(item.value, { allowBareRange: isSeatNumberColumnName(item.column) }),
@@ -7014,10 +7025,17 @@ function repairDuplicateZoneFaceColumns(table) {
 
   const stats = zoneIndexes.map((index) => ({
     index,
-    faceScore: scoreColumn(index, (value) => isGenericFaceValue(value) || isVenueSeatTypeValue(value) || /^(R|S|A|VIP|VVIP| FLOOR|Floor)/i.test(value)),
-    zoneScore: scoreColumn(index, (value) => isLikelyZoneCode(value) || Boolean(parseCompositeSeatInfo(value)?.zone)),
+    faceScore: scoreColumn(index, (value) => {
+      const text = String(value || "").trim();
+      return isGenericFaceValue(text) || isVenueSeatTypeValue(text) || /^(?:R|S|A|VIP|VVIP|FLOOR|Floor|看台|看臺|内场|內場)$/i.test(text);
+    }),
+    zoneScore: scoreColumn(index, (value) => {
+      const text = String(value || "").trim();
+      if (isGenericFaceValue(text) || isVenueSeatTypeValue(text)) return false;
+      return isLikelyZoneCode(text) || Boolean(parseCompositeSeatInfo(text)?.zone);
+    }),
   }));
-  const hasRealZoneColumn = stats.some((item) => item.zoneScore >= 0.45);
+  const hasRealZoneColumn = stats.some((item) => item.zoneScore >= 0.45 && item.zoneScore > item.faceScore);
   if (!hasRealZoneColumn) return false;
 
   let changed = false;
@@ -7025,6 +7043,91 @@ function repairDuplicateZoneFaceColumns(table) {
     if (item.faceScore >= 0.45 && item.faceScore > item.zoneScore + 0.2 && table.columns[item.index] !== "票面") {
       table.columns[item.index] = "票面";
       changed = true;
+    }
+  });
+  return changed;
+}
+
+function repairDuplicateZoneLayoutFromOriginalColumns(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  const sourceColumns = Array.isArray(table.sourceTextColumns) && table.sourceTextColumns.length
+    ? table.sourceTextColumns
+    : Array.isArray(table.originalColumns)
+      ? table.originalColumns
+      : [];
+  const sourceRows = Array.isArray(table.sourceTextRows) && table.sourceTextRows.length === table.rows.length
+    ? table.sourceTextRows
+    : Array.isArray(table.originalRows) && table.originalRows.length === table.rows.length
+      ? table.originalRows
+      : [];
+  if (!sourceColumns.length || !sourceRows.length) return false;
+  const zoneIndexes = sourceColumns
+    .map((column, index) => ({ column: String(column || "").trim(), index }))
+    .filter(({ column }) => getDefaultFieldForHeader(column) === "区域" || /^(区域|区|區|block|section|zone|area|구역|구)$/i.test(column))
+    .map(({ index }) => index);
+  if (zoneIndexes.length < 2) return false;
+
+  const scoreSourceColumn = (index, tester) => {
+    const values = sourceRows.map((row) => String(row?.[index] || "").trim()).filter(Boolean);
+    if (!values.length) return 0;
+    return values.filter(tester).length / values.length;
+  };
+  const stats = zoneIndexes.map((index) => ({
+    index,
+    faceScore: scoreSourceColumn(index, (value) => isGenericFaceValue(value) || isVenueSeatTypeValue(value)),
+    zoneScore: scoreSourceColumn(index, (value) => !isGenericFaceValue(value) && !isVenueSeatTypeValue(value) && isLikelyZoneCode(value)),
+  }));
+  const faceIndex = stats
+    .filter((item) => item.faceScore >= 0.45 && item.faceScore > item.zoneScore)
+    .sort((a, b) => b.faceScore - a.faceScore)[0]?.index;
+  const zoneIndex = stats
+    .filter((item) => item.zoneScore >= 0.45 && item.index !== faceIndex)
+    .sort((a, b) => b.zoneScore - a.zoneScore)[0]?.index;
+  if (faceIndex < 0 || zoneIndex < 0) return false;
+
+  const sourceRowIndex = findSeatRowColumnIndexes(sourceColumns)[0] ?? -1;
+  const sourceSeatIndex = findSeatNumberColumnIndexes(sourceColumns)[0] ?? -1;
+  const sourcePriceIndex = findSalePriceColumnIndex(sourceColumns);
+  const sourceRemarkIndex = findColumnIndex(sourceColumns, ["备注", "remark", "note", "说明"]);
+  let changed = false;
+  const renameColumn = (index, name) => {
+    if (index < 0) return;
+    while (table.columns.length <= index) table.columns.push("");
+    if (table.columns[index] !== name) {
+      table.columns[index] = name;
+      changed = true;
+    }
+  };
+  renameColumn(faceIndex, "票面");
+  renameColumn(zoneIndex, "区域");
+  renameColumn(sourceRowIndex, "排");
+  renameColumn(sourceSeatIndex, "座位号");
+  renameColumn(sourcePriceIndex, "售价");
+  if (sourceRemarkIndex >= 0) renameColumn(sourceRemarkIndex, "备注");
+
+  table.rows.forEach((row, rowIndex) => {
+    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex]) return;
+    while (row.length < table.columns.length) row.push("");
+    const sourceRow = sourceRows[rowIndex] || [];
+    const setValue = (index, value, mapper = (item) => item) => {
+      if (index < 0) return;
+      const nextValue = mapper(String(value || "").trim());
+      if (row[index] !== nextValue) {
+        row[index] = nextValue;
+        changed = true;
+      }
+    };
+    setValue(faceIndex, sourceRow[faceIndex]);
+    setValue(zoneIndex, sourceRow[zoneIndex], (value) => getZoneTokenFromCell(value) || value);
+    setValue(sourceRowIndex, sourceRow[sourceRowIndex], (value) => extractSeatRowFromText(value, { allowBareRange: true }) || value);
+    setValue(sourceSeatIndex, sourceRow[sourceSeatIndex], (value) => extractSeatNumberFromText(value, { allowBareRange: true }) || value);
+    setValue(sourcePriceIndex, sourceRow[sourcePriceIndex], (value) => extractSalePriceText(value, { minPrice: 100 }) || value);
+    if (sourceRemarkIndex >= 0) {
+      const sourceRemark = String(sourceRow[sourceRemarkIndex] || "").trim();
+      const currentRemark = String(row[sourceRemarkIndex] || "").trim();
+      if (sourceRemark || isSuspiciousNumericRemarkField({ label: "备注", value: currentRemark })) {
+        setValue(sourceRemarkIndex, sourceRemark);
+      }
     }
   });
   return changed;
@@ -7088,6 +7191,9 @@ function normalizePendingTableColumns(table) {
   });
 
   if (repairSemanticColumnRoles(table)) {
+    changed = true;
+  }
+  if (repairDuplicateZoneLayoutFromOriginalColumns(table)) {
     changed = true;
   }
   if (repairDuplicateZoneFaceColumns(table)) {
@@ -7258,6 +7364,9 @@ function normalizePendingTableColumns(table) {
     changed = true;
   }
   if (repairVenueFaceValueFromRemark(table)) {
+    changed = true;
+  }
+  if (repairDuplicateZoneLayoutFromOriginalColumns(table)) {
     changed = true;
   }
   if (repairRowsFromBoundSourceText(table)) {
@@ -12283,7 +12392,7 @@ function ensureSalePriceColumn(table) {
 function findSeatNumberColumnIndexes(columns = []) {
   return findColumnIndexes(columns, ["票面号段", "门票号段", "座位号段", "座位号", "座位", "号数", "大小号", "号段", "号码", "座位/序号", "seat", "번호", "좌석번호"]).filter((index) => {
     const column = String(columns[index] || "");
-    return !/座位图|座席图|seat\s*map|seatmap|map/i.test(column);
+    return !isSalePriceColumnName(column) && !isGenericPriceColumnName(column) && !/price|ask|座位图|座席图|seat\s*map|seatmap|map/i.test(column);
   });
 }
 
@@ -12832,6 +12941,7 @@ function getCanonicalDisplayFieldLabel(label = "") {
   const normalized = normalize(text);
   if (!normalized) return "";
   if (hasHeaderHint(text, ["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"])) return "日期";
+  if (isSalePriceColumnName(text)) return isGenericPriceColumnName(text) ? normalized : "售价";
   if (isFloorLevelColumnName(text)) return "楼层";
   if (isVenueSeatTypeColumnName(text)) return "席位";
   if (isFaceValueColumnName(text)) return "票面";
@@ -12840,7 +12950,6 @@ function getCanonicalDisplayFieldLabel(label = "") {
   if (isSeatNumberColumnName(text)) return "座位号";
   if (isSeatConditionColumnName(text)) return "座位情况";
   if (isQuantityColumnName(text)) return "数量";
-  if (isSalePriceColumnName(text)) return isGenericPriceColumnName(text) ? normalized : "售价";
   if (isRemarkColumnName(text)) return "备注";
   return normalized;
 }
@@ -12914,6 +13023,17 @@ function removeCoreDuplicateRemarkFields(fields = []) {
   });
 }
 
+function isSuspiciousNumericRemarkField(field = {}) {
+  const label = getCanonicalDisplayFieldLabel(field?.label) || field?.label;
+  const value = String(field?.value || "").trim();
+  if (label !== "备注" || !value) return false;
+  if (isLikelyRemarkValue(value) || isLogisticsOrRemarkValue(value) || rowTextHasLinkedSeats(value)) return false;
+  if (isLikelySalePriceValue(value, { minPrice: 100 })) return true;
+  if (extractSeatRowFromText(value, { allowBareRange: true }) || isLikelySeatRowValue(value)) return true;
+  if (extractSeatNumberFromText(value, { allowBareRange: true }) || isLikelySeatNumberValue(value)) return true;
+  return false;
+}
+
 function removeConflictingTicketDisplayFields(fields = [], ticket) {
   if (!ticket?.table) return fields;
   const standardFields = getStandardTicketFields(ticket);
@@ -12927,6 +13047,7 @@ function removeConflictingTicketDisplayFields(fields = [], ticket) {
     const label = getCanonicalDisplayFieldLabel(field?.label) || field?.label;
     const value = String(field?.value || "").trim();
     if (!label || !value) return false;
+    if (isSuspiciousNumericRemarkField(field)) return false;
     const normalizedValue = normalize(value);
     const standardValue = standardByLabel.get(label) || "";
     const normalizedStandardValue = normalizedStandardByLabel.get(label) || "";
