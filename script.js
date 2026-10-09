@@ -919,7 +919,22 @@ function alignSparseRecognizedRowByTrustedColumns(row = [], sourceColumns = [], 
   const priceSourceIndex = sourceFields.lastIndexOf("售价");
   if (priceSourceIndex < 0) return null;
   const values = row.map((cell) => String(cell || "").trim());
-  if (!hasPriceOrSoldValue(values[values.length - 1])) return null;
+  const trailingRemarkSourceIndex = sourceFields.findIndex((field, index) => index > priceSourceIndex && field === "备注");
+  let priceValueIndex = values.length - 1;
+  let trailingRemarkIndex = -1;
+  if (!hasPriceOrSoldValue(values[priceValueIndex])) {
+    const previousIndex = priceValueIndex - 1;
+    const lastValue = values[priceValueIndex];
+    if (
+      previousIndex < 0 ||
+      !hasPriceOrSoldValue(values[previousIndex]) ||
+      !(trailingRemarkSourceIndex >= 0 || isStandaloneLogisticsValue(lastValue) || isLikelyRemarkValue(lastValue) || rowTextHasLinkedSeats(lastValue))
+    ) {
+      return null;
+    }
+    trailingRemarkIndex = priceValueIndex;
+    priceValueIndex = previousIndex;
+  }
 
   const mapped = Array.from({ length: targetColumns.length }, () => "");
   const usedTargetIndexes = new Set();
@@ -932,8 +947,11 @@ function alignSparseRecognizedRowByTrustedColumns(row = [], sourceColumns = [], 
     return true;
   };
 
-  assignFromSource(priceSourceIndex, values[values.length - 1]);
-  let valueIndex = values.length - 2;
+  assignFromSource(priceSourceIndex, values[priceValueIndex]);
+  if (trailingRemarkIndex >= 0) {
+    assignFromSource(trailingRemarkSourceIndex >= 0 ? trailingRemarkSourceIndex : sourceFields.lastIndexOf("备注"), values[trailingRemarkIndex]);
+  }
+  let valueIndex = priceValueIndex - 1;
   let sourcePointer = priceSourceIndex - 1;
 
   if (sourceFields[0] === "序号" && isLikelySerialValue(values[0])) {
@@ -13008,7 +13026,11 @@ function normalizeTicketDisplayFieldLabels(fields = []) {
 }
 
 function normalizeSalePriceColumnLabels(columns = []) {
-  return (Array.isArray(columns) ? columns : []).map((column) => (isSalePriceColumnName(column) ? "售价" : column));
+  return (Array.isArray(columns) ? columns : []).map((column) => {
+    if (getDefaultFieldForHeader(column) === "日期") return "日期";
+    if (isSalePriceColumnName(column)) return "售价";
+    return column;
+  });
 }
 
 function ticketFieldsHaveCanonicalLabel(fields = [], label = "") {
