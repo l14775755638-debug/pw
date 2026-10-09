@@ -75,7 +75,7 @@ const paddleCpuThreads = Math.max(
   1,
   Math.min(readPositiveIntegerEnv("PADDLE_CPU_THREADS", Math.max(1, Math.floor(serverCpuCount / batchOcrConcurrency))), serverCpuCount),
 );
-const rowColorLogicVersion = 122;
+const rowColorLogicVersion = 123;
 const maxAnchorRowsPerTable = Math.max(40, readPositiveIntegerEnv("TICKET_ANCHOR_MAX_ROWS_PER_TABLE", 260));
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";

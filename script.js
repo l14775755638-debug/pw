@@ -1,9 +1,9 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 122;
+const ROW_COLOR_LOGIC_VERSION = 123;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 30;
-const VISUAL_INHERIT_REPAIR_VERSION = 1;
+const VISUAL_INHERIT_REPAIR_VERSION = 2;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = true;
@@ -22,7 +22,7 @@ const MAX_PENDING_ROWS_NORMALIZE_ON_LOAD = 5000;
 const MAX_LOCAL_STORAGE_AUTO_RESTORE_BYTES = 2_000_000;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
-const DATE_COLUMN_NAMES = ["日期", "演出日期", "门票时间", "票期", "场次日期", "date", "day", "일자"];
+const DATE_COLUMN_NAMES = ["日期", "演出日期", "时间", "门票时间", "票期", "场次日期", "date", "day", "일자", "날짜", "시간"];
 const SERIAL_COLUMN_NAMES = ["序号", "编号", "no", "num", "number", "index", "id"];
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const IS_ADMIN_PAGE = URL_PARAMS.get("admin") === "1";
@@ -4830,6 +4830,7 @@ function repairAdditiveSerialDatesFromSourceText(table) {
       startIndex: sourceIndex,
       endIndex,
       date: targetDate,
+      anchorIndex: targetAnchorIndex,
     });
   });
   if (!additiveBlocks.length) return false;
@@ -4847,6 +4848,13 @@ function repairAdditiveSerialDatesFromSourceText(table) {
     if (!targetDate) return;
     while (row.length < table.columns.length) row.push("");
     const currentDate = String(row[dateIndex] || "").trim();
+    recordInheritedFieldDebug(table, rowIndex, "日期", {
+      value: targetDate,
+      source: "additive_serial_date",
+      sourceIndex,
+      anchorIndex: block.anchorIndex,
+      blockStart: block.startIndex,
+    });
     if (currentDate === targetDate) return;
     row[dateIndex] = targetDate;
     syncOriginalRowValue(table, rowIndex, dateIndex, targetDate, { appendMissing: true });
@@ -5010,6 +5018,80 @@ function buildVisualInheritedValuesByRow(table) {
   return byTicketRow;
 }
 
+function normalizeInheritedDebugPayload(field, payload = {}) {
+  const normalizedField = getCanonicalDisplayFieldLabel(field) || field;
+  const value = normalizeVisualInheritedValue(normalizedField, payload.value) || String(payload.value || "").trim();
+  if (!normalizedField || !value) return null;
+  return {
+    field: normalizedField,
+    value,
+    source: String(payload.source || "").trim(),
+    sourceIndex: Number.isInteger(Number(payload.sourceIndex)) ? Number(payload.sourceIndex) : "",
+    anchorIndex: Number.isInteger(Number(payload.anchorIndex)) ? Number(payload.anchorIndex) : "",
+    blockStart: Number.isInteger(Number(payload.blockStart)) ? Number(payload.blockStart) : "",
+    ppRowIndex: Number.isInteger(Number(payload.ppRowIndex)) ? Number(payload.ppRowIndex) : "",
+    sourceText: String(payload.sourceText || "").trim().slice(0, 160),
+  };
+}
+
+function ensureInheritedFieldDebug(table) {
+  if (!table || typeof table !== "object") return {};
+  if (!table.inheritedFieldDebug || typeof table.inheritedFieldDebug !== "object") table.inheritedFieldDebug = {};
+  return table.inheritedFieldDebug;
+}
+
+function recordInheritedFieldDebug(table, rowIndex, field, payload = {}) {
+  if (!table || !Number.isInteger(rowIndex) || rowIndex < 0) return;
+  const item = normalizeInheritedDebugPayload(field, payload);
+  if (!item) return;
+  const debug = ensureInheritedFieldDebug(table);
+  const key = String(rowIndex);
+  debug[key] = debug[key] && typeof debug[key] === "object" ? debug[key] : {};
+  debug[key][item.field] = item;
+  table.visualInheritRepairVersion = VISUAL_INHERIT_REPAIR_VERSION;
+}
+
+function compactInheritedFieldDebug(debug) {
+  if (!debug || typeof debug !== "object") return {};
+  const compact = {};
+  Object.entries(debug).forEach(([rowIndex, fields]) => {
+    if (!fields || typeof fields !== "object") return;
+    const fieldEntries = Object.entries(fields)
+      .map(([field, payload]) => normalizeInheritedDebugPayload(field, payload))
+      .filter(Boolean);
+    if (fieldEntries.length) compact[rowIndex] = Object.fromEntries(fieldEntries.map((item) => [item.field, item]));
+  });
+  return compact;
+}
+
+function getInheritedFieldDebugEntries(table, rowIndex) {
+  const fields = table?.inheritedFieldDebug?.[String(rowIndex)];
+  if (!fields || typeof fields !== "object") return [];
+  return Object.values(fields).filter((item) => item?.field && item?.value);
+}
+
+function formatInheritedFieldDebug(table, rowIndex) {
+  const entries = getInheritedFieldDebugEntries(table, rowIndex);
+  if (!entries.length) return "";
+  const order = ["日期", "票面", "楼层", "区域", "排", "座位号", "备注", "座位情况"];
+  return entries
+    .sort((left, right) => {
+      const leftIndex = order.indexOf(left.field);
+      const rightIndex = order.indexOf(right.field);
+      return (leftIndex >= 0 ? leftIndex : order.length) - (rightIndex >= 0 ? rightIndex : order.length);
+    })
+    .map((item) => {
+      const parts = [`${item.field}=${item.value}`];
+      if (Number.isInteger(Number(item.sourceIndex))) parts.push(`源行${Number(item.sourceIndex) + 1}`);
+      if (Number.isInteger(Number(item.anchorIndex))) parts.push(`锚点${Number(item.anchorIndex) + 1}`);
+      if (Number.isInteger(Number(item.blockStart))) parts.push(`块${Number(item.blockStart) + 1}`);
+      if (Number.isInteger(Number(item.ppRowIndex))) parts.push(`结构行${Number(item.ppRowIndex) + 1}`);
+      if (item.source) parts.push(item.source);
+      return parts.join(" / ");
+    })
+    .join("；");
+}
+
 function repairInheritedFieldsFromVisualTableStructure(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
   const visualByRow = buildVisualInheritedValuesByRow(table);
@@ -5023,12 +5105,19 @@ function repairInheritedFieldsFromVisualTableStructure(table) {
       const columnIndex = findColumnIndex(table.columns, [field]);
       if (columnIndex < 0 || !value) return;
       while (row.length < table.columns.length) row.push("");
-      if (String(row[columnIndex] || "").trim() === value) return;
-      row[columnIndex] = value;
-      syncOriginalRowValue(table, rowIndex, columnIndex, value, { appendMissing: true });
-      changed = true;
+      recordInheritedFieldDebug(table, rowIndex, field, {
+        value,
+        source: "pp_structure",
+        ppRowIndex: table.ppStructureTicketRowMatches?.find?.((match) => Number(match?.ticketRowIndex) === rowIndex)?.ppRowIndex,
+      });
+      if (String(row[columnIndex] || "").trim() !== value) {
+        row[columnIndex] = value;
+        syncOriginalRowValue(table, rowIndex, columnIndex, value, { appendMissing: true });
+        changed = true;
+      }
     });
   });
+  if (visualByRow.size) table.visualInheritRepairVersion = VISUAL_INHERIT_REPAIR_VERSION;
   return changed;
 }
 
@@ -5082,7 +5171,15 @@ function repairMergedDateBlocks(table, anchors = null) {
     const targetDate = (explicitAnchor || nextAnchor || getInheritedMergedDateAnchor(sourceIndex, dateAnchors) || getNearestMergedDateAnchor(rowIndex, dateAnchors))?.date || "";
     if (!targetDate) return;
     const currentDate = String(row[dateIndex] || "").trim();
-    if (currentDate === targetDate) return;
+    if (currentDate === targetDate) {
+      recordInheritedFieldDebug(table, rowIndex, "日期", {
+        value: targetDate,
+        source: "merged_date_blocks",
+        sourceIndex,
+        anchorIndex: (explicitAnchor || nextAnchor || getInheritedMergedDateAnchor(sourceIndex, dateAnchors) || getNearestMergedDateAnchor(rowIndex, dateAnchors))?.index,
+      });
+      return;
+    }
     if (explicitAnchor && currentDate && isLikelyDateValue(currentDate)) return;
     const replaceableDateCell =
       !currentDate ||
@@ -5093,6 +5190,12 @@ function repairMergedDateBlocks(table, anchors = null) {
     if (!replaceableDateCell) return;
     row[dateIndex] = targetDate;
     syncOriginalRowValue(table, rowIndex, dateIndex, targetDate, { appendMissing: true });
+    recordInheritedFieldDebug(table, rowIndex, "日期", {
+      value: targetDate,
+      source: "merged_date_blocks",
+      sourceIndex,
+      anchorIndex: (explicitAnchor || nextAnchor || getInheritedMergedDateAnchor(sourceIndex, dateAnchors) || getNearestMergedDateAnchor(rowIndex, dateAnchors))?.index,
+    });
     changed = true;
   });
   return changed;
@@ -5513,7 +5616,18 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
       const target = normalizeVisualInheritedValue(field, anchor?.value || "");
       const current = String(row[columnIndex] || "").trim();
       const sourceHasExplicit = Boolean(normalizeVisualInheritedValue(field, sourceContext?.fields?.[field] || ""));
-      if (!shouldReplaceContextValue(field, current, target, sourceHasExplicit)) return;
+      const willReplace = shouldReplaceContextValue(field, current, target, sourceHasExplicit);
+      if (target && (willReplace || current === target)) {
+        recordInheritedFieldDebug(table, rowIndex, field, {
+          value: target,
+          source: "row_color_context",
+          sourceIndex,
+          anchorIndex: anchor?.index,
+          blockStart: getGridContextBlockStartForIndex(sourceRows, sourceIndex, `field:${field}`),
+          sourceText: sourceContext?.text || "",
+        });
+      }
+      if (!willReplace) return;
       row[columnIndex] = target;
       syncOriginalRowValue(table, rowIndex, columnIndex, target, { appendMissing: true });
       changed = true;
@@ -5523,15 +5637,25 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
       const targetDate = dateAnchor?.value || "";
       const currentDate = String(row[dateIndex] || "").trim();
       const sourceHasExplicitDate = Boolean(sourceContext?.date);
-      if (
+      const willReplaceDate =
         targetDate &&
         currentDate !== targetDate &&
         (!currentDate ||
           isLikelyDateColumnValue(currentDate) ||
           !isLikelyDateValue(currentDate) ||
           isPlaceholderOrSeparatorText(currentDate) ||
-          !sourceHasExplicitDate)
-      ) {
+          !sourceHasExplicitDate);
+      if (targetDate && (willReplaceDate || currentDate === targetDate)) {
+        recordInheritedFieldDebug(table, rowIndex, "日期", {
+          value: targetDate,
+          source: "row_color_context",
+          sourceIndex,
+          anchorIndex: dateAnchor?.index,
+          blockStart: getGridContextBlockStartForIndex(sourceRows, sourceIndex, "dateBlockStart"),
+          sourceText: sourceContext?.text || "",
+        });
+      }
+      if (willReplaceDate) {
         row[dateIndex] = targetDate;
         syncOriginalRowValue(table, rowIndex, dateIndex, targetDate, { appendMissing: true });
         changed = true;
@@ -5546,7 +5670,18 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
         currentFace &&
         (isNumericTicketFaceValue(currentFace) || isLikelyFaceValue(currentFace) || isGenericFaceValue(currentFace)) &&
         !isPlaceholderOrSeparatorText(currentFace);
-      if (targetFace && currentFace !== targetFace && (!hasValidFace || !sourceHasExplicitFace)) {
+      const willReplaceFace = targetFace && currentFace !== targetFace && (!hasValidFace || !sourceHasExplicitFace);
+      if (targetFace && (willReplaceFace || currentFace === targetFace)) {
+        recordInheritedFieldDebug(table, rowIndex, "票面", {
+          value: targetFace,
+          source: "row_color_context",
+          sourceIndex,
+          anchorIndex: faceAnchor?.index,
+          blockStart: getGridContextBlockStartForIndex(sourceRows, sourceIndex, "faceBlockStart"),
+          sourceText: sourceContext?.text || "",
+        });
+      }
+      if (willReplaceFace) {
         row[faceIndex] = targetFace;
         syncOriginalRowValue(table, rowIndex, faceIndex, targetFace, { appendMissing: true });
         changed = true;
@@ -5623,6 +5758,11 @@ function repairMergedFaceBlocks(table) {
     if (!targetFace) return;
     row[faceIndex] = targetFace;
     syncOriginalRowValue(table, rowIndex, faceIndex, targetFace, { appendMissing: true });
+    recordInheritedFieldDebug(table, rowIndex, "票面", {
+      value: targetFace,
+      source: "merged_face_blocks",
+      sourceIndex: rowIndex,
+    });
     changed = true;
   });
   return changed;
@@ -11211,10 +11351,15 @@ function makeCompactPendingTable(table) {
           rowTextVerified: item?.rowTextVerified === true,
           rowGeometryVerified: item?.rowGeometryVerified === true,
           matchedText: item?.matchedText || "",
+          rowText: item?.rowText || "",
           localPixelLabel: item?.localPixelLabel || "",
           localPixelRedRatio: Number(item?.localPixelRedRatio || 0),
           localPixelWhiteRatio: Number(item?.localPixelWhiteRatio || 0),
           localPixelColoredRatio: Number(item?.localPixelColoredRatio || 0),
+          sourceIndex: item?.sourceIndex ?? "",
+          dateBlockStart: item?.dateBlockStart === true,
+          faceBlockStart: item?.faceBlockStart === true,
+          gridColumnStarts: Array.isArray(item?.gridColumnStarts) ? [...item.gridColumnStarts] : [],
         }))
       : [],
     aiRowColorAutoRows: Array.isArray(table.aiRowColorAutoRows) ? [...table.aiRowColorAutoRows] : [],
@@ -11226,6 +11371,8 @@ function makeCompactPendingTable(table) {
     rowColorManualReviewOnly: Boolean(table.rowColorManualReviewOnly),
     rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
     visualInheritRepairVersion: Number(table.visualInheritRepairVersion || 0),
+    inheritedFieldDebug: compactInheritedFieldDebug(table.inheritedFieldDebug),
+    rowColorSourceContextAnchors: table.rowColorSourceContextAnchors ? JSON.parse(JSON.stringify(table.rowColorSourceContextAnchors)) : null,
     publishDecisionLogicVersion: Number(table.publishDecisionLogicVersion || 0),
     colorReviewSamples: { ...(table.colorReviewSamples || {}) },
     rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
@@ -11913,6 +12060,8 @@ function normalizeLoadedPendingTable(table) {
     ppStructureAnalysis: compactPpStructureAnalysis(table.ppStructureAnalysis),
     ppStructureTicketRowMatches: clonePpStructureMatches(table.ppStructureTicketRowMatches),
     ppStructureMessage: table.ppStructureMessage || "",
+    inheritedFieldDebug: compactInheritedFieldDebug(table.inheritedFieldDebug),
+    rowColorSourceContextAnchors: table.rowColorSourceContextAnchors ? JSON.parse(JSON.stringify(table.rowColorSourceContextAnchors)) : null,
   };
   const legacyRowActionRows =
     Array.isArray(normalizedTable.rowColorRows) && normalizedTable.rowColorRows.some((item) => item?.rowActionGeometry === true)
@@ -11968,6 +12117,8 @@ function normalizeLoadedPendingTable(table) {
     normalizedTable.rowActionMessage = "旧版原图贴行按钮坐标已作废，已切回稳定表格核对。";
   }
   normalizedTable.rowColorLogicVersion = Number(normalizedTable.rowColorLogicVersion || 0);
+  normalizedTable.visualInheritRepairVersion = Number(normalizedTable.visualInheritRepairVersion || 0);
+  normalizedTable.inheritedFieldDebug = compactInheritedFieldDebug(normalizedTable.inheritedFieldDebug);
   repairMisreadDataHeaderTable(normalizedTable);
   normalizePendingTableColumns(normalizedTable);
   ensurePendingTableSourceRowIndexes(normalizedTable);
@@ -13843,10 +13994,47 @@ function dedupeTicketFields(fields = [], { canonical = false } = {}) {
   });
 }
 
+function dedupeCanonicalTicketFields(fields = []) {
+  const multiValueLabels = new Set(["备注", "座位情况"]);
+  const bestByLabel = new Map();
+  const result = [];
+  const scoreField = (field) => {
+    const label = String(field?.label || "").trim();
+    const canonical = getCanonicalDisplayFieldLabel(label) || label;
+    let score = 0;
+    if (label === canonical) score += 30;
+    if (["日期", "票面", "楼层", "席位", "区域", "排", "座位号", "售价", "数量"].includes(canonical)) score += 20;
+    if (canonical === "售价" && extractSalePriceText(field?.value, { minPrice: 100 })) score += 10;
+    return score;
+  };
+  fields.forEach((field) => {
+    const canonical = getCanonicalDisplayFieldLabel(field?.label) || String(field?.label || "").trim();
+    const value = String(field?.value || "").trim();
+    if (!canonical || !value) return;
+    if (multiValueLabels.has(canonical)) {
+      result.push(field);
+      return;
+    }
+    const existing = bestByLabel.get(canonical);
+    if (!existing || scoreField(field) > scoreField(existing)) bestByLabel.set(canonical, field);
+  });
+  const emittedLabels = new Set();
+  fields.forEach((field) => {
+    const canonical = getCanonicalDisplayFieldLabel(field?.label) || String(field?.label || "").trim();
+    if (multiValueLabels.has(canonical)) return;
+    const best = bestByLabel.get(canonical);
+    if (!best || emittedLabels.has(canonical) || best !== field) return;
+    result.push(field);
+    emittedLabels.add(canonical);
+  });
+  return result;
+}
+
 function normalizeTicketDisplayFieldLabels(fields = []) {
   return fields.map((field) => {
     const canonical = getCanonicalDisplayFieldLabel(field?.label);
     if (canonical === "售价") return { ...field, label: "售价" };
+    if (canonical === "日期") return { ...field, label: "日期" };
     return field;
   });
 }
@@ -14086,8 +14274,10 @@ function getOriginalTicketFields(ticket, options = {}) {
       originalFields.filter((field) => !isMisreadDataHeaderField(field) && !displayLabelLooksLikeTicketData(field.label)),
     );
     return orderTicketFieldsForDisplay(
-      normalizeTicketDisplayFieldLabels(
-        removeConflictingTicketDisplayFields(dedupeTicketFields(addMissingStandardTicketFields(cleanedOriginalFields, ticket), { canonical: true }), ticket),
+      dedupeCanonicalTicketFields(
+        normalizeTicketDisplayFieldLabels(
+          removeConflictingTicketDisplayFields(dedupeTicketFields(addMissingStandardTicketFields(cleanedOriginalFields, ticket), { canonical: true }), ticket),
+        ),
       ),
     );
   }
@@ -14144,8 +14334,10 @@ function getOriginalTicketFields(ticket, options = {}) {
     cleanedFields.push({ label: "数量", value: quantityValue });
   }
   return orderTicketFieldsForDisplay(
-    normalizeTicketDisplayFieldLabels(
-      removeConflictingTicketDisplayFields(dedupeTicketFields(addMissingStandardTicketFields(cleanedFields, ticket), { canonical: true }), ticket),
+    dedupeCanonicalTicketFields(
+      normalizeTicketDisplayFieldLabels(
+        removeConflictingTicketDisplayFields(dedupeTicketFields(addMissingStandardTicketFields(cleanedFields, ticket), { canonical: true }), ticket),
+      ),
     ),
   );
 }
@@ -15964,6 +16156,9 @@ function cloneReviewState(table) {
     colorReviewSamples: { ...(table.colorReviewSamples || {}) },
     rowColorSource: table.rowColorSource || "",
     rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
+    visualInheritRepairVersion: Number(table.visualInheritRepairVersion || 0),
+    inheritedFieldDebug: compactInheritedFieldDebug(table.inheritedFieldDebug),
+    rowColorSourceContextAnchors: table.rowColorSourceContextAnchors ? JSON.parse(JSON.stringify(table.rowColorSourceContextAnchors)) : null,
     publishDecisionLogicVersion: Number(table.publishDecisionLogicVersion || 0),
     rowColorReliable: Boolean(table.rowColorReliable),
     rowColorConfirmed: Boolean(table.rowColorConfirmed),
@@ -16040,6 +16235,8 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.rowColorSource = state.rowColorSource || "";
   table.rowColorLogicVersion = Number(state.rowColorLogicVersion || 0);
   table.visualInheritRepairVersion = Number(state.visualInheritRepairVersion || 0);
+  table.inheritedFieldDebug = compactInheritedFieldDebug(state.inheritedFieldDebug);
+  table.rowColorSourceContextAnchors = state.rowColorSourceContextAnchors ? JSON.parse(JSON.stringify(state.rowColorSourceContextAnchors)) : null;
   table.publishDecisionLogicVersion = Number(state.publishDecisionLogicVersion || 0);
   table.rowColorReliable = Boolean(state.rowColorReliable);
   table.rowColorConfirmed = Boolean(state.rowColorConfirmed);
@@ -16387,6 +16584,7 @@ function renderStandardReviewRowCard(table, rowIndex, aiDecisionByRow = null, { 
   const soldLike = isSoldTicket(ticket);
   const colorHeld = !soldLike && isColorHeldForReviewTicket(ticket);
   const ppStructureMatchText = getPpStructureMatchText(table, rowIndex);
+  const inheritedFieldDebugText = formatInheritedFieldDebug(table, rowIndex);
   const publishBlockReason = selectedForPublish && !publishEligible ? getPendingRowPublishBlockReason(ticket) : "";
   const decisionReason = getPendingRowDecisionReason(ticket, { selectedForPublish, publishEligible });
   const zoneUnmatched =
@@ -16425,6 +16623,7 @@ function renderStandardReviewRowCard(table, rowIndex, aiDecisionByRow = null, { 
       ${!shouldPublish ? `<div class="review-ticket-warning">当前原因：${escapeHtml(decisionReason)}</div>` : ""}
       ${zoneUnmatched ? `<div class="review-ticket-warning">区域未匹配座位图热区：请检查“区域”是否识别错字，或到座位图热区里补这个区。</div>` : ""}
       ${ppStructureMatchText ? `<div class="ai-suggestion publish"><strong>结构坐标</strong><span>${escapeHtml(ppStructureMatchText)}</span></div>` : ""}
+      ${inheritedFieldDebugText ? `<div class="ai-suggestion publish"><strong>继承来源</strong><span>${escapeHtml(inheritedFieldDebugText)}</span></div>` : ""}
       ${
         aiDecision
           ? `<div class="ai-suggestion ${aiDecision.action === "publish" ? "publish" : "skip"}">
