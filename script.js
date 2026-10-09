@@ -4592,14 +4592,47 @@ function repairAdditiveSerialDatesFromSourceText(table) {
   const sourceDateIndex = getSourceTextDateColumnIndex(sourceColumns);
   const anchors = getSourceTextDateAnchors(table);
   if (!sourceRows.length || sourceDateIndex < 0 || !anchors.length) return false;
-  let changed = false;
+  const sortedAnchors = anchors.slice().sort((a, b) => a.index - b.index);
+  const additiveSourceIndexes = [];
   table.rows.forEach((row, rowIndex) => {
-    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex] || !rowHasAdditiveSerial(table, row)) return;
+    if (!Array.isArray(row) || !rowHasAdditiveSerial(table, row)) return;
+    const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+    if (Number.isInteger(sourceIndex)) additiveSourceIndexes.push(sourceIndex);
+  });
+  const additiveBlocks = [];
+  table.rows.forEach((row, rowIndex) => {
+    if (!Array.isArray(row) || !rowHasAdditiveSerial(table, row)) return;
     const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
     const sourceRow = Number.isInteger(sourceIndex) ? sourceRows[sourceIndex] : null;
     const explicitSourceDate = normalizeDateCellValue(sourceRow?.[sourceDateIndex], { allowDayOnly: true });
-    const nextAnchor = explicitSourceDate ? null : getNextMergedDateAnchor(sourceIndex, anchors);
+    const nextAnchor = explicitSourceDate ? null : getNextMergedDateAnchor(sourceIndex, sortedAnchors);
     const targetDate = explicitSourceDate || nextAnchor?.date || "";
+    if (!targetDate) return;
+    const targetAnchorIndex = explicitSourceDate ? sourceIndex : nextAnchor.index;
+    const followingAnchor = sortedAnchors.find((anchor) => anchor.index > targetAnchorIndex);
+    const followingAdditiveIndex = additiveSourceIndexes.filter((index) => index > sourceIndex).sort((a, b) => a - b)[0];
+    const endIndex = Math.min(
+      followingAnchor ? followingAnchor.index : Number.POSITIVE_INFINITY,
+      Number.isInteger(followingAdditiveIndex) ? followingAdditiveIndex : Number.POSITIVE_INFINITY,
+    );
+    additiveBlocks.push({
+      startIndex: sourceIndex,
+      endIndex,
+      date: targetDate,
+    });
+  });
+  if (!additiveBlocks.length) return false;
+
+  const getAdditiveBlockForSourceIndex = (sourceIndex) => {
+    if (!Number.isInteger(sourceIndex)) return null;
+    return additiveBlocks.find((block) => sourceIndex >= block.startIndex && sourceIndex < block.endIndex) || null;
+  };
+  let changed = false;
+  table.rows.forEach((row, rowIndex) => {
+    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex]) return;
+    const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+    const block = getAdditiveBlockForSourceIndex(sourceIndex);
+    const targetDate = block?.date || "";
     if (!targetDate) return;
     while (row.length < table.columns.length) row.push("");
     const currentDate = String(row[dateIndex] || "").trim();
@@ -4618,11 +4651,37 @@ function tableNeedsAdditiveSerialDateRepair(table) {
   const sourceRows = Array.isArray(table.sourceTextRows) ? table.sourceTextRows : [];
   const anchors = getSourceTextDateAnchors(table);
   if (!sourceRows.length || !anchors.length) return false;
-  return table.rows.some((row, rowIndex) => {
-    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex] || !rowHasAdditiveSerial(table, row)) return false;
+  const sortedAnchors = anchors.slice().sort((a, b) => a.index - b.index);
+  const additiveSourceIndexes = [];
+  table.rows.forEach((row, rowIndex) => {
+    if (!Array.isArray(row) || !rowHasAdditiveSerial(table, row)) return;
     const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
-    const nextAnchor = getNextMergedDateAnchor(sourceIndex, anchors);
-    const targetDate = nextAnchor?.date || "";
+    if (Number.isInteger(sourceIndex)) additiveSourceIndexes.push(sourceIndex);
+  });
+  const additiveBlocks = [];
+  table.rows.forEach((row, rowIndex) => {
+    if (!Array.isArray(row) || !rowHasAdditiveSerial(table, row)) return;
+    const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+    const nextAnchor = getNextMergedDateAnchor(sourceIndex, sortedAnchors);
+    if (!nextAnchor?.date) return;
+    const followingAnchor = sortedAnchors.find((anchor) => anchor.index > nextAnchor.index);
+    const followingAdditiveIndex = additiveSourceIndexes.filter((index) => index > sourceIndex).sort((a, b) => a - b)[0];
+    const endIndex = Math.min(
+      followingAnchor ? followingAnchor.index : Number.POSITIVE_INFINITY,
+      Number.isInteger(followingAdditiveIndex) ? followingAdditiveIndex : Number.POSITIVE_INFINITY,
+    );
+    additiveBlocks.push({
+      startIndex: sourceIndex,
+      endIndex,
+      date: nextAnchor.date,
+    });
+  });
+  if (!additiveBlocks.length) return false;
+  return table.rows.some((row, rowIndex) => {
+    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex]) return false;
+    const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+    const block = additiveBlocks.find((item) => sourceIndex >= item.startIndex && sourceIndex < item.endIndex);
+    const targetDate = block?.date || "";
     return Boolean(targetDate && String(row[dateIndex] || "").trim() !== targetDate);
   });
 }
