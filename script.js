@@ -12975,7 +12975,7 @@ function getCanonicalDisplayFieldLabel(label = "") {
   const normalized = normalize(text);
   if (!normalized) return "";
   if (hasHeaderHint(text, ["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"])) return "日期";
-  if (isSalePriceColumnName(text)) return isGenericPriceColumnName(text) ? normalized : "售价";
+  if (isSalePriceColumnName(text)) return "售价";
   if (isFloorLevelColumnName(text)) return "楼层";
   if (isVenueSeatTypeColumnName(text)) return "席位";
   if (isFaceValueColumnName(text)) return "票面";
@@ -12997,6 +12997,18 @@ function dedupeTicketFields(fields = [], { canonical = false } = {}) {
     seen.add(key);
     return true;
   });
+}
+
+function normalizeTicketDisplayFieldLabels(fields = []) {
+  return fields.map((field) => {
+    const canonical = getCanonicalDisplayFieldLabel(field?.label);
+    if (canonical === "售价") return { ...field, label: "售价" };
+    return field;
+  });
+}
+
+function normalizeSalePriceColumnLabels(columns = []) {
+  return (Array.isArray(columns) ? columns : []).map((column) => (isSalePriceColumnName(column) ? "售价" : column));
 }
 
 function ticketFieldsHaveCanonicalLabel(fields = [], label = "") {
@@ -13222,7 +13234,9 @@ function getOriginalTicketFields(ticket, options = {}) {
       originalFields.filter((field) => !isMisreadDataHeaderField(field) && !displayLabelLooksLikeTicketData(field.label)),
     );
     return orderTicketFieldsForDisplay(
-      removeConflictingTicketDisplayFields(dedupeTicketFields(addMissingStandardTicketFields(cleanedOriginalFields, ticket), { canonical: true }), ticket),
+      normalizeTicketDisplayFieldLabels(
+        removeConflictingTicketDisplayFields(dedupeTicketFields(addMissingStandardTicketFields(cleanedOriginalFields, ticket), { canonical: true }), ticket),
+      ),
     );
   }
   const salePrice = getTicketSalePriceValue(ticket);
@@ -13278,7 +13292,9 @@ function getOriginalTicketFields(ticket, options = {}) {
     cleanedFields.push({ label: "数量", value: quantityValue });
   }
   return orderTicketFieldsForDisplay(
-    removeConflictingTicketDisplayFields(dedupeTicketFields(addMissingStandardTicketFields(cleanedFields, ticket), { canonical: true }), ticket),
+    normalizeTicketDisplayFieldLabels(
+      removeConflictingTicketDisplayFields(dedupeTicketFields(addMissingStandardTicketFields(cleanedFields, ticket), { canonical: true }), ticket),
+    ),
   );
 }
 
@@ -18857,6 +18873,10 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
         : {};
   return Array.from({ length: count }, (_, index) => {
     const parsedTable = uploadTables[index];
+    const columns = normalizeSalePriceColumnLabels(parsedTable.columns);
+    const originalColumns = normalizeSalePriceColumnLabels(
+      Array.isArray(parsedTable.originalColumns) ? parsedTable.originalColumns : parsedTable.columns,
+    );
     const sourcePage = Number(parsedTable.sourcePage || 0) || index + 1;
     const sourcePart = isPdf ? 1 : Number(parsedTable.sourcePart || 0) || index + 1;
     const pageText = isPdf ? `PDF 第 ${sourcePage} 页` : `第 ${sourcePart} 张表`;
@@ -18871,8 +18891,8 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
       sourcePage,
       sourcePart,
       eventId: currentEvent.id,
-      columns: parsedTable.columns,
-      originalColumns: Array.isArray(parsedTable.originalColumns) ? parsedTable.originalColumns : [...parsedTable.columns],
+      columns,
+      originalColumns,
       originalRows: Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
       sourceTextColumns: Array.isArray(parsedTable.sourceTextColumns) ? [...parsedTable.sourceTextColumns] : Array.isArray(parsedTable.originalColumns) ? [...parsedTable.originalColumns] : [...parsedTable.columns],
       sourceTextRows: Array.isArray(parsedTable.sourceTextRows) ? cloneRows(parsedTable.sourceTextRows) : Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
