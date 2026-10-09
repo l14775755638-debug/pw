@@ -11252,6 +11252,27 @@ function normalizePendingTablesInMemory({ save = false, force = false } = {}) {
   return true;
 }
 
+function clonePendingTableForDeferredLoad(table = {}) {
+  return {
+    ...table,
+    columns: Array.isArray(table.columns) ? [...table.columns] : [],
+    rows: Array.isArray(table.rows) ? table.rows.map((row) => (Array.isArray(row) ? [...row] : [])) : [],
+    originalColumns: Array.isArray(table.originalColumns) ? [...table.originalColumns] : undefined,
+    originalRows: Array.isArray(table.originalRows) ? table.originalRows.map((row) => (Array.isArray(row) ? [...row] : [])) : undefined,
+    sourceTextColumns: Array.isArray(table.sourceTextColumns) ? [...table.sourceTextColumns] : undefined,
+    sourceTextRows: Array.isArray(table.sourceTextRows) ? table.sourceTextRows.map((row) => (Array.isArray(row) ? [...row] : [])) : undefined,
+    publishRows: { ...(table.publishRows || {}) },
+    manualPublishRows: { ...(table.manualPublishRows || {}) },
+    manualSkipRows: { ...(table.manualSkipRows || {}) },
+    reviewedRows: { ...(table.reviewedRows || {}) },
+    userEditedRows: { ...(table.userEditedRows || {}) },
+    lightReviewFlags: true,
+    reviewFlagsVersion: table.reviewFlagsVersion || REVIEW_FLAGS_VERSION,
+    needsManualReview: typeof table.needsManualReview === "boolean" ? table.needsManualReview : true,
+    reviewReasons: Array.isArray(table.reviewReasons) && table.reviewReasons.length ? [...table.reviewReasons] : ["待确认表较多，已延迟校对计算"],
+  };
+}
+
 function applyLoadedAppState(parsed) {
   if (!Array.isArray(parsed?.events) || !parsed.events.length) return false;
   sessionStorage.removeItem("ticket-admin-state-backup-restore-attempted");
@@ -11263,7 +11284,9 @@ function applyLoadedAppState(parsed) {
   const rawPendingRows = rawPendingTables.reduce((count, table) => count + (Array.isArray(table?.rows) ? table.rows.length : 0), 0);
   const shouldDeferPendingNormalize =
     rawPendingTables.length > MAX_PENDING_TABLES_NORMALIZE_ON_LOAD || rawPendingRows > MAX_PENDING_ROWS_NORMALIZE_ON_LOAD;
-  const normalizedLoadedPending = rawPendingTables.map(normalizeLoadedPendingTable);
+  const normalizedLoadedPending = shouldDeferPendingNormalize
+    ? rawPendingTables.map(clonePendingTableForDeferredLoad)
+    : rawPendingTables.map(normalizeLoadedPendingTable);
   const loadedPendingTables = shouldDeferPendingNormalize ? normalizedLoadedPending : mergeFragmentedPendingTables(normalizedLoadedPending);
   pendingTableNormalizeDeferredOnLoad = shouldDeferPendingNormalize;
   pendingTables.splice(0, pendingTables.length, ...loadedPendingTables);
@@ -14767,12 +14790,13 @@ function selectUploadRecordWindow(direction) {
 }
 
 function renderUploadRecords({ save = true, normalize = true } = {}) {
-  if (normalize && pendingTableNormalizeDeferredOnLoad) {
-    pendingTableNormalizeDeferredOnLoad = false;
-  } else if (normalize) {
+  const deferHeavyReview = Boolean(pendingTableNormalizeDeferredOnLoad);
+  if (normalize && !deferHeavyReview) {
     normalizePendingTablesInMemory({ save });
   }
-  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
+  const allCurrentPending = pendingTables
+    .filter((table) => table.eventId === currentEvent.id)
+    .map((table) => (deferHeavyReview ? table : ensurePendingTableReviewFlags(table)));
   const repairedTables = allCurrentPending.filter((table) => table._columnRepairChanged);
   if (repairedTables.length) {
     repairedTables.forEach((table) => {
@@ -17224,7 +17248,7 @@ function renderReviewSourceMedia(table, sourceUrl, { sourceMissing, sourceWaitin
 }
 
 function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normalize = true } = {}) {
-  if (normalize) normalizePendingTablesInMemory({ save: true });
+  if (normalize && !pendingTableNormalizeDeferredOnLoad) normalizePendingTablesInMemory({ save: true });
   const table = getSelectedPendingTable();
   if (!table || table.eventId !== currentEvent.id) {
     reviewLayout.classList.remove("quick-manual-review-layout");
