@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 121;
+const ROW_COLOR_LOGIC_VERSION = 122;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 30;
@@ -12840,6 +12840,12 @@ function rememberOpenCvSoldTextColorAnchors(table) {
 
 function removeSoldRowsFromTable(table) {
   const mergedDateAnchors = rememberMergedDateSourceAnchors(table);
+  repairRowsFromBoundSourceText(table);
+  repairMergedContextFromRowColorSourceAnchors(table);
+  repairMergedDateBlocks(table, mergedDateAnchors);
+  repairMergedFaceBlocks(table);
+  repairInheritedFieldsFromVisualTableStructure(table);
+  sanitizeSeatConditionColumnValues(table);
   rememberOpenCvSoldTextColorAnchors(table);
   const useLightSoldCleanup = table.lightReviewFlags && !hasOpenCvRowColorPreview(table);
   const removed = removeRowsFromTable(table, (row, rowIndex) =>
@@ -19815,6 +19821,25 @@ function previewUploadedTable(tableId) {
   searchInput.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+function pendingTableRequiresRegeneration(table) {
+  if (!table) return false;
+  const reasons = Array.isArray(table.reviewReasons) ? table.reviewReasons.join(" ") : "";
+  const message = `${table.rowColorMessage || ""} ${table.rowActionMessage || ""} ${reasons}`;
+  return /旧版.*确认表|确认表.*作废|重新生成确认表|不能继续用于发布/.test(message);
+}
+
+function blockRegenerationRequiredPublish(tables = []) {
+  const blocked = (tables || []).filter(pendingTableRequiresRegeneration);
+  if (!blocked.length) return false;
+  manualReviewOnly = true;
+  selectedPendingTableId = blocked[0]?.id || selectedPendingTableId;
+  setUploadStatus("旧版确认表已作废，请先清空确认表重来，再用已识别页重新生成确认表。", "error");
+  showToast("旧版确认表不能发布，请重新生成确认表。", "error");
+  renderUploadRecords();
+  renderReviewPanel();
+  return true;
+}
+
 async function confirmSelectedPendingTable() {
   if (!requireSeatmapTestBeforePublish()) return;
   const table = getSelectedPendingTable();
@@ -19822,6 +19847,7 @@ async function confirmSelectedPendingTable() {
     showToast("请先选择一张待确认表。", "error");
     return;
   }
+  if (blockRegenerationRequiredPublish([table])) return;
   const queueSnapshot = getCurrentPendingTables();
   const currentQueueIndex = queueSnapshot.findIndex((item) => item.id === table.id);
   const publishRows = [];
@@ -19885,6 +19911,7 @@ function confirmAllPendingTables() {
     showToast("当前演出没有待确认表。", "error");
     return;
   }
+  if (blockRegenerationRequiredPublish(currentPending)) return;
   const riskyTables = currentPending.filter((table) => table.needsManualReview);
   if (riskyTables.length) {
     const confirmed = window.confirm(`有 ${riskyTables.length} 张表被标记为“需人工确认”。\n\n建议先点“查看需人工确认”逐张校对原始图。仍然一键发布全部吗？`);
@@ -19960,6 +19987,7 @@ function confirmReadyPendingTables() {
     showToast("当前演出没有待确认表。", "error");
     return;
   }
+  if (blockRegenerationRequiredPublish(currentPending)) return;
   const readyTables = currentPending.filter((table) => !table.needsManualReview);
   if (!readyTables.length) {
     manualReviewOnly = true;
