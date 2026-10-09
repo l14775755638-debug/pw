@@ -2002,6 +2002,29 @@ tr.hit-row td {
   flex: 0 0 auto;
 }
 
+.inline-page-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 180px;
+  min-width: 150px;
+}
+
+.inline-page-jump span {
+  flex: 0 0 auto;
+}
+
+.inline-page-jump input {
+  width: 78px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #bfdde2;
+  border-radius: 6px;
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+}
+
 .upload-record {
   display: flex;
   align-items: center;

@@ -15874,6 +15874,23 @@ function selectUploadRecordWindow(direction) {
   return selectPendingTable(target.id, { scroll: true });
 }
 
+function selectPendingTableBySourcePage(pageValue) {
+  const page = Number(String(pageValue || "").trim());
+  if (!Number.isInteger(page) || page <= 0) {
+    showToast("请输入有效 PDF 页码。", "error");
+    return false;
+  }
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id);
+  const targetIndex = allCurrentPending.findIndex((table) => Number(table.sourcePage || 0) === page);
+  if (targetIndex < 0) {
+    showToast(`没有找到 PDF 第 ${page} 页的待确认表。`, "error");
+    return false;
+  }
+  manualReviewOnly = false;
+  uploadRecordWindowStart = Math.floor(targetIndex / MAX_UPLOAD_RECORDS_RENDERED) * MAX_UPLOAD_RECORDS_RENDERED;
+  return selectPendingTable(allCurrentPending[targetIndex].id, { scroll: true });
+}
+
 function renderUploadRecords({ save = true, normalize = true } = {}) {
   const deferHeavyReview = Boolean(pendingTableNormalizeDeferredOnLoad);
   if (normalize && !deferHeavyReview) {
@@ -15918,6 +15935,11 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
         <span>为避免页面卡顿，只显示当前附近第 ${windowStart + 1}-${windowEnd} / ${currentPending.length} 张待确认表。</span>
         <button class="small-button ghost" type="button" data-review-list-window="prev" ${windowStart > 0 ? "" : "disabled"}>上一组</button>
         <button class="small-button ghost" type="button" data-review-list-window="next" ${windowEnd < currentPending.length ? "" : "disabled"}>下一组</button>
+        <label class="inline-page-jump">
+          <span>跳到 PDF 页</span>
+          <input type="number" min="1" inputmode="numeric" data-review-page-jump-input placeholder="例如 14" />
+        </label>
+        <button class="small-button ghost" type="button" data-review-page-jump>打开</button>
         ${primaryVisibleTable ? `<button class="small-button" type="button" data-review-table="${escapeHtml(primaryVisibleTable.id)}">打开当前页</button>` : ""}
       </div>`
     : "";
@@ -22142,12 +22164,25 @@ uploadRecords.addEventListener("click", (event) => {
     selectUploadRecordWindow(listWindowButton.dataset.reviewListWindow === "prev" ? -1 : 1);
     return;
   }
+  const pageJumpButton = event.target.closest("[data-review-page-jump]");
+  if (pageJumpButton) {
+    const container = pageJumpButton.closest(".upload-record-window-note") || uploadRecords;
+    const input = container.querySelector("[data-review-page-jump-input]");
+    selectPendingTableBySourcePage(input?.value || "");
+    return;
+  }
   const button = event.target.closest("[data-review-table]");
   if (!button) return;
   selectPendingTable(button.dataset.reviewTable, { scroll: true });
 });
 
 uploadRecords.addEventListener("keydown", (event) => {
+  const pageJumpInput = event.target.closest("[data-review-page-jump-input]");
+  if (pageJumpInput && event.key === "Enter") {
+    event.preventDefault();
+    selectPendingTableBySourcePage(pageJumpInput.value || "");
+    return;
+  }
   if (!["Enter", " "].includes(event.key)) return;
   const record = event.target.closest("[data-review-table]");
   if (!record) return;
