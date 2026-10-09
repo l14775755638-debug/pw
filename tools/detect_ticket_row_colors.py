@@ -944,14 +944,87 @@ def has_horizontal_rule_near_column(image, y, x1, x2, radius=7):
     return False
 
 
-def get_grid_context_columns(x_centers):
+def sample_column_cell_color(image, interval, x1, x2):
+    height, width = image.shape[:2]
+    x1 = max(0, min(width - 1, int(round(float(x1)))))
+    x2 = max(x1 + 1, min(width, int(round(float(x2)))))
+    y1 = int(interval.get("y1", 0))
+    y2 = int(interval.get("y2", y1 + 1))
+    y1 = max(0, min(height - 1, y1))
+    y2 = max(y1 + 1, min(height, y2))
+    pad_x = max(2, min(8, int((x2 - x1) * 0.12)))
+    pad_y = max(1, min(5, int((y2 - y1) * 0.18)))
+    region = image[y1 + pad_y : max(y1 + pad_y + 1, y2 - pad_y), x1 + pad_x : max(x1 + pad_x + 1, x2 - pad_x)]
+    if region.size == 0:
+        return None
+    return np.median(region.reshape(-1, 3), axis=0)
+
+
+def has_column_color_transition(image, current_interval, previous_interval, x1, x2):
+    current = sample_column_cell_color(image, current_interval, x1, x2)
+    previous = sample_column_cell_color(image, previous_interval, x1, x2)
+    if current is None or previous is None:
+        return False
+    delta = float(np.linalg.norm(current.astype(float) - previous.astype(float)))
+    current_gray = float(np.mean(current))
+    previous_gray = float(np.mean(previous))
+    current_sat = float(max(current) - min(current))
+    previous_sat = float(max(previous) - min(previous))
+    if current_gray > 238 and previous_gray > 238:
+        return False
+    return delta >= 32 and (current_sat >= 18 or previous_sat >= 18 or abs(current_gray - previous_gray) >= 26)
+
+
+def get_major_grid_x_centers(x_centers):
     xs = sorted(int(x) for x in x_centers)
+    if len(xs) < 4:
+        return xs
+    span = max(xs) - min(xs)
+    gap_threshold = max(52, min(92, span * 0.06))
+    major = [xs[0]]
+    for index, x in enumerate(xs[1:-1], start=1):
+        previous_gap = x - xs[index - 1]
+        next_gap = xs[index + 1] - x
+        if previous_gap >= gap_threshold or next_gap >= gap_threshold:
+            if not major or x - major[-1] >= 16:
+                major.append(x)
+    if xs[-1] - major[-1] >= 16:
+        major.append(xs[-1])
+    return major if len(major) >= 4 else xs
+
+
+def get_grid_context_columns(x_centers):
+    xs = get_major_grid_x_centers(x_centers)
     if len(xs) < 4:
         return None
     return {
         "date": (xs[1], xs[2]),
         "face": (xs[2], xs[3]),
     }
+
+
+def get_grid_column_boxes(x_centers):
+    xs = get_major_grid_x_centers(x_centers)
+    if len(xs) < 2:
+        return []
+    return [(xs[index], xs[index + 1]) for index in range(len(xs) - 1) if xs[index + 1] - xs[index] >= 8]
+
+
+def get_grid_column_block_starts(image, y, x_centers, *, near=False, current_interval=None, previous_interval=None):
+    boxes = get_grid_column_boxes(x_centers)
+    starts = []
+    for x1, x2 in boxes:
+        if near:
+            has_rule = bool(has_horizontal_rule_near_column(image, y, x1 + 4, x2 - 4))
+        else:
+            has_rule = bool(has_horizontal_rule_in_column(image, y, x1 + 4, x2 - 4))
+        has_transition = bool(
+            current_interval is not None
+            and previous_interval is not None
+            and has_column_color_transition(image, current_interval, previous_interval, x1 + 4, x2 - 4)
+        )
+        starts.append(bool(has_rule or has_transition))
+    return starts
 
 
 def classify_rightmost_grid_cell(image, interval, x_centers):
@@ -1044,10 +1117,29 @@ def analyze_physical_grid(image, expected_rows):
             date_x1, date_x2 = context_columns["date"]
             face_x1, face_x2 = context_columns["face"]
             upper_line = int(interval.get("upperLine", interval.get("y1", 0)))
-            row["dateBlockStart"] = bool(index == 0 or has_horizontal_rule_in_column(image, upper_line, date_x1 + 4, date_x2 - 4))
-            row["faceBlockStart"] = bool(index == 0 or has_horizontal_rule_in_column(image, upper_line, face_x1 + 4, face_x2 - 4))
+            previous_interval = selected[index - 1] if index > 0 else None
+            row["dateBlockStart"] = bool(
+                index == 0
+                or has_horizontal_rule_in_column(image, upper_line, date_x1 + 4, date_x2 - 4)
+                or has_column_color_transition(image, interval, previous_interval, date_x1 + 4, date_x2 - 4)
+            )
+            row["faceBlockStart"] = bool(
+                index == 0
+                or has_horizontal_rule_in_column(image, upper_line, face_x1 + 4, face_x2 - 4)
+                or has_column_color_transition(image, interval, previous_interval, face_x1 + 4, face_x2 - 4)
+            )
             row["dateColumnBox"] = {"x1": int(date_x1), "x2": int(date_x2)}
             row["faceColumnBox"] = {"x1": int(face_x1), "x2": int(face_x2)}
+            row["gridColumnStarts"] = [
+                bool(index == 0 or value)
+                for value in get_grid_column_block_starts(
+                    image,
+                    upper_line,
+                    geometry["xCenters"],
+                    current_interval=interval,
+                    previous_interval=previous_interval,
+                )
+            ]
         row["index"] = index
         row["sourceIndex"] = index
         row["gridRowIndex"] = index
@@ -1725,10 +1817,30 @@ def analyze_ocr_rows(image_path, ocr_rows):
             date_x1, date_x2 = context_columns["date"]
             face_x1, face_x2 = context_columns["face"]
             upper_line = int(interval.get("y1", 0))
-            row["dateBlockStart"] = bool(index == 0 or has_horizontal_rule_near_column(image, upper_line, date_x1 + 4, date_x2 - 4))
-            row["faceBlockStart"] = bool(index == 0 or has_horizontal_rule_near_column(image, upper_line, face_x1 + 4, face_x2 - 4))
+            previous_interval = intervals[index - 1] if index > 0 else None
+            row["dateBlockStart"] = bool(
+                index == 0
+                or has_horizontal_rule_near_column(image, upper_line, date_x1 + 4, date_x2 - 4)
+                or has_column_color_transition(image, interval, previous_interval, date_x1 + 4, date_x2 - 4)
+            )
+            row["faceBlockStart"] = bool(
+                index == 0
+                or has_horizontal_rule_near_column(image, upper_line, face_x1 + 4, face_x2 - 4)
+                or has_column_color_transition(image, interval, previous_interval, face_x1 + 4, face_x2 - 4)
+            )
             row["dateColumnBox"] = {"x1": int(date_x1), "x2": int(date_x2)}
             row["faceColumnBox"] = {"x1": int(face_x1), "x2": int(face_x2)}
+            row["gridColumnStarts"] = [
+                bool(index == 0 or value)
+                for value in get_grid_column_block_starts(
+                    image,
+                    upper_line,
+                    geometry["xCenters"],
+                    near=True,
+                    current_interval=interval,
+                    previous_interval=previous_interval,
+                )
+            ]
         row["index"] = index
         row["sourceIndex"] = index
         row["ocrIndex"] = interval.get("ocrIndex", index)

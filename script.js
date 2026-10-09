@@ -1005,7 +1005,25 @@ function recognizedSparseFieldAcceptsValue(field = "", value = "") {
     if (parseCompositeSeatInfo(text)?.zone || extractZoneTokenFromText(text) || isLikelyZoneCode(text)) return false;
     return true;
   }
-  if (field === "备注" || field === "座位情况") return true;
+  if (field === "备注" || field === "座位情况") {
+    if (
+      isLikelyDateValue(text) ||
+      isLikelyDateColumnValue(text) ||
+      isLikelySerialValue(text) ||
+      hasPriceOrSoldValue(text) ||
+      isNumericTicketFaceValue(text) ||
+      isLikelyFaceValue(text) ||
+      isGenericFaceValue(text) ||
+      isLikelyFloorLevelValue(text) ||
+      extractZoneTokenFromText(text) ||
+      isLikelyZoneCode(text) ||
+      isLikelySeatRowValue(text) ||
+      isLikelySeatNumberValue(text)
+    ) {
+      return false;
+    }
+    return isStandaloneLogisticsValue(text) || isLikelyRemarkValue(text) || rowTextHasLinkedSeats(text);
+  }
   if (field === "序号") return isLikelySerialValue(text);
   return false;
 }
@@ -4014,7 +4032,7 @@ function repairAdjacentSeatDetailColumns(table, ratios = []) {
   return changed;
 }
 
-function mergeDuplicateColumnsByName(table, names = ["备注", "售价", "序号"]) {
+function mergeDuplicateColumnsByName(table, names = ["备注", "售价", "序号", "座位情况"]) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
   let changed = false;
   const targets = new Set(names.map((name) => normalize(name)));
@@ -4879,7 +4897,7 @@ function tableNeedsAdditiveSerialDateRepair(table) {
   });
 }
 
-const VISUAL_INHERIT_FIELDS = ["日期", "票面", "楼层", "区域"];
+const VISUAL_INHERIT_FIELDS = ["日期", "票面", "楼层", "席位", "区域"];
 
 function getCanonicalInheritFieldLabel(label = "") {
   const field = getDefaultFieldForHeader(label) || getCanonicalDisplayFieldLabel(label);
@@ -4894,6 +4912,7 @@ function normalizeVisualInheritedValue(field = "", value = "") {
     if (isVenueSeatTypeValue(text)) return formatVenueSeatTypeDisplayValue(text);
     return isNumericTicketFaceValue(text) || isLikelyFaceValue(text) || isGenericFaceValue(text) ? text : "";
   }
+  if (field === "席位") return isVenueSeatTypeValue(text) || isGenericFaceValue(text) ? text : "";
   if (field === "楼层") return isLikelyFloorLevelValue(text) || isVenueSeatTypeValue(text) ? text : "";
   if (field === "区域") {
     const zone = getZoneTokenFromCell(text) || cleanZoneToken(text);
@@ -5031,7 +5050,12 @@ function tableNeedsVisualInheritedFieldRepair(table) {
 
 function tableHasVisualBlockContext(table) {
   const context = getRowColorSourceContextAnchors(table);
-  return context.sourceRows.some((row) => row.dateBlockStart === true || row.faceBlockStart === true);
+  return context.sourceRows.some(
+    (row) =>
+      row.dateBlockStart === true ||
+      row.faceBlockStart === true ||
+      Object.values(row.fieldBlockStarts || {}).some((value) => value === true),
+  );
 }
 
 function rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex) {
@@ -5140,8 +5164,15 @@ function getStrongSourceSequenceBreakStart(sourceRows = [], startIndex = -1, end
 
 function getGridContextBlockStartForIndex(sourceRows = [], sourceIndex = -1, blockKey = "") {
   if (!Array.isArray(sourceRows) || !Number.isInteger(sourceIndex) || !blockKey) return null;
+  const isStartForBlock = (row) => {
+    if (String(blockKey).startsWith("field:")) {
+      const field = blockKey.slice("field:".length);
+      return row?.fieldBlockStarts?.[field] === true;
+    }
+    return row?.[blockKey] === true;
+  };
   const starts = sourceRows
-    .map((row) => ({ index: Number(row?.index), isStart: row?.[blockKey] === true }))
+    .map((row) => ({ index: Number(row?.index), isStart: isStartForBlock(row) }))
     .filter((item) => Number.isInteger(item.index) && item.isStart)
     .map((item) => item.index)
     .sort((a, b) => a - b);
@@ -5156,8 +5187,15 @@ function getGridContextBlockStartForIndex(sourceRows = [], sourceIndex = -1, blo
 
 function getGridContextAnchorBlockStart(sourceRows = [], anchorIndex = -1, blockKey = "", previousAnchorIndex = -1) {
   if (!Array.isArray(sourceRows) || !Number.isInteger(anchorIndex) || !blockKey) return null;
+  const isStartForBlock = (row) => {
+    if (String(blockKey).startsWith("field:")) {
+      const field = blockKey.slice("field:".length);
+      return row?.fieldBlockStarts?.[field] === true;
+    }
+    return row?.[blockKey] === true;
+  };
   const starts = sourceRows
-    .map((row) => ({ index: Number(row?.index), isStart: row?.[blockKey] === true }))
+    .map((row) => ({ index: Number(row?.index), isStart: isStartForBlock(row) }))
     .filter((item) => Number.isInteger(item.index) && item.isStart)
     .map((item) => item.index)
     .sort((a, b) => a - b);
@@ -5228,7 +5266,7 @@ function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = 
 
 function getRowColorSourceContextAnchors(table) {
   const context = table?.rowColorSourceContextAnchors;
-  if (!context || typeof context !== "object") return { dateAnchors: [], faceAnchors: [], sourceRows: [], requireSequenceBoundary: false };
+  if (!context || typeof context !== "object") return { dateAnchors: [], faceAnchors: [], fieldAnchors: {}, sourceRows: [], sourceColumns: [], requireSequenceBoundary: false };
   const normalizeAnchor = (anchor, key) => {
     const index = Number(anchor?.index);
     const value = String(anchor?.[key] || anchor?.value || "").trim();
@@ -5237,27 +5275,89 @@ function getRowColorSourceContextAnchors(table) {
   const normalizeSourceRow = (row) => {
     const index = Number(row?.index);
     if (!Number.isInteger(index)) return null;
+    const fieldBlockStarts =
+      row?.fieldBlockStarts && typeof row.fieldBlockStarts === "object"
+        ? Object.fromEntries(
+            Object.entries(row.fieldBlockStarts)
+              .map(([field, value]) => [getCanonicalDisplayFieldLabel(field) || field, value === true])
+              .filter(([field]) => VISUAL_INHERIT_FIELDS.includes(field)),
+          )
+        : {};
     return {
       index,
       serial: String(row?.serial || "").trim(),
       date: String(row?.date || "").trim(),
       face: String(row?.face || "").trim(),
+      fields: row?.fields && typeof row.fields === "object" ? { ...row.fields } : {},
       text: String(row?.text || "").trim(),
       dateBlockStart: row?.dateBlockStart === true,
       faceBlockStart: row?.faceBlockStart === true,
+      fieldBlockStarts,
     };
   };
+  const fieldAnchors = {};
+  if (context.fieldAnchors && typeof context.fieldAnchors === "object") {
+    Object.entries(context.fieldAnchors).forEach(([rawField, anchors]) => {
+      const field = getCanonicalDisplayFieldLabel(rawField) || rawField;
+      if (!VISUAL_INHERIT_FIELDS.includes(field) || !Array.isArray(anchors)) return;
+      const normalized = anchors
+        .map((anchor) => {
+          const index = Number(anchor?.index);
+          const value = String(anchor?.value || anchor?.[field] || "").trim();
+          return Number.isInteger(index) && value ? { index, value } : null;
+        })
+        .filter(Boolean);
+      if (normalized.length) fieldAnchors[field] = normalized;
+    });
+  }
   return {
     dateAnchors: Array.isArray(context.dateAnchors) ? context.dateAnchors.map((anchor) => normalizeAnchor(anchor, "date")).filter(Boolean) : [],
     faceAnchors: Array.isArray(context.faceAnchors) ? context.faceAnchors.map((anchor) => normalizeAnchor(anchor, "face")).filter(Boolean) : [],
+    fieldAnchors,
     sourceRows: Array.isArray(context.sourceRows) ? context.sourceRows.map(normalizeSourceRow).filter(Boolean) : [],
+    sourceColumns: Array.isArray(context.sourceColumns) ? [...context.sourceColumns] : [],
     requireSequenceBoundary: context.requireSequenceBoundary === true,
   };
 }
 
-function extractRowColorSourceContextAnchorsFromRows(rows = []) {
+function getSourceColumnFieldAtIndex(columns = [], index = -1) {
+  if (!Array.isArray(columns) || index < 0 || index >= columns.length) return "";
+  return getDefaultFieldForHeader(columns[index]) || getCanonicalDisplayFieldLabel(columns[index]);
+}
+
+function getFieldBlockStartsFromGridStarts(columns = [], gridColumnStarts = []) {
+  if (!Array.isArray(columns) || !Array.isArray(gridColumnStarts)) return {};
+  const starts = {};
+  columns.forEach((column, index) => {
+    const field = getSourceColumnFieldAtIndex(columns, index);
+    if (!VISUAL_INHERIT_FIELDS.includes(field)) return;
+    starts[field] = gridColumnStarts[index] === true;
+  });
+  return starts;
+}
+
+function addGenericFieldAnchor(fieldAnchors, field, index, value) {
+  const normalizedField = getCanonicalDisplayFieldLabel(field) || field;
+  if (!VISUAL_INHERIT_FIELDS.includes(normalizedField)) return;
+  const normalizedValue = normalizeVisualInheritedValue(normalizedField, value);
+  if (!normalizedValue) return;
+  if (!fieldAnchors[normalizedField]) fieldAnchors[normalizedField] = [];
+  fieldAnchors[normalizedField].push({ index, value: normalizedValue });
+}
+
+function extractGenericFieldAnchorsFromRow(fieldAnchors, sourceIndex, values = [], columns = []) {
+  if (!Number.isInteger(sourceIndex) || !Array.isArray(values) || !Array.isArray(columns)) return;
+  columns.forEach((column, index) => {
+    const field = getSourceColumnFieldAtIndex(columns, index);
+    if (!VISUAL_INHERIT_FIELDS.includes(field)) return;
+    addGenericFieldAnchor(fieldAnchors, field, sourceIndex, values[index]);
+  });
+}
+
+function extractRowColorSourceContextAnchorsFromRows(rows = [], columns = []) {
   const dateAnchors = [];
   const faceAnchors = [];
+  const fieldAnchors = {};
   const sourceRows = [];
   (Array.isArray(rows) ? rows : []).forEach((item, fallbackIndex) => {
     const sourceIndex = Number.isInteger(Number(item?.index))
@@ -5269,27 +5369,33 @@ function extractRowColorSourceContextAnchorsFromRows(rows = []) {
     const rawText = String(item?.matchedText || item?.rowText || "").trim();
     if (!rawText) return;
     const values = rawText.split(/\t+/).map((cell) => cell.trim()).filter(Boolean);
-    const parsed = parseBoundTicketSourceRowByFields(values, []);
+    const parsed = parseBoundTicketSourceRowByFields(values, columns) || parseBoundTicketSourceRowByFields(values, []) || {};
     const date = String(parsed?.["日期"] || "").trim();
     const face = String(parsed?.["票面"] || values.slice(1, -1).find((value) => isNumericTicketFaceValue(value)) || "").trim();
+    const fieldBlockStarts = getFieldBlockStartsFromGridStarts(columns, item?.gridColumnStarts);
+    extractGenericFieldAnchorsFromRow(fieldAnchors, sourceIndex, values, columns);
+    Object.entries(parsed || {}).forEach(([field, value]) => addGenericFieldAnchor(fieldAnchors, field, sourceIndex, value));
     sourceRows.push({
       index: sourceIndex,
       serial: String(parsed?.["序号"] || values[0] || "").trim(),
       date,
       face,
+      fields: parsed,
       text: rawText,
       dateBlockStart: item?.dateBlockStart === true,
       faceBlockStart: item?.faceBlockStart === true,
+      fieldBlockStarts,
     });
     if (date) dateAnchors.push({ index: sourceIndex, date, value: date });
     if (face) faceAnchors.push({ index: sourceIndex, face, value: face });
   });
-  return { dateAnchors, faceAnchors, sourceRows };
+  return { dateAnchors, faceAnchors, fieldAnchors, sourceRows, sourceColumns: Array.isArray(columns) ? [...columns] : [] };
 }
 
 function mergeSourceContextWithVisualBlockRows(baseContext, visualRows = []) {
   const dateAnchors = Array.isArray(baseContext?.dateAnchors) ? baseContext.dateAnchors : [];
   const faceAnchors = Array.isArray(baseContext?.faceAnchors) ? baseContext.faceAnchors : [];
+  const fieldAnchors = baseContext?.fieldAnchors && typeof baseContext.fieldAnchors === "object" ? baseContext.fieldAnchors : {};
   const sourceRows = Array.isArray(baseContext?.sourceRows) ? baseContext.sourceRows : [];
   const visualBySourceIndex = new Map();
   (Array.isArray(visualRows) ? visualRows : []).forEach((row, fallbackIndex) => {
@@ -5308,12 +5414,18 @@ function mergeSourceContextWithVisualBlockRows(baseContext, visualRows = []) {
       ...row,
       dateBlockStart: row?.dateBlockStart === true || visual?.dateBlockStart === true,
       faceBlockStart: row?.faceBlockStart === true || visual?.faceBlockStart === true,
+      fieldBlockStarts: {
+        ...(row?.fieldBlockStarts && typeof row.fieldBlockStarts === "object" ? row.fieldBlockStarts : {}),
+        ...(visual?.gridColumnStarts ? getFieldBlockStartsFromGridStarts(baseContext?.sourceColumns || [], visual.gridColumnStarts) : {}),
+      },
     };
   });
   return {
     dateAnchors,
     faceAnchors,
+    fieldAnchors,
     sourceRows: mergedSourceRows,
+    sourceColumns: Array.isArray(baseContext?.sourceColumns) ? [...baseContext.sourceColumns] : [],
     requireSequenceBoundary: baseContext?.requireSequenceBoundary === true,
   };
 }
@@ -5321,6 +5433,7 @@ function mergeSourceContextWithVisualBlockRows(baseContext, visualRows = []) {
 function extractSourceContextAnchorsFromTableRows(rows = [], columns = []) {
   const dateAnchors = [];
   const faceAnchors = [];
+  const fieldAnchors = {};
   const sourceRows = [];
   (Array.isArray(rows) ? rows : []).forEach((row, index) => {
     if (!Array.isArray(row)) return;
@@ -5329,29 +5442,33 @@ function extractSourceContextAnchorsFromTableRows(rows = [], columns = []) {
     const serial = String(parsed["序号"] || values[0] || "").trim();
     const date = String(parsed["日期"] || "").trim();
     const face = String(parsed["票面"] || values.slice(1, -1).find((value) => isNumericTicketFaceValue(value)) || "").trim();
+    extractGenericFieldAnchorsFromRow(fieldAnchors, index, values, columns);
+    Object.entries(parsed || {}).forEach(([field, value]) => addGenericFieldAnchor(fieldAnchors, field, index, value));
     sourceRows.push({
       index,
       serial,
       date,
       face,
+      fields: parsed,
       text: values.filter(Boolean).join("\t"),
       dateBlockStart: false,
       faceBlockStart: false,
+      fieldBlockStarts: {},
     });
     if (date) dateAnchors.push({ index, date, value: date });
     if (face) faceAnchors.push({ index, face, value: face });
   });
-  return { dateAnchors, faceAnchors, sourceRows };
+  return { dateAnchors, faceAnchors, fieldAnchors, sourceRows, sourceColumns: Array.isArray(columns) ? [...columns] : [] };
 }
 
 function ensureTextSourceContextAnchors(table) {
   if (!table || !Array.isArray(table.rows)) return false;
   const existing = getRowColorSourceContextAnchors(table);
-  if (existing.dateAnchors.length || existing.faceAnchors.length) return false;
+  if (existing.dateAnchors.length || existing.faceAnchors.length || Object.keys(existing.fieldAnchors || {}).length) return false;
   const rawRows = Array.isArray(table.sourceTextRows) && table.sourceTextRows.length ? table.sourceTextRows : null;
   if (!rawRows || rawRows.length !== table.rows.length) return false;
   const context = extractSourceContextAnchorsFromTableRows(rawRows, table.originalColumns || table.columns || []);
-  if (!context.dateAnchors.length && !context.faceAnchors.length) return false;
+  if (!context.dateAnchors.length && !context.faceAnchors.length && !Object.keys(context.fieldAnchors || {}).length) return false;
   table.rowColorSourceContextAnchors = context;
   table.rowColorSourceContextAnchors.requireSequenceBoundary = true;
   if (!Array.isArray(table.rowColorSourceIndexes) || table.rowColorSourceIndexes.length !== table.rows.length) {
@@ -5363,17 +5480,44 @@ function ensureTextSourceContextAnchors(table) {
 function repairMergedContextFromRowColorSourceAnchors(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
   if (!Array.isArray(table.rowColorSourceIndexes) || table.rowColorSourceIndexes.length !== table.rows.length) return false;
-  const { dateAnchors, faceAnchors, sourceRows, requireSequenceBoundary } = getRowColorSourceContextAnchors(table);
+  const { dateAnchors, faceAnchors, fieldAnchors, sourceRows, requireSequenceBoundary } = getRowColorSourceContextAnchors(table);
   const sourceRowByIndex = new Map(sourceRows.map((row) => [Number(row.index), row]));
-  if (!dateAnchors.length && !faceAnchors.length) return false;
+  if (!dateAnchors.length && !faceAnchors.length && !Object.keys(fieldAnchors || {}).length) return false;
   const dateIndex = findColumnIndex(table.columns, DATE_COLUMN_NAMES);
   const faceIndex = findColumnIndex(table.columns, ["票面", "票价", "面值", "face", "face value", "等级", "档位"]);
   let changed = false;
+  const shouldReplaceContextValue = (field, current, target, sourceHasExplicit) => {
+    if (!target || current === target) return false;
+    if (!current || isPlaceholderOrSeparatorText(current)) return true;
+    if (!sourceHasExplicit) return true;
+    if (field === "日期") return isLikelyDateColumnValue(current) || !isLikelyDateValue(current);
+    if (field === "票面" || field === "席位") {
+      return !(isNumericTicketFaceValue(current) || isLikelyFaceValue(current) || isGenericFaceValue(current) || isVenueSeatTypeValue(current));
+    }
+    if (field === "楼层") return !isLikelyFloorLevelValue(current) && !isVenueSeatTypeValue(current);
+    if (field === "区域") return !extractZoneTokenFromText(current) && !isLikelyZoneCode(current);
+    if (field === "座位情况" || field === "备注") return !rowTextHasLinkedSeats(current) && !isLikelyRemarkValue(current);
+    return false;
+  };
   table.rows.forEach((row, rowIndex) => {
     if (!Array.isArray(row) || table.userEditedRows?.[rowIndex]) return;
     while (row.length < table.columns.length) row.push("");
     const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
     const sourceContext = sourceRowByIndex.get(sourceIndex) || null;
+    Object.entries(fieldAnchors || {}).forEach(([field, anchors]) => {
+      if (field === "日期" || field === "票面") return;
+      if (!hasTicketSalePrice({ table, row, index: rowIndex })) return;
+      const columnIndex = table.columns.findIndex((column) => (getDefaultFieldForHeader(column) || getCanonicalDisplayFieldLabel(column)) === field);
+      if (columnIndex < 0 || !Array.isArray(anchors) || !anchors.length) return;
+      const anchor = getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows, `field:${field}`, { requireSequenceBoundary });
+      const target = normalizeVisualInheritedValue(field, anchor?.value || "");
+      const current = String(row[columnIndex] || "").trim();
+      const sourceHasExplicit = Boolean(normalizeVisualInheritedValue(field, sourceContext?.fields?.[field] || ""));
+      if (!shouldReplaceContextValue(field, current, target, sourceHasExplicit)) return;
+      row[columnIndex] = target;
+      syncOriginalRowValue(table, rowIndex, columnIndex, target, { appendMissing: true });
+      changed = true;
+    });
     if (dateIndex >= 0 && rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex)) {
       const dateAnchor = getBoundSourceContextAnchorForIndex(dateAnchors, sourceIndex, sourceRows, "dateBlockStart", { requireSequenceBoundary });
       const targetDate = dateAnchor?.value || "";
@@ -5408,6 +5552,46 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
         changed = true;
       }
     }
+  });
+  return changed;
+}
+
+function isValidSeatConditionCellValue(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (
+    isLikelyDateValue(text) ||
+    isLikelyDateColumnValue(text) ||
+    isLikelySerialValue(text) ||
+    hasPriceOrSoldValue(text) ||
+    isNumericTicketFaceValue(text) ||
+    isLikelyFaceValue(text) ||
+    isGenericFaceValue(text) ||
+    isLikelyFloorLevelValue(text) ||
+    extractZoneTokenFromText(text) ||
+    isLikelyZoneCode(text) ||
+    isLikelySeatRowValue(text) ||
+    isLikelySeatNumberValue(text)
+  ) {
+    return false;
+  }
+  return isStandaloneLogisticsValue(text) || isLikelyRemarkValue(text) || rowTextHasLinkedSeats(text);
+}
+
+function sanitizeSeatConditionColumnValues(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  const indexes = findColumnIndexes(table.columns, ["座位情况", "座位状态", "座席情况", "seat condition", "seat status"]);
+  if (!indexes.length) return false;
+  let changed = false;
+  table.rows.forEach((row, rowIndex) => {
+    if (!Array.isArray(row)) return;
+    indexes.forEach((columnIndex) => {
+      const value = String(row[columnIndex] || "").trim();
+      if (!value || isValidSeatConditionCellValue(value)) return;
+      row[columnIndex] = "";
+      syncOriginalRowValue(table, rowIndex, columnIndex, "", { appendMissing: true });
+      changed = true;
+    });
   });
   return changed;
 }
@@ -5484,7 +5668,24 @@ function parseBoundTicketSourceRowByFields(sourceRow = [], sourceColumns = []) {
         setParsedBoundField(parsed, field, extractSeatNumberFromText(value, { allowBareRange: true }) || value);
       }
       if (field === "售价" && hasPriceOrSoldValue(value)) setParsedBoundField(parsed, field, value);
-      if ((field === "备注" || field === "座位情况") && !hasPriceOrSoldValue(value)) setParsedBoundField(parsed, field, value);
+      if (
+        (field === "备注" || field === "座位情况") &&
+        !isLikelyDateValue(value) &&
+        !isLikelyDateColumnValue(value) &&
+        !isLikelySerialValue(value) &&
+        !hasPriceOrSoldValue(value) &&
+        !isNumericTicketFaceValue(value) &&
+        !isLikelyFaceValue(value) &&
+        !isGenericFaceValue(value) &&
+        !isLikelyFloorLevelValue(value) &&
+        !extractZoneTokenFromText(value) &&
+        !isLikelyZoneCode(value) &&
+        !isLikelySeatRowValue(value) &&
+        !isLikelySeatNumberValue(value) &&
+        (isStandaloneLogisticsValue(value) || isLikelyRemarkValue(value) || rowTextHasLinkedSeats(value))
+      ) {
+        setParsedBoundField(parsed, field, value);
+      }
     });
   }
 
@@ -9788,7 +9989,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorLogicVersion = ROW_COLOR_LOGIC_VERSION;
   table.rowColorMessage = "";
   table.rowColorRows = [];
-  table.rowColorSourceContextAnchors = { dateAnchors: [], faceAnchors: [] };
+  table.rowColorSourceContextAnchors = { dateAnchors: [], faceAnchors: [], fieldAnchors: {}, sourceColumns: [] };
   table.rowColorSoldTextAnchor = null;
   table.rowColorPartialSequenceAligned = false;
   table.rowColorPageLabels = [];
@@ -9815,9 +10016,18 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorUnreliableReasons = Array.isArray(analysis.unreliableReasons) ? analysis.unreliableReasons : [];
   table.rowColorWarningReasons = Array.isArray(analysis.warningReasons) ? analysis.warningReasons : [];
   const availableRows = Array.isArray(analysis.rows) ? analysis.rows : [];
-  const visualSourceContext = extractRowColorSourceContextAnchorsFromRows(availableRows);
-  const hasVisualTextContext = Boolean(visualSourceContext.dateAnchors.length || visualSourceContext.faceAnchors.length);
-  const hasPreviousTextContext = Boolean(previousSourceContext.dateAnchors.length || previousSourceContext.faceAnchors.length);
+  const sourceColumnsForContext = Array.isArray(table.sourceTextColumns) && table.sourceTextColumns.length ? table.sourceTextColumns : table.originalColumns || table.columns || [];
+  const visualSourceContext = extractRowColorSourceContextAnchorsFromRows(availableRows, sourceColumnsForContext);
+  const hasVisualTextContext = Boolean(
+    visualSourceContext.dateAnchors.length ||
+      visualSourceContext.faceAnchors.length ||
+      Object.keys(visualSourceContext.fieldAnchors || {}).length,
+  );
+  const hasPreviousTextContext = Boolean(
+    previousSourceContext.dateAnchors.length ||
+      previousSourceContext.faceAnchors.length ||
+      Object.keys(previousSourceContext.fieldAnchors || {}).length,
+  );
   table.rowColorSourceContextAnchors = mergeSourceContextWithVisualBlockRows(
     hasVisualTextContext || !hasPreviousTextContext ? visualSourceContext : previousSourceContext,
     availableRows,
@@ -19566,6 +19776,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
       const rowColorStart = Math.max(0, Math.floor(Number(table.rowColorPageRowOffset || 0) || 0));
       applyOpenCvRowColorsToTable(table, effectiveColorAnalysis, rowColorStart);
     }
+    sanitizeSeatConditionColumnValues(table);
     if (quickManualMode) {
       table.publishRows = {};
       table.manualPublishRows = {};
@@ -19577,12 +19788,18 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
         const ticket = { table, row, index: rowIndex };
         table.publishRows[rowIndex] = isCustomerPublishableTicket(ticket);
       });
-      return markPendingTableReviewFlagsLightly(table);
+      const reviewedTable = markPendingTableReviewFlagsLightly(table);
+      sanitizeSeatConditionColumnValues(reviewedTable);
+      return reviewedTable;
     }
     if (useLightReviewFlags || (table.rows || []).length > 250) {
-      return markPendingTableReviewFlagsLightly(table);
+      const reviewedTable = markPendingTableReviewFlagsLightly(table);
+      sanitizeSeatConditionColumnValues(reviewedTable);
+      return reviewedTable;
     }
-    return updatePendingTableReviewFlags(table);
+    const reviewedTable = updatePendingTableReviewFlags(table);
+    sanitizeSeatConditionColumnValues(reviewedTable);
+    return reviewedTable;
   });
 }
 
