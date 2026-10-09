@@ -4611,6 +4611,22 @@ function repairAdditiveSerialDatesFromSourceText(table) {
   return changed;
 }
 
+function tableNeedsAdditiveSerialDateRepair(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  const dateIndex = findColumnIndex(table.columns, DATE_COLUMN_NAMES);
+  if (dateIndex < 0) return false;
+  const sourceRows = Array.isArray(table.sourceTextRows) ? table.sourceTextRows : [];
+  const anchors = getSourceTextDateAnchors(table);
+  if (!sourceRows.length || !anchors.length) return false;
+  return table.rows.some((row, rowIndex) => {
+    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex] || !rowHasAdditiveSerial(table, row)) return false;
+    const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+    const nextAnchor = getNextMergedDateAnchor(sourceIndex, anchors);
+    const targetDate = nextAnchor?.date || "";
+    return Boolean(targetDate && String(row[dateIndex] || "").trim() !== targetDate);
+  });
+}
+
 function rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex) {
   if (!table || !Array.isArray(row) || table.userEditedRows?.[rowIndex]) return false;
   const rowText = row.map((cell) => String(cell || "").trim()).filter(Boolean).join(" ");
@@ -9842,6 +9858,7 @@ function ensureReviewTableCanonicalRows(table) {
     table._reviewDisplayRepairVersion !== expectedVersion ||
     Number(table._columnNormalizationVersion || 0) !== COLUMN_NORMALIZATION_VERSION ||
     tableHasReviewDisplayOffset(table) ||
+    tableNeedsAdditiveSerialDateRepair(table) ||
     (Number(table.sourcePage || 0) > 0 && table._forceCanonicalDisplay !== true);
   if (!needsRepair) return false;
   const beforeSignature = getPendingTableRuntimeSignature(table);
@@ -9849,6 +9866,7 @@ function ensureReviewTableCanonicalRows(table) {
   delete table._columnNormalizationVersion;
   repairMisreadDataHeaderTable(table);
   normalizePendingTableColumns(table);
+  repairAdditiveSerialDatesFromSourceText(table);
   ensurePendingTableSourceRowIndexes(table);
   if (Number(table.sourcePage || 0) > 0) forceCanonicalOriginalDisplay(table);
   table._reviewDisplayRepairVersion = expectedVersion;
