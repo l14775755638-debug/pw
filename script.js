@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 124;
+const ROW_COLOR_LOGIC_VERSION = 125;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 30;
@@ -5153,6 +5153,20 @@ function tableHasVisualBlockContext(table) {
   );
 }
 
+function sourceRowsHaveContextBlockStart(sourceRows = [], blockKey = "") {
+  if (!Array.isArray(sourceRows) || !blockKey) return false;
+  return sourceRows.some((row) => {
+    if (!row || Number(row.index) <= 0) return false;
+    if (blockKey === "dateBlockStart") return row.dateBlockStart === true;
+    if (blockKey === "faceBlockStart") return row.faceBlockStart === true;
+    if (blockKey.startsWith("field:")) {
+      const field = getCanonicalDisplayFieldLabel(blockKey.slice(6)) || blockKey.slice(6);
+      return row.fieldBlockStarts?.[field] === true;
+    }
+    return false;
+  });
+}
+
 function rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex) {
   if (!table || !Array.isArray(row) || table.userEditedRows?.[rowIndex]) return false;
   const rowText = row.map((cell) => String(cell || "").trim()).filter(Boolean).join(" ");
@@ -5367,6 +5381,7 @@ function getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows = 
     if (sourceIndex >= next.index) continue;
     const sequenceBreakStart = getStrongSourceSequenceBreakStart(sourceRows, current.index, next.index);
     if (!Number.isInteger(sequenceBreakStart) && options.requireSequenceBoundary === true) return current;
+    if (!Number.isInteger(sequenceBreakStart) && options.disableMidpointFallback === true) return current;
     const boundary = Number.isInteger(sequenceBreakStart) ? sequenceBreakStart : (current.index + next.index) / 2;
     return sourceIndex >= boundary ? next : current;
   }
@@ -5618,7 +5633,11 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
       if (!hasTicketSalePrice({ table, row, index: rowIndex })) return;
       const columnIndex = table.columns.findIndex((column) => (getDefaultFieldForHeader(column) || getCanonicalDisplayFieldLabel(column)) === field);
       if (columnIndex < 0 || !Array.isArray(anchors) || !anchors.length) return;
-      const anchor = getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows, `field:${field}`, { requireSequenceBoundary });
+      const blockKey = `field:${field}`;
+      const anchor = getBoundSourceContextAnchorForIndex(anchors, sourceIndex, sourceRows, blockKey, {
+        requireSequenceBoundary,
+        disableMidpointFallback: !sourceRowsHaveContextBlockStart(sourceRows, blockKey),
+      });
       const target = normalizeVisualInheritedValue(field, anchor?.value || "");
       const current = String(row[columnIndex] || "").trim();
       const sourceHasExplicit = Boolean(normalizeVisualInheritedValue(field, sourceContext?.fields?.[field] || ""));
@@ -5629,7 +5648,7 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
           source: "row_color_context",
           sourceIndex,
           anchorIndex: anchor?.index,
-          blockStart: getGridContextBlockStartForIndex(sourceRows, sourceIndex, `field:${field}`),
+          blockStart: getGridContextBlockStartForIndex(sourceRows, sourceIndex, blockKey),
           sourceText: sourceContext?.text || "",
         });
       }
@@ -5639,7 +5658,10 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
       changed = true;
     });
     if (dateIndex >= 0 && rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex)) {
-      const dateAnchor = getBoundSourceContextAnchorForIndex(dateAnchors, sourceIndex, sourceRows, "dateBlockStart", { requireSequenceBoundary });
+      const dateAnchor = getBoundSourceContextAnchorForIndex(dateAnchors, sourceIndex, sourceRows, "dateBlockStart", {
+        requireSequenceBoundary,
+        disableMidpointFallback: !sourceRowsHaveContextBlockStart(sourceRows, "dateBlockStart"),
+      });
       const targetDate = dateAnchor?.value || "";
       const currentDate = String(row[dateIndex] || "").trim();
       const sourceHasExplicitDate = Boolean(sourceContext?.date);
@@ -5668,7 +5690,10 @@ function repairMergedContextFromRowColorSourceAnchors(table) {
       }
     }
     if (faceIndex >= 0 && rowShouldReceiveMergedFace(table, row, rowIndex, faceIndex)) {
-      const faceAnchor = getBoundSourceContextAnchorForIndex(faceAnchors, sourceIndex, sourceRows, "faceBlockStart", { requireSequenceBoundary });
+      const faceAnchor = getBoundSourceContextAnchorForIndex(faceAnchors, sourceIndex, sourceRows, "faceBlockStart", {
+        requireSequenceBoundary,
+        disableMidpointFallback: !sourceRowsHaveContextBlockStart(sourceRows, "faceBlockStart"),
+      });
       const targetFace = faceAnchor?.value || "";
       const currentFace = String(row[faceIndex] || "").trim();
       const sourceHasExplicitFace = Boolean(sourceContext?.face);

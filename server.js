@@ -75,7 +75,7 @@ const paddleCpuThreads = Math.max(
   1,
   Math.min(readPositiveIntegerEnv("PADDLE_CPU_THREADS", Math.max(1, Math.floor(serverCpuCount / batchOcrConcurrency))), serverCpuCount),
 );
-const rowColorLogicVersion = 124;
+const rowColorLogicVersion = 125;
 const maxAnchorRowsPerTable = Math.max(40, readPositiveIntegerEnv("TICKET_ANCHOR_MAX_ROWS_PER_TABLE", 260));
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
@@ -982,7 +982,14 @@ function generatePendingTablesWithClientRules(payload) {
               totalPageCount: serverPendingGroups.length,
               forceLightReviewFlags: serverPendingGroups.length > 12 || (serverPayload.options || {}).forceLightReviewFlags === true,
             };
-            var effectiveRowColorAnalyses = serverPayload.rowColorAnalyses || {};
+            var sourceRowColorAnalyses = serverPayload.rowColorAnalyses || {};
+            var effectiveRowColorAnalyses = Object.fromEntries(
+              Object.entries(sourceRowColorAnalyses)
+                .filter(function (entry) {
+                  var analysis = entry[1];
+                  return Number(analysis && analysis.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION;
+                })
+            );
             var analysisKeys = Object.keys(effectiveRowColorAnalyses).filter((key) => effectiveRowColorAnalyses[key]);
             if (analysisKeys.length === 1) {
               var onlyAnalysis = effectiveRowColorAnalyses[analysisKeys[0]];

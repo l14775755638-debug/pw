@@ -937,11 +937,20 @@ def has_horizontal_rule_in_column(image, y, x1, x2):
     return dark_ratio >= 0.075 or edge_ratio >= 0.04
 
 
-def has_horizontal_rule_near_column(image, y, x1, x2, radius=7):
-    for offset in range(-int(radius), int(radius) + 1):
+def has_horizontal_rule_near_column(image, y, x1, x2, radius=7, lower_radius=None):
+    lower = int(radius if lower_radius is None else lower_radius)
+    for offset in range(-int(radius), lower + 1):
         if has_horizontal_rule_in_column(image, int(round(float(y))) + offset, x1, x2):
             return True
     return False
+
+
+def has_upper_horizontal_rule_near_column(image, interval, x1, x2, radius=7):
+    """Detect only the row's upper border, not a following row's lower border."""
+    y = int(interval.get("upperLine", interval.get("y1", 0)))
+    height = max(1, int(interval.get("y2", y + 1)) - int(interval.get("y1", y)))
+    lower_radius = min(2, max(0, int(height * 0.16)))
+    return has_horizontal_rule_near_column(image, y, x1, x2, radius=radius, lower_radius=lower_radius)
 
 
 def sample_column_cell_color(image, interval, x1, x2):
@@ -1015,7 +1024,9 @@ def get_grid_column_block_starts(image, y, x_centers, *, near=False, current_int
     starts = []
     for x1, x2 in boxes:
         if near:
-            has_rule = bool(has_horizontal_rule_near_column(image, y, x1 + 4, x2 - 4))
+            has_rule = bool(
+                has_upper_horizontal_rule_near_column(image, current_interval or {"y1": y, "y2": y + 1}, x1 + 4, x2 - 4)
+            )
         else:
             has_rule = bool(has_horizontal_rule_in_column(image, y, x1 + 4, x2 - 4))
         has_transition = bool(
@@ -1820,12 +1831,12 @@ def analyze_ocr_rows(image_path, ocr_rows):
             previous_interval = intervals[index - 1] if index > 0 else None
             row["dateBlockStart"] = bool(
                 index == 0
-                or has_horizontal_rule_near_column(image, upper_line, date_x1 + 4, date_x2 - 4)
+                or has_upper_horizontal_rule_near_column(image, interval, date_x1 + 4, date_x2 - 4)
                 or has_column_color_transition(image, interval, previous_interval, date_x1 + 4, date_x2 - 4)
             )
             row["faceBlockStart"] = bool(
                 index == 0
-                or has_horizontal_rule_near_column(image, upper_line, face_x1 + 4, face_x2 - 4)
+                or has_upper_horizontal_rule_near_column(image, interval, face_x1 + 4, face_x2 - 4)
                 or has_column_color_transition(image, interval, previous_interval, face_x1 + 4, face_x2 - 4)
             )
             row["dateColumnBox"] = {"x1": int(date_x1), "x2": int(date_x2)}
