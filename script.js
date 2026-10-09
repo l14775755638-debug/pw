@@ -3743,6 +3743,12 @@ function isLikelySerialValue(value) {
   return /^(序号|编号|no\.?|new|day\d+[-_])?\s*[\w-]*\d+$/i.test(text) && !isLikelyDateValue(text) && !isLikelySalePriceValue(text);
 }
 
+function isAdditiveSerialValue(value = "") {
+  const text = String(value || "").normalize("NFKC").trim();
+  if (!text) return false;
+  return /^(?:add|追加|补|補|extra|plus)[\s\-_]*\d+$/i.test(text);
+}
+
 function isLikelyRemarkOnlyColumnValue(value) {
   const text = String(value || "").trim();
   return Boolean(text && isLikelyRemarkValue(text) && !isLikelyZoneCode(text) && !isLikelySeatRowValue(text) && !isLikelySeatNumberValue(text));
@@ -4545,6 +4551,66 @@ function getInheritedMergedDateAnchor(sourceIndex, anchors) {
   return inherited;
 }
 
+function getNextMergedDateAnchor(sourceIndex, anchors) {
+  if (!Number.isInteger(sourceIndex) || !Array.isArray(anchors) || !anchors.length) return null;
+  return anchors
+    .map((anchor) => ({ index: Number(anchor?.index), date: String(anchor?.date || "").trim() }))
+    .filter((anchor) => Number.isInteger(anchor.index) && anchor.date && anchor.index > sourceIndex)
+    .sort((a, b) => a.index - b.index)[0] || null;
+}
+
+function rowHasAdditiveSerial(table, row) {
+  if (!table || !Array.isArray(row)) return false;
+  const serialIndex = findColumnIndex(table.columns || [], SERIAL_COLUMN_NAMES);
+  if (serialIndex >= 0 && isAdditiveSerialValue(row[serialIndex])) return true;
+  return row.some((cell, index) => index !== findColumnIndex(table.columns || [], DATE_COLUMN_NAMES) && isAdditiveSerialValue(cell));
+}
+
+function getSourceTextDateColumnIndex(columns = []) {
+  return (Array.isArray(columns) ? columns : []).findIndex((column) => getDefaultFieldForHeader(column) === "日期");
+}
+
+function getSourceTextDateAnchors(table) {
+  const sourceRows = Array.isArray(table?.sourceTextRows) ? table.sourceTextRows : [];
+  const sourceColumns = Array.isArray(table?.sourceTextColumns) ? table.sourceTextColumns : [];
+  const sourceDateIndex = getSourceTextDateColumnIndex(sourceColumns);
+  if (sourceDateIndex < 0 || !sourceRows.length) return [];
+  return sourceRows
+    .map((row, index) => {
+      const date = normalizeDateCellValue(row?.[sourceDateIndex], { allowDayOnly: true });
+      return date ? { index, date } : null;
+    })
+    .filter(Boolean);
+}
+
+function repairAdditiveSerialDatesFromSourceText(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  const dateIndex = findColumnIndex(table.columns, DATE_COLUMN_NAMES);
+  if (dateIndex < 0) return false;
+  const sourceRows = Array.isArray(table.sourceTextRows) ? table.sourceTextRows : [];
+  const sourceColumns = Array.isArray(table.sourceTextColumns) ? table.sourceTextColumns : [];
+  const sourceDateIndex = getSourceTextDateColumnIndex(sourceColumns);
+  const anchors = getSourceTextDateAnchors(table);
+  if (!sourceRows.length || sourceDateIndex < 0 || !anchors.length) return false;
+  let changed = false;
+  table.rows.forEach((row, rowIndex) => {
+    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex] || !rowHasAdditiveSerial(table, row)) return;
+    const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+    const sourceRow = Number.isInteger(sourceIndex) ? sourceRows[sourceIndex] : null;
+    const explicitSourceDate = normalizeDateCellValue(sourceRow?.[sourceDateIndex], { allowDayOnly: true });
+    const nextAnchor = explicitSourceDate ? null : getNextMergedDateAnchor(sourceIndex, anchors);
+    const targetDate = explicitSourceDate || nextAnchor?.date || "";
+    if (!targetDate) return;
+    while (row.length < table.columns.length) row.push("");
+    const currentDate = String(row[dateIndex] || "").trim();
+    if (currentDate === targetDate) return;
+    row[dateIndex] = targetDate;
+    syncOriginalRowValue(table, rowIndex, dateIndex, targetDate, { appendMissing: true });
+    changed = true;
+  });
+  return changed;
+}
+
 function rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex) {
   if (!table || !Array.isArray(row) || table.userEditedRows?.[rowIndex]) return false;
   const rowText = row.map((cell) => String(cell || "").trim()).filter(Boolean).join(" ");
@@ -4564,7 +4630,9 @@ function repairMergedDateBlocks(table, anchors = null) {
     if (!rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex)) return;
     const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
     const explicitAnchor = dateAnchors.find((anchor) => anchor.index === sourceIndex || anchor.index === rowIndex);
-    const targetDate = (explicitAnchor || getInheritedMergedDateAnchor(sourceIndex, dateAnchors) || getNearestMergedDateAnchor(rowIndex, dateAnchors))?.date || "";
+    const additiveSerialRow = rowHasAdditiveSerial(table, row);
+    const nextAnchor = additiveSerialRow ? getNextMergedDateAnchor(sourceIndex, dateAnchors) : null;
+    const targetDate = (explicitAnchor || nextAnchor || getInheritedMergedDateAnchor(sourceIndex, dateAnchors) || getNearestMergedDateAnchor(rowIndex, dateAnchors))?.date || "";
     if (!targetDate) return;
     const currentDate = String(row[dateIndex] || "").trim();
     if (currentDate === targetDate) return;
@@ -4573,7 +4641,8 @@ function repairMergedDateBlocks(table, anchors = null) {
       !currentDate ||
       isLikelyDateColumnValue(currentDate) ||
       isPlaceholderOrSeparatorText(currentDate) ||
-      !isLikelyDateValue(currentDate);
+      !isLikelyDateValue(currentDate) ||
+      additiveSerialRow;
     if (!replaceableDateCell) return;
     row[dateIndex] = targetDate;
     syncOriginalRowValue(table, rowIndex, dateIndex, targetDate, { appendMissing: true });
@@ -7389,6 +7458,9 @@ function normalizePendingTableColumns(table) {
     changed = true;
   }
   if (repairRowsFromBoundSourceText(table)) {
+    changed = true;
+  }
+  if (repairAdditiveSerialDatesFromSourceText(table)) {
     changed = true;
   }
 
