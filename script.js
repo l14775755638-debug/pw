@@ -1,5 +1,5 @@
 const REVIEW_FLAGS_VERSION = 37;
-const ROW_COLOR_LOGIC_VERSION = 123;
+const ROW_COLOR_LOGIC_VERSION = 124;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 30;
@@ -2215,8 +2215,14 @@ function valueRatio(values = [], predicate) {
   return values.filter(predicate).length / values.length;
 }
 
+function isDayPrefixedSerialValue(value = "") {
+  const text = String(value || "").normalize("NFKC").trim();
+  return /^(?:day|d)\s*\d{1,2}\s*[-_]\s*[\w-]*\d+$/i.test(text);
+}
+
 function isLikelyDateValue(value) {
   const text = String(value || "").trim();
+  if (isDayPrefixedSerialValue(text)) return false;
   return Boolean(
     /^\d{1,2}[./-]\d{1,2}$/.test(text) ||
       /^\d{4}[./-]\d{1,2}[./-]\d{1,2}$/.test(text) ||
@@ -6472,6 +6478,7 @@ function removeFirstSeatRowPhrase(text) {
 function extractDateFromCompositeSeatText(value) {
   const text = String(value || "").normalize("NFKC").trim();
   if (!text) return "";
+  if (isDayPrefixedSerialValue(text)) return "";
   const compact = text.match(/(?:^|[^\d])(20\d{2})(\d{2})(\d{2})(?=$|[^\d])/);
   if (compact) return `${compact[1]}.${Number(compact[2])}.${Number(compact[3])}`;
   const full = text.match(/(?:^|[^\d])(20\d{2})[./\-年](\d{1,2})[./\-月](\d{1,2})\s*(?:日|号)?(?=$|[^\d])/);
@@ -10814,6 +10821,7 @@ function normalizeDateSearchText(value) {
 function getDateKeysFromText(value) {
   const text = String(value || "").trim();
   if (!text) return [];
+  if (isDayPrefixedSerialValue(text)) return [];
   const rawCompactText = text.normalize("NFKC").replace(/\s+/g, "");
   const compactText = normalizeDateSearchText(text);
   const rawAliasText = rawCompactText.replace(/[._/\-]+/g, "");
@@ -10822,7 +10830,7 @@ function getDateKeysFromText(value) {
   keys.push(...getKoreanDateAliasKeys(rawAliasText));
   keys.push(...getChineseDateAliasKeys(aliasText));
   const eventDayMatches = [
-    ...compactText.matchAll(/(?:^|[^\da-z])d(?:ay)?[._/\-]?\s*(\d{1,2})(?=$|[^\da-z])/gi),
+    ...compactText.matchAll(/(?:^|[^\da-z])d(?:ay)?[._/\-]?\s*(\d{1,2})(?![._/\-]\d)(?=$|[^\da-z])/gi),
     ...compactText.matchAll(/(?:^|[^\d])第?(\d{1,2})(?:天|场|場|日目)(?=$|[^\d])/g),
     ...rawCompactText.matchAll(/(?:^|[^\d])(\d{1,2})(?:일차|회차)(?=$|[^\d])/g),
   ];
@@ -10841,7 +10849,11 @@ function getDateKeysFromText(value) {
   compactMonthDayMatches.forEach((match) => keys.push(...makeDateKeys("", match[1], match[2])));
 
   const monthDayMatches = [...compactText.matchAll(/(?:^|[^\d])(\d{1,2})(?:[.\/-]|月)(\d{1,2})(?:日|号|號)?(?=$|[^\d])/g)];
-  monthDayMatches.forEach((match) => keys.push(...makeDateKeys("", match[1], match[2])));
+  monthDayMatches.forEach((match) => {
+    const prefix = compactText.slice(Math.max(0, match.index - 4), match.index).toLowerCase();
+    if (/(?:day|d)$/.test(prefix)) return;
+    keys.push(...makeDateKeys("", match[1], match[2]));
+  });
 
   const dayKeywordMatches = [...compactText.matchAll(/(?:^|[^\d])([0-2]?\d|3[01])(?:日|号|號|day)(?=$|[^\d])/gi)];
   dayKeywordMatches.forEach((match) => keys.push(`day-${Number(match[1])}`));
@@ -10882,6 +10894,7 @@ function getDateOptionForValues(values = [], dateOptions = currentEvent.dateOpti
 function normalizeDateCellValue(value, { allowDayOnly = true } = {}) {
   const text = String(value || "").trim();
   if (!text) return "";
+  if (isDayPrefixedSerialValue(text)) return "";
   const extracted = extractDateFromCompositeSeatText(text);
   if (extracted) return extracted;
   if (isLikelyDateValue(text)) return text;
@@ -13773,7 +13786,8 @@ function getTicketPrimaryDateValue(ticket) {
 }
 
 function getStandardTicketFields(ticket) {
-  const date = getTicketPrimaryDateValue(ticket) || getFirstNonEmptyColumnValue(ticket.table, ticket.row, DATE_COLUMN_NAMES);
+  const fallbackDate = getFirstNonEmptyColumnValue(ticket.table, ticket.row, DATE_COLUMN_NAMES);
+  const date = getTicketPrimaryDateValue(ticket) || (isDayPrefixedSerialValue(fallbackDate) ? "" : fallbackDate);
   const face = getFirstFaceValueFromTicket(ticket);
   const floor = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["楼层", "層数", "层数", "楼座", "floor", "tier", "level", "층"]);
   const composite = findCompositeSeatInfoInTicket(ticket);
@@ -16584,7 +16598,6 @@ function renderStandardReviewRowCard(table, rowIndex, aiDecisionByRow = null, { 
   const soldLike = isSoldTicket(ticket);
   const colorHeld = !soldLike && isColorHeldForReviewTicket(ticket);
   const ppStructureMatchText = getPpStructureMatchText(table, rowIndex);
-  const inheritedFieldDebugText = formatInheritedFieldDebug(table, rowIndex);
   const publishBlockReason = selectedForPublish && !publishEligible ? getPendingRowPublishBlockReason(ticket) : "";
   const decisionReason = getPendingRowDecisionReason(ticket, { selectedForPublish, publishEligible });
   const zoneUnmatched =
@@ -16623,7 +16636,6 @@ function renderStandardReviewRowCard(table, rowIndex, aiDecisionByRow = null, { 
       ${!shouldPublish ? `<div class="review-ticket-warning">当前原因：${escapeHtml(decisionReason)}</div>` : ""}
       ${zoneUnmatched ? `<div class="review-ticket-warning">区域未匹配座位图热区：请检查“区域”是否识别错字，或到座位图热区里补这个区。</div>` : ""}
       ${ppStructureMatchText ? `<div class="ai-suggestion publish"><strong>结构坐标</strong><span>${escapeHtml(ppStructureMatchText)}</span></div>` : ""}
-      ${inheritedFieldDebugText ? `<div class="ai-suggestion publish"><strong>继承来源</strong><span>${escapeHtml(inheritedFieldDebugText)}</span></div>` : ""}
       ${
         aiDecision
           ? `<div class="ai-suggestion ${aiDecision.action === "publish" ? "publish" : "skip"}">
