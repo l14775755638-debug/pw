@@ -927,6 +927,29 @@ function removeRedundantMisalignedDuplicateColumns(columns = [], rows = []) {
   return changed;
 }
 
+function repairDuplicateDateSerialColumns(columns = [], rows = []) {
+  if (!Array.isArray(columns) || !Array.isArray(rows) || !columns.length) return false;
+  const dateIndexes = columns.map((column, index) => (getDefaultFieldForHeader(column) === "日期" ? index : -1)).filter((index) => index >= 0);
+  if (dateIndexes.length < 2) return false;
+  const scoreColumn = (index, predicate) => {
+    const values = rows.map((row) => String(row?.[index] || "").trim()).filter(Boolean);
+    if (!values.length) return 0;
+    return values.filter(predicate).length / values.length;
+  };
+  const hasRealDateColumn = dateIndexes.some((index) => scoreColumn(index, (value) => isLikelyDateValue(value) || isLikelyDateColumnValue(value)) >= 0.25);
+  if (!hasRealDateColumn) return false;
+  let changed = false;
+  dateIndexes.forEach((index) => {
+    const serialScore = scoreColumn(index, isLikelySerialValue);
+    const dateScore = scoreColumn(index, (value) => isLikelyDateValue(value) || isLikelyDateColumnValue(value));
+    if (serialScore >= 0.5 && serialScore > dateScore && columns[index] !== "序号") {
+      columns[index] = "序号";
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 function pruneDecorativeHeaderOnlyColumns(columns = [], row = []) {
   if (!Array.isArray(columns) || !Array.isArray(row) || !columns.length) return columns;
   if (row.length >= columns.length) return columns;
@@ -1382,6 +1405,7 @@ function parseTableText(text) {
   });
 
   removeEmptyDecorativeColumns(columns, rows);
+  repairDuplicateDateSerialColumns(columns, rows);
   removeEmptyDuplicateFieldColumns(columns, rows);
   removeRedundantMisalignedDuplicateColumns(columns, rows);
   extendColumnsForOverflowRows(columns, rows);
@@ -5130,20 +5154,37 @@ function getGridContextBlockStartForIndex(sourceRows = [], sourceIndex = -1, blo
   return current;
 }
 
+function getGridContextAnchorBlockStart(sourceRows = [], anchorIndex = -1, blockKey = "", previousAnchorIndex = -1) {
+  if (!Array.isArray(sourceRows) || !Number.isInteger(anchorIndex) || !blockKey) return null;
+  const starts = sourceRows
+    .map((row) => ({ index: Number(row?.index), isStart: row?.[blockKey] === true }))
+    .filter((item) => Number.isInteger(item.index) && item.isStart)
+    .map((item) => item.index)
+    .sort((a, b) => a - b);
+  if (!starts.length) return null;
+  const priorStart = starts.filter((start) => start < anchorIndex && start > previousAnchorIndex).pop();
+  if (Number.isInteger(priorStart)) return priorStart;
+  const sameRowStart = starts.includes(anchorIndex) ? anchorIndex : null;
+  if (Number.isInteger(sameRowStart)) return sameRowStart;
+  return getGridContextBlockStartForIndex(sourceRows, anchorIndex, blockKey);
+}
+
 function getGridContextAnchorForIndex(anchors, sourceIndex, sourceRows = [], blockKey = "") {
   if (!Array.isArray(anchors) || !anchors.length || !Array.isArray(sourceRows) || !sourceRows.length || !blockKey) return null;
   const targetBlockStart = getGridContextBlockStartForIndex(sourceRows, sourceIndex, blockKey);
   if (!Number.isInteger(targetBlockStart)) return null;
-  const blockAnchors = anchors
+  const sortedAnchors = anchors
     .map((anchor) => ({
       ...anchor,
       index: Number(anchor?.index),
       value: String(anchor?.value || anchor?.date || anchor?.face || "").trim(),
     }))
     .filter((anchor) => Number.isInteger(anchor.index) && anchor.value)
-    .map((anchor) => ({
+    .sort((a, b) => a.index - b.index);
+  const blockAnchors = sortedAnchors
+    .map((anchor, index) => ({
       ...anchor,
-      blockStart: getGridContextBlockStartForIndex(sourceRows, anchor.index, blockKey),
+      blockStart: getGridContextAnchorBlockStart(sourceRows, anchor.index, blockKey, index > 0 ? sortedAnchors[index - 1].index : -1),
     }))
     .filter((anchor) => Number.isInteger(anchor.blockStart));
   const exactBlockAnchors = blockAnchors
@@ -7721,6 +7762,7 @@ function normalizePendingTableColumns(table) {
     }
   });
   if (removeEmptyDecorativeColumns(table.columns, table.rows)) changed = true;
+  if (repairDuplicateDateSerialColumns(table.columns, table.rows)) changed = true;
   if (removeEmptyDuplicateFieldColumns(table.columns, table.rows)) changed = true;
   if (removeRedundantMisalignedDuplicateColumns(table.columns, table.rows)) changed = true;
 
@@ -7926,6 +7968,7 @@ function normalizePendingTableColumns(table) {
     changed = true;
   }
   if (removeEmptyDecorativeColumns(table.columns, table.rows)) changed = true;
+  if (repairDuplicateDateSerialColumns(table.columns, table.rows)) changed = true;
   if (removeEmptyDuplicateFieldColumns(table.columns, table.rows)) changed = true;
   if (removeRedundantMisalignedDuplicateColumns(table.columns, table.rows)) changed = true;
 
