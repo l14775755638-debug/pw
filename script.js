@@ -819,7 +819,7 @@ function isDecorativeRecognizedColumn(column = "") {
   const text = String(column || "").trim();
   if (!text) return true;
   if (getDefaultFieldForHeader(text)) return false;
-  return /^[、,，.。/\\|!！?？:_\-—–~～]+$/.test(text);
+  return /^[口□▢▣☐☑☒▾▼▽▿⌄⌵⏷⏶、,，.。/\\|!！?？:_\-—–~～]+$/.test(text);
 }
 
 function getEffectiveSourceColumnsForRow(row = [], sourceColumns = []) {
@@ -850,6 +850,80 @@ function removeEmptyDecorativeColumns(columns = [], rows = []) {
     });
     changed = true;
   }
+  return changed;
+}
+
+function removeEmptyDuplicateFieldColumns(columns = [], rows = []) {
+  if (!Array.isArray(columns) || !Array.isArray(rows) || !columns.length) return false;
+  const fieldStats = new Map();
+  columns.forEach((column, index) => {
+    const field = getDefaultFieldForHeader(column);
+    if (!field) return;
+    const hasValue = rows.some((row) => String(row?.[index] || "").trim());
+    if (!fieldStats.has(field)) fieldStats.set(field, { count: 0, valueCount: 0 });
+    const stats = fieldStats.get(field);
+    stats.count += 1;
+    if (hasValue) stats.valueCount += 1;
+  });
+  let changed = false;
+  for (let index = columns.length - 1; index >= 0; index -= 1) {
+    const field = getDefaultFieldForHeader(columns[index]);
+    if (!field) continue;
+    const hasValue = rows.some((row) => String(row?.[index] || "").trim());
+    const stats = fieldStats.get(field);
+    if (!hasValue && stats?.count > 1 && stats.valueCount > 0) {
+      columns.splice(index, 1);
+      rows.forEach((row) => {
+        if (Array.isArray(row)) row.splice(index, 1);
+      });
+      changed = true;
+      continue;
+    }
+  }
+  return changed;
+}
+
+function removeRedundantMisalignedDuplicateColumns(columns = [], rows = []) {
+  if (!Array.isArray(columns) || !Array.isArray(rows) || !columns.length) return false;
+  const priceIndex = columns.findIndex((column) => getDefaultFieldForHeader(column) === "售价");
+  if (priceIndex < 0) return false;
+  const indexesByField = new Map();
+  columns.forEach((column, index) => {
+    const field = getDefaultFieldForHeader(column);
+    if (!field) return;
+    if (!indexesByField.has(field)) indexesByField.set(field, []);
+    indexesByField.get(field).push(index);
+  });
+  let changed = false;
+  const removeIndexes = new Set();
+  indexesByField.forEach((indexes, field) => {
+    if (indexes.length < 2 || field === "售价") return;
+    indexes.forEach((index) => {
+      if (index === priceIndex) return;
+      const values = rows.map((row) => String(row?.[index] || "").trim()).filter(Boolean);
+      if (!values.length) return;
+      const priceLikeRatio = values.filter((value) => hasPriceOrSoldValue(value)).length / values.length;
+      let comparableCount = 0;
+      let sameAsPriceCount = 0;
+      rows.forEach((row) => {
+        const value = normalizeComparablePrice(row?.[index]);
+        if (!value) return;
+        comparableCount += 1;
+        if (value === normalizeComparablePrice(row?.[priceIndex])) sameAsPriceCount += 1;
+      });
+      const sameAsPriceRatio = comparableCount ? sameAsPriceCount / comparableCount : 0;
+      if (priceLikeRatio >= 0.7 && sameAsPriceRatio >= 0.7) removeIndexes.add(index);
+    });
+  });
+  [...removeIndexes]
+    .sort((a, b) => b - a)
+    .forEach((index) => {
+      columns.splice(index, 1);
+      rows.forEach((row) => {
+        if (Array.isArray(row)) row.splice(index, 1);
+      });
+      changed = true;
+    });
   return changed;
 }
 
@@ -1308,6 +1382,8 @@ function parseTableText(text) {
   });
 
   removeEmptyDecorativeColumns(columns, rows);
+  removeEmptyDuplicateFieldColumns(columns, rows);
+  removeRedundantMisalignedDuplicateColumns(columns, rows);
   extendColumnsForOverflowRows(columns, rows);
   if (!columns.some(Boolean) || !rows.length) return null;
   return { columns, rows, sourceTextColumns: [...columns], sourceTextRows, headerless: false };
@@ -2345,19 +2421,27 @@ function getSmartFieldMapping(headers = [], rows = [], template = null) {
   return deduped;
 }
 
+function stripRecognizedHeaderDecorations(header = "") {
+  const raw = String(header || "").trim();
+  if (!raw) return "";
+  if (/^[口□▢▣☐☑☒▾▼▽▿⌄⌵⏷⏶]+$/.test(raw)) return "";
+  return raw.replace(/[□▢▣☐☑☒▾▼▽▿⌄⌵⏷⏶]/g, "").replace(/口+$/g, "").trim();
+}
+
 function getDefaultFieldForHeader(header = "") {
-  const text = normalize(header);
+  const cleanedHeader = stripRecognizedHeaderDecorations(header) || header;
+  const text = normalize(cleanedHeader);
   if (!text) return "";
   if (/座位图|座席图|seatmap/.test(text)) return "";
-  if (/座位\s*[\/／]?\s*序号|座位序号|seat\s*(?:no|num|number|id)|좌석\s*번호/i.test(header) || /座位序号/.test(text)) return "座位号";
+  if (/座位\s*[\/／]?\s*序号|座位序号|seat\s*(?:no|num|number|id)|좌석\s*번호/i.test(cleanedHeader) || /座位序号/.test(text)) return "座位号";
   if (["售价", "价格", "单价", "报价", "金额", "price", "ask", "cny", "rmb", "krw", "usd", "jpy", "가격", "금액", "원"].some((name) => text.includes(normalize(name)))) return "售价";
   if (["序号", "编号", "no", "num", "number", "id"].some((name) => text.includes(normalize(name)))) return "序号";
   if (["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"].some((name) => text.includes(normalize(name)))) return "日期";
-  if (isSeatConditionColumnName(header)) return "座位情况";
+  if (isSeatConditionColumnName(cleanedHeader)) return "座位情况";
   if (/^(排数号|排數號|排號|排号|row(no|num|number)?)$/.test(text)) return "排";
   if (/票面(排数|位置)|门票(排数|位置)|座位(排数|位置)/.test(text)) return "排";
   if (/票面号段|门票号段|座位号段|号段|号码/.test(text)) return "座位号";
-  if (isFloorLevelColumnName(header)) return "楼层";
+  if (isFloorLevelColumnName(cleanedHeader)) return "楼层";
   if (["区域", "区", "位置", "block", "section", "구역", "구", "위치"].some((name) => text.includes(normalize(name)))) return "区域";
   if (["票面", "漂面", "票而", "票价", "价位", "面值", "席位", "席别", "席別", "座席", "类型", "类别", "face", "category", "cat", "좌석", "등급", "구분", "석"].some((name) => text.includes(normalize(name)))) return "票面";
   if (["排数", "排", "行数", "行", "row", "열"].some((name) => text.includes(normalize(name)))) return "排";
@@ -4537,6 +4621,90 @@ function getRowSourceIndexForMergedContext(table, rowIndex) {
   return Number.isInteger(value) && value >= 0 ? value : rowIndex;
 }
 
+function getSerialFieldIndex(columns = []) {
+  return (Array.isArray(columns) ? columns : []).findIndex((column) => getDefaultFieldForHeader(column) === "序号");
+}
+
+function normalizeSourceRowSerial(value = "") {
+  const text = String(value || "").normalize("NFKC").trim();
+  if (!text || !isLikelySerialValue(text)) return "";
+  return normalize(text);
+}
+
+function buildSourceRowSerialIndex(table) {
+  const sourceRows = Array.isArray(table?.sourceTextRows) ? table.sourceTextRows : [];
+  const sourceColumns = Array.isArray(table?.sourceTextColumns) ? table.sourceTextColumns : [];
+  const sourceSerialIndex = getSerialFieldIndex(sourceColumns);
+  if (sourceSerialIndex < 0 || !sourceRows.length) return null;
+  const bySerial = new Map();
+  sourceRows.forEach((row, index) => {
+    if (!Array.isArray(row)) return;
+    const serial = normalizeSourceRowSerial(row[sourceSerialIndex]);
+    if (!serial) return;
+    if (!bySerial.has(serial)) bySerial.set(serial, []);
+    bySerial.get(serial).push(index);
+  });
+  return bySerial;
+}
+
+function ticketRowMatchesSourceRowEnough(table, row, sourceRow) {
+  if (!table || !Array.isArray(row) || !Array.isArray(sourceRow)) return false;
+  const sourceColumns = Array.isArray(table.sourceTextColumns) ? table.sourceTextColumns : [];
+  const sourceFields = sourceColumns.map((column) => getDefaultFieldForHeader(column));
+  const candidates = [
+    ["售价", (value) => hasPriceOrSoldValue(value)],
+    ["区域", (value) => Boolean(extractZoneTokenFromText(value) || isLikelyZoneCode(value))],
+    ["排", (value) => isLikelySeatRowValue(value)],
+    ["座位号", (value) => isLikelySeatNumberValue(value) || rowTextHasLinkedSeats(value)],
+  ];
+  let compared = 0;
+  let matched = 0;
+  candidates.forEach(([field, predicate]) => {
+    const rowIndex = findFirstColumnIndexByField(table.columns || [], field);
+    if (rowIndex < 0) return;
+    const rowValue = String(row[rowIndex] || "").trim();
+    if (!rowValue || !predicate(rowValue)) return;
+    const sourceValue = sourceRow
+      .map((cell, index) => ({ value: String(cell || "").trim(), field: sourceFields[index] }))
+      .find((item) => item.value && (item.field === field || predicate(item.value)))?.value || "";
+    if (!sourceValue) return;
+    compared += 1;
+    if (normalize(rowValue) === normalize(sourceValue)) matched += 1;
+  });
+  return compared === 0 || matched > 0;
+}
+
+function recalibrateSourceRowIndexesFromSerial(table) {
+  if (!table || !Array.isArray(table.rows) || !Array.isArray(table.sourceTextRows)) return false;
+  const serialIndex = getSerialFieldIndex(table.columns || []);
+  const bySerial = buildSourceRowSerialIndex(table);
+  if (serialIndex < 0 || !bySerial?.size) return false;
+  if (!Array.isArray(table.rowColorSourceIndexes) || table.rowColorSourceIndexes.length !== table.rows.length) {
+    table.rowColorSourceIndexes = table.rows.map((_, index) => index);
+  }
+  let changed = false;
+  table.rows.forEach((row, rowIndex) => {
+    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex]) return;
+    const serial = normalizeSourceRowSerial(row[serialIndex]);
+    if (!serial) return;
+    const candidates = bySerial.get(serial) || [];
+    if (!candidates.length) return;
+    const currentIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+    const currentRow = table.sourceTextRows[currentIndex];
+    const currentSerialIndex = getSerialFieldIndex(table.sourceTextColumns || []);
+    const currentSerial = normalizeSourceRowSerial(currentRow?.[currentSerialIndex]);
+    if (currentSerial === serial) return;
+    const candidate =
+      candidates.length === 1 && ticketRowMatchesSourceRowEnough(table, row, table.sourceTextRows[candidates[0]])
+        ? candidates[0]
+        : candidates.find((index) => ticketRowMatchesSourceRowEnough(table, row, table.sourceTextRows[index]));
+    if (!Number.isInteger(candidate) || candidate === currentIndex) return;
+    table.rowColorSourceIndexes[rowIndex] = candidate;
+    changed = true;
+  });
+  return changed;
+}
+
 function getInheritedMergedDateAnchor(sourceIndex, anchors) {
   if (!Number.isInteger(sourceIndex) || !Array.isArray(anchors) || !anchors.length) return null;
   const sortedAnchors = anchors
@@ -5279,10 +5447,15 @@ function parseBoundTicketSourceRowByFields(sourceRow = [], sourceColumns = []) {
     });
   }
 
-  if (!parsed["售价"] && hasPriceOrSoldValue(values[values.length - 1])) {
-    parsed["售价"] = values[values.length - 1];
+  let parsedPriceIndex = -1;
+  if (!parsed["售价"]) {
+    parsedPriceIndex = values.length - 1;
+    while (parsedPriceIndex >= 0 && !hasPriceOrSoldValue(values[parsedPriceIndex])) parsedPriceIndex -= 1;
+    if (parsedPriceIndex >= 0) parsed["售价"] = values[parsedPriceIndex];
+  } else {
+    parsedPriceIndex = values.findIndex((value) => normalize(value) === normalize(parsed["售价"]));
   }
-  let cursor = values.length - (parsed["售价"] === values[values.length - 1] ? 2 : 1);
+  let cursor = parsedPriceIndex >= 0 ? parsedPriceIndex - 1 : values.length - 1;
   const consumeFromRight = (field, predicate, transform = (value) => value) => {
     if (parsed[field]) return false;
     for (let index = cursor; index >= 0; index -= 1) {
@@ -5295,7 +5468,12 @@ function parseBoundTicketSourceRowByFields(sourceRow = [], sourceColumns = []) {
     return false;
   };
 
-  consumeFromRight("座位号", (value) => isLikelySeatNumberValue(value) && !isLikelySeatRowValue(value), (value) => extractSeatNumberFromText(value, { allowBareRange: true }) || value.toUpperCase());
+  consumeFromRight("座位号", (value) => {
+    const text = String(value || "").trim();
+    const seatNumber = extractSeatNumberFromText(text, { allowBareRange: true }) || (isLikelySeatNumberValue(text) ? text : "");
+    if (!seatNumber) return false;
+    return !isLikelySeatRowValue(text) || /^(?:\d+\s*)?x$/i.test(text);
+  }, (value) => extractSeatNumberFromText(value, { allowBareRange: true }) || value.toUpperCase());
   consumeFromRight("排", (value) => isLikelySeatRowValue(value), (value) => extractSeatRowFromText(value, { allowBareRange: true }) || value);
   consumeFromRight("区域", (value) => Boolean(extractZoneTokenFromText(value) || isLikelyZoneCode(value)), (value) => extractZoneTokenFromText(value) || value);
   consumeFromRight("楼层", (value) => isLikelyFloorLevelValue(value));
@@ -5405,9 +5583,16 @@ function repairTicketRowFromBoundSourceText(table, row, rowIndex) {
   const parsedMapped = parsedBoundFieldsToMappedRow(parsed, table.columns);
   const sparseMapped = alignSparseRecognizedRowByTrustedColumns(sourceRow, sourceColumns, table.columns);
   const directMapped = mapRecognizedRowToColumns(sourceRow, sourceColumns, table.columns);
-  const mapped = [parsedMapped, sparseMapped, directMapped]
-    .filter(Boolean)
-    .sort((left, right) => getTicketFieldMappingScore(right, table.columns) - getTicketFieldMappingScore(left, table.columns))[0];
+  const mapped = [
+    { row: parsedMapped, priority: 3 },
+    { row: sparseMapped, priority: 2 },
+    { row: directMapped, priority: 1 },
+  ]
+    .filter((item) => item.row)
+    .sort((left, right) => {
+      const scoreDiff = getTicketFieldMappingScore(right.row, table.columns) - getTicketFieldMappingScore(left.row, table.columns);
+      return scoreDiff || right.priority - left.priority;
+    })[0]?.row;
   if (!mapped) return false;
   table.columns.forEach((column, index) => {
     const field = getDefaultFieldForHeader(column);
@@ -5421,14 +5606,38 @@ function repairTicketRowFromBoundSourceText(table, row, rowIndex) {
       (field === "票面" && (isNumericTicketFaceValue(value) || isLikelyFaceValue(value) || isGenericFaceValue(value)) && !(isNumericTicketFaceValue(current) || isLikelyFaceValue(current) || isGenericFaceValue(current))) ||
       (field === "楼层" && !isLikelyFloorLevelValue(current) && isLikelyFloorLevelValue(value)) ||
       (field === "区域" && (!extractZoneTokenFromText(current) || current === value)) ||
-      (field === "排" && !isLikelySeatRowValue(current) && isLikelySeatRowValue(value)) ||
-      (field === "座位号" && !isLikelySeatNumberValue(current) && isLikelySeatNumberValue(value)) ||
+      (field === "排" && isBetterSeatRowCandidate(value, current)) ||
+      (field === "座位号" && isBetterSeatNumberCandidate(value, current)) ||
       (field === "售价" && !hasPriceOrSoldValue(current) && hasPriceOrSoldValue(value));
     if (!shouldReplace || current === value) return;
     row[index] = value;
     syncOriginalRowValue(table, rowIndex, index, value, { appendMissing: true });
     changed = true;
   });
+  if (parsed) {
+    const applyParsedField = (field) => {
+      const value = String(parsed[field] || "").trim();
+      if (!value) return;
+      const index = findFirstColumnIndexByField(table.columns, field);
+      if (index < 0) return;
+      const current = String(row[index] || "").trim();
+      let shouldReplace = !current;
+      if (field === "区域") shouldReplace = shouldReplace || !extractZoneTokenFromText(current);
+      if (field === "排") shouldReplace = shouldReplace || isBetterSeatRowCandidate(value, current);
+      if (field === "座位号") {
+        const parsedRow = String(parsed["排"] || "").trim();
+        const currentSeatIncludesParsedRow = parsedRow && new RegExp(`^${parsedRow.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*x$`, "i").test(current);
+        shouldReplace = shouldReplace || isBetterSeatNumberCandidate(value, current) || (/^x$/i.test(value) && currentSeatIncludesParsedRow);
+      }
+      if (field === "售价") shouldReplace = shouldReplace || (!hasPriceOrSoldValue(current) && hasPriceOrSoldValue(value));
+      if (field === "备注") shouldReplace = shouldReplace || isSuspiciousNumericRemarkField({ label: "备注", value: current });
+      if (!shouldReplace || current === value) return;
+      row[index] = value;
+      syncOriginalRowValue(table, rowIndex, index, value, { appendMissing: true });
+      changed = true;
+    };
+    ["区域", "排", "座位号", "售价", "备注"].forEach(applyParsedField);
+  }
   return changed;
 }
 
@@ -5860,7 +6069,7 @@ function isBetterSeatNumberCandidate(candidate, current) {
   const next = String(candidate || "").trim();
   const previous = String(current || "").trim();
   if (!next) return false;
-  if (!previous || isLikelySalePriceValue(previous) || isLikelySeatRowValue(previous)) return true;
+  if (!previous || rowTextHasLinkedSeats(previous) || isLikelySalePriceValue(previous) || isLikelySeatRowValue(previous)) return true;
   if (/[-到至]/.test(next) && !/[-到至]/.test(previous)) return true;
   return false;
 }
@@ -7374,11 +7583,21 @@ function repairDuplicateZoneLayoutFromOriginalColumns(table) {
     : Array.isArray(table.originalColumns)
       ? table.originalColumns
       : [];
-  const sourceRows = Array.isArray(table.sourceTextRows) && table.sourceTextRows.length === table.rows.length
-    ? table.sourceTextRows
-    : Array.isArray(table.originalRows) && table.originalRows.length === table.rows.length
-      ? table.originalRows
-      : [];
+  let sourceRows = [];
+  if (
+    Array.isArray(table.sourceTextRows) &&
+    Array.isArray(table.rowColorSourceIndexes) &&
+    table.rowColorSourceIndexes.length === table.rows.length
+  ) {
+    sourceRows = table.rows.map((_, rowIndex) => {
+      const sourceIndex = getRowSourceIndexForMergedContext(table, rowIndex);
+      return Array.isArray(table.sourceTextRows[sourceIndex]) ? table.sourceTextRows[sourceIndex] : [];
+    });
+  } else if (Array.isArray(table.sourceTextRows) && table.sourceTextRows.length === table.rows.length) {
+    sourceRows = table.sourceTextRows;
+  } else if (Array.isArray(table.originalRows) && table.originalRows.length === table.rows.length) {
+    sourceRows = table.originalRows;
+  }
   if (!sourceColumns.length || !sourceRows.length) return false;
   const zoneIndexes = sourceColumns
     .map((column, index) => ({ column: String(column || "").trim(), index }))
@@ -7501,6 +7720,9 @@ function normalizePendingTableColumns(table) {
       changed = true;
     }
   });
+  if (removeEmptyDecorativeColumns(table.columns, table.rows)) changed = true;
+  if (removeEmptyDuplicateFieldColumns(table.columns, table.rows)) changed = true;
+  if (removeRedundantMisalignedDuplicateColumns(table.columns, table.rows)) changed = true;
 
   table.rows.forEach((row, rowIndex) => {
     if (table.userEditedRows?.[rowIndex]) return;
@@ -7623,6 +7845,9 @@ function normalizePendingTableColumns(table) {
     quantityIndex = findQuantityColumnIndex(table.columns);
     priceIndex = findSalePriceColumnIndex(table.columns);
   }
+  if (recalibrateSourceRowIndexesFromSerial(table)) {
+    changed = true;
+  }
   if (repairMergedDateBlocks(table, mergedDateAnchors)) {
     changed = true;
   }
@@ -7688,6 +7913,9 @@ function normalizePendingTableColumns(table) {
   if (repairDuplicateZoneLayoutFromOriginalColumns(table)) {
     changed = true;
   }
+  if (recalibrateSourceRowIndexesFromSerial(table)) {
+    changed = true;
+  }
   if (repairRowsFromBoundSourceText(table)) {
     changed = true;
   }
@@ -7697,6 +7925,9 @@ function normalizePendingTableColumns(table) {
   if (repairAdditiveSerialDatesFromSourceText(table)) {
     changed = true;
   }
+  if (removeEmptyDecorativeColumns(table.columns, table.rows)) changed = true;
+  if (removeEmptyDuplicateFieldColumns(table.columns, table.rows)) changed = true;
+  if (removeRedundantMisalignedDuplicateColumns(table.columns, table.rows)) changed = true;
 
   table.autoRepairedColumns = Boolean(table.autoRepairedColumns || changed);
   table._columnRepairChanged = changed;
@@ -10086,6 +10317,7 @@ function ensureReviewTableCanonicalRows(table) {
   delete table._columnNormalizationVersion;
   repairMisreadDataHeaderTable(table);
   normalizePendingTableColumns(table);
+  recalibrateSourceRowIndexesFromSerial(table);
   repairInheritedFieldsFromVisualTableStructure(table);
   repairAdditiveSerialDatesFromSourceText(table);
   ensurePendingTableSourceRowIndexes(table);
@@ -13324,7 +13556,7 @@ function normalizeOriginalDisplayField(ticket, field, options = {}) {
 }
 
 function getCanonicalDisplayFieldLabel(label = "") {
-  const text = String(label || "");
+  const text = stripRecognizedHeaderDecorations(label) || String(label || "");
   const normalized = normalize(text);
   if (!normalized) return "";
   if (hasHeaderHint(text, ["日期", "演出日期", "时间", "date", "day", "일자", "날짜", "시간"])) return "日期";
@@ -13362,8 +13594,12 @@ function normalizeTicketDisplayFieldLabels(fields = []) {
 
 function normalizeSalePriceColumnLabels(columns = []) {
   return (Array.isArray(columns) ? columns : []).map((column) => {
-    if (getDefaultFieldForHeader(column) === "日期") return "日期";
-    if (isSalePriceColumnName(column)) return "售价";
+    const field = getDefaultFieldForHeader(column);
+    if (field === "日期") return "日期";
+    if (field === "售价" || isSalePriceColumnName(column)) return "售价";
+    if (field === "排") return "排";
+    if (field === "座位号") return "座位号";
+    if (isDecorativeRecognizedColumn(column)) return "";
     return column;
   });
 }
