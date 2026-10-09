@@ -5,6 +5,7 @@ const path = require("path");
 const tls = require("tls");
 const os = require("os");
 const vm = require("vm");
+const zlib = require("zlib");
 const { execFile, spawn } = require("child_process");
 
 const root = __dirname;
@@ -3564,9 +3565,28 @@ function serveStatic(request, response) {
       response.end("Not found");
       return;
     }
+    const ext = path.extname(filePath).toLowerCase();
+    const isStaticAsset = [".js", ".css", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico"].includes(ext);
+    const contentType = mimeTypes[ext] || "application/octet-stream";
+    const acceptsGzip = /\bgzip\b/i.test(String(request.headers["accept-encoding"] || ""));
+    const shouldGzip = acceptsGzip && /^(text\/|application\/javascript|application\/json|image\/svg\+xml)/i.test(contentType);
+    const headers = {
+      "Content-Type": contentType,
+      "Cache-Control": isStaticAsset ? "public, max-age=300" : "no-store",
+      Vary: "Accept-Encoding",
+    };
+    if (shouldGzip) {
+      response.writeHead(200, {
+        ...headers,
+        "Content-Encoding": "gzip",
+      });
+      fs.createReadStream(filePath).pipe(zlib.createGzip()).pipe(response);
+      return;
+    }
     response.writeHead(200, {
-      "Content-Type": mimeTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream",
-      "Cache-Control": "no-store",
+      ...headers,
+      "Content-Type": mimeTypes[ext] || "application/octet-stream",
+      "Content-Length": stats.size,
     });
     fs.createReadStream(filePath).pipe(response);
   });
