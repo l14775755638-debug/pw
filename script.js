@@ -3,6 +3,7 @@ const ROW_COLOR_LOGIC_VERSION = 121;
 const PUBLISH_DECISION_LOGIC_VERSION = 11;
 const ROW_ACTION_GEOMETRY_VERSION = 14;
 const COLUMN_NORMALIZATION_VERSION = 30;
+const VISUAL_INHERIT_REPAIR_VERSION = 1;
 const AI_ROW_COLOR_SKIP_CONFIDENCE = 0.78;
 const AI_ROW_COLOR_PUBLISH_CONFIDENCE = 0.7;
 const AUTO_ANCHOR_ROW_COLOR_DURING_UPLOAD = true;
@@ -4686,6 +4687,161 @@ function tableNeedsAdditiveSerialDateRepair(table) {
   });
 }
 
+const VISUAL_INHERIT_FIELDS = ["日期", "票面", "楼层", "区域"];
+
+function getCanonicalInheritFieldLabel(label = "") {
+  const field = getDefaultFieldForHeader(label) || getCanonicalDisplayFieldLabel(label);
+  return VISUAL_INHERIT_FIELDS.includes(field) ? field : "";
+}
+
+function normalizeVisualInheritedValue(field = "", value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (field === "日期") return normalizeDateCellValue(text, { allowDayOnly: true });
+  if (field === "票面") {
+    if (isVenueSeatTypeValue(text)) return formatVenueSeatTypeDisplayValue(text);
+    return isNumericTicketFaceValue(text) || isLikelyFaceValue(text) || isGenericFaceValue(text) ? text : "";
+  }
+  if (field === "楼层") return isLikelyFloorLevelValue(text) || isVenueSeatTypeValue(text) ? text : "";
+  if (field === "区域") {
+    const zone = getZoneTokenFromCell(text) || cleanZoneToken(text);
+    return zone && (parseCompositeSeatInfo(zone)?.zone || extractZoneTokenFromText(zone) || isLikelyZoneCode(zone)) ? zone : "";
+  }
+  return "";
+}
+
+function getPpStructureRows(table) {
+  const analysisTables = Array.isArray(table?.ppStructureAnalysis?.tables) ? table.ppStructureAnalysis.tables : [];
+  return analysisTables.flatMap((ppTable, tableIndex) =>
+    (Array.isArray(ppTable?.rows) ? ppTable.rows : []).map((row) => ({
+      ...row,
+      tableIndex,
+      rowIndex: Number(row?.rowIndex || 0),
+      cells: Array.isArray(row?.cells) ? row.cells : [],
+    })),
+  );
+}
+
+function findVisualHeaderColumns(ppRows = []) {
+  const byField = new Map();
+  ppRows.forEach((row) => {
+    row.cells.forEach((cell) => {
+      const field = getCanonicalInheritFieldLabel(cell?.text);
+      if (!field || byField.has(field)) return;
+      byField.set(field, {
+        field,
+        tableIndex: row.tableIndex,
+        rowIndex: Number(cell?.rowIndex ?? row.rowIndex ?? 0),
+        columnIndex: Number(cell?.columnIndex || 0),
+      });
+    });
+  });
+  return byField;
+}
+
+function cellCoversVisualColumn(cell, columnIndex) {
+  const start = Number(cell?.columnIndex || 0);
+  const span = Math.max(1, Number(cell?.colspan || 1));
+  return columnIndex >= start && columnIndex < start + span;
+}
+
+function cellCoversVisualRow(cell, rowIndex) {
+  const start = Number(cell?.rowIndex || 0);
+  const span = Math.max(1, Number(cell?.rowspan || 1));
+  return rowIndex >= start && rowIndex < start + span;
+}
+
+function buildVisualInheritedValuesByRow(table) {
+  const matches = Array.isArray(table?.ppStructureTicketRowMatches) ? table.ppStructureTicketRowMatches : [];
+  if (!matches.length) return new Map();
+  const ppRows = getPpStructureRows(table);
+  if (!ppRows.length) return new Map();
+  const headerColumns = findVisualHeaderColumns(ppRows);
+  if (!headerColumns.size) return new Map();
+  const valuesByField = new Map();
+  headerColumns.forEach((header, field) => {
+    const fieldCells = [];
+    ppRows
+      .filter((row) => row.tableIndex === header.tableIndex && row.rowIndex > header.rowIndex)
+      .forEach((row) => {
+        row.cells.forEach((cell) => {
+          if (!cellCoversVisualColumn(cell, header.columnIndex)) return;
+          const value = normalizeVisualInheritedValue(field, cell?.text);
+          if (!value) return;
+          fieldCells.push({
+            field,
+            value,
+            tableIndex: row.tableIndex,
+            rowIndex: Number(cell?.rowIndex ?? row.rowIndex ?? 0),
+            rowEndIndex: Number(cell?.rowIndex ?? row.rowIndex ?? 0) + Math.max(1, Number(cell?.rowspan || 1)),
+          });
+        });
+      });
+    if (fieldCells.length) valuesByField.set(field, fieldCells);
+  });
+  if (!valuesByField.size) return new Map();
+  const byTicketRow = new Map();
+  matches.forEach((match) => {
+    if (match?.matched !== true && Number(match?.score || 0) < 0.62) return;
+    const ticketRowIndex = Number(match?.ticketRowIndex);
+    const ppTableIndex = Number(match?.ppTableIndex || 0);
+    const ppRowIndex = Number(match?.ppRowIndex);
+    if (!Number.isInteger(ticketRowIndex) || !Number.isInteger(ppRowIndex)) return;
+    valuesByField.forEach((fieldCells, field) => {
+      const visualCell = fieldCells.find(
+        (cell) => cell.tableIndex === ppTableIndex && ppRowIndex >= cell.rowIndex && ppRowIndex < cell.rowEndIndex,
+      );
+      if (!visualCell) return;
+      if (!byTicketRow.has(ticketRowIndex)) byTicketRow.set(ticketRowIndex, new Map());
+      byTicketRow.get(ticketRowIndex).set(field, visualCell.value);
+    });
+  });
+  return byTicketRow;
+}
+
+function repairInheritedFieldsFromVisualTableStructure(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  const visualByRow = buildVisualInheritedValuesByRow(table);
+  if (!visualByRow.size) return false;
+  let changed = false;
+  table.rows.forEach((row, rowIndex) => {
+    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex]) return;
+    const visualFields = visualByRow.get(rowIndex);
+    if (!visualFields) return;
+    visualFields.forEach((value, field) => {
+      const columnIndex = findColumnIndex(table.columns, [field]);
+      if (columnIndex < 0 || !value) return;
+      while (row.length < table.columns.length) row.push("");
+      if (String(row[columnIndex] || "").trim() === value) return;
+      row[columnIndex] = value;
+      syncOriginalRowValue(table, rowIndex, columnIndex, value, { appendMissing: true });
+      changed = true;
+    });
+  });
+  return changed;
+}
+
+function tableNeedsVisualInheritedFieldRepair(table) {
+  if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
+  const visualByRow = buildVisualInheritedValuesByRow(table);
+  if (!visualByRow.size) return false;
+  return table.rows.some((row, rowIndex) => {
+    if (!Array.isArray(row) || table.userEditedRows?.[rowIndex]) return false;
+    const visualFields = visualByRow.get(rowIndex);
+    if (!visualFields) return false;
+    for (const [field, value] of visualFields.entries()) {
+      const columnIndex = findColumnIndex(table.columns, [field]);
+      if (columnIndex >= 0 && value && String(row[columnIndex] || "").trim() !== value) return true;
+    }
+    return false;
+  });
+}
+
+function tableHasVisualBlockContext(table) {
+  const context = getRowColorSourceContextAnchors(table);
+  return context.sourceRows.some((row) => row.dateBlockStart === true || row.faceBlockStart === true);
+}
+
 function rowShouldReceiveMergedDate(table, row, rowIndex, dateIndex) {
   if (!table || !Array.isArray(row) || table.userEditedRows?.[rowIndex]) return false;
   const rowText = row.map((cell) => String(cell || "").trim()).filter(Boolean).join(" ");
@@ -7535,6 +7691,9 @@ function normalizePendingTableColumns(table) {
   if (repairRowsFromBoundSourceText(table)) {
     changed = true;
   }
+  if (repairInheritedFieldsFromVisualTableStructure(table)) {
+    changed = true;
+  }
   if (repairAdditiveSerialDatesFromSourceText(table)) {
     changed = true;
   }
@@ -9917,6 +10076,8 @@ function ensureReviewTableCanonicalRows(table) {
     table._reviewDisplayRepairVersion !== expectedVersion ||
     Number(table._columnNormalizationVersion || 0) !== COLUMN_NORMALIZATION_VERSION ||
     tableHasReviewDisplayOffset(table) ||
+    (tableHasVisualBlockContext(table) && Number(table.visualInheritRepairVersion || 0) !== VISUAL_INHERIT_REPAIR_VERSION) ||
+    tableNeedsVisualInheritedFieldRepair(table) ||
     tableNeedsAdditiveSerialDateRepair(table) ||
     (Number(table.sourcePage || 0) > 0 && table._forceCanonicalDisplay !== true);
   if (!needsRepair) return false;
@@ -9925,9 +10086,11 @@ function ensureReviewTableCanonicalRows(table) {
   delete table._columnNormalizationVersion;
   repairMisreadDataHeaderTable(table);
   normalizePendingTableColumns(table);
+  repairInheritedFieldsFromVisualTableStructure(table);
   repairAdditiveSerialDatesFromSourceText(table);
   ensurePendingTableSourceRowIndexes(table);
   if (Number(table.sourcePage || 0) > 0) forceCanonicalOriginalDisplay(table);
+  table.visualInheritRepairVersion = VISUAL_INHERIT_REPAIR_VERSION;
   table._reviewDisplayRepairVersion = expectedVersion;
   const afterSignature = getPendingTableRuntimeSignature(table);
   if (beforeSignature !== afterSignature) table._columnRepairChanged = true;
@@ -10577,6 +10740,7 @@ function makeCompactPendingTable(table) {
     rowColorActionableConflict: Boolean(table.rowColorActionableConflict),
     rowColorManualReviewOnly: Boolean(table.rowColorManualReviewOnly),
     rowColorLogicVersion: Number(table.rowColorLogicVersion || 0),
+    visualInheritRepairVersion: Number(table.visualInheritRepairVersion || 0),
     publishDecisionLogicVersion: Number(table.publishDecisionLogicVersion || 0),
     colorReviewSamples: { ...(table.colorReviewSamples || {}) },
     rowColorSoldTextAnchor: table.rowColorSoldTextAnchor
@@ -10621,6 +10785,27 @@ function clonePpStructureMatch(match) {
   };
 }
 
+function compactPpStructureCell(cell, fallbackRowIndex = 0) {
+  return {
+    rowIndex: Number(cell?.rowIndex ?? fallbackRowIndex) || 0,
+    columnIndex: Number(cell?.columnIndex || 0),
+    text: String(cell?.text || "").slice(0, 120),
+    rowspan: Math.max(1, Number(cell?.rowspan || 1)),
+    colspan: Math.max(1, Number(cell?.colspan || 1)),
+    bbox: cell?.bbox || null,
+  };
+}
+
+function compactPpStructureRow(row) {
+  const rowIndex = Number(row?.rowIndex || 0);
+  return {
+    rowIndex,
+    text: String(row?.text || "").slice(0, 300),
+    bbox: row?.bbox || null,
+    cells: Array.isArray(row?.cells) ? row.cells.slice(0, 30).map((cell) => compactPpStructureCell(cell, rowIndex)) : [],
+  };
+}
+
 function compactPpStructureAnalysis(analysis) {
   if (!analysis || typeof analysis !== "object") return null;
   return {
@@ -10635,6 +10820,7 @@ function compactPpStructureAnalysis(analysis) {
           ocrBoxCount: Number(table.ocrBoxCount || 0),
           htmlCellCount: Number(table.htmlCellCount || 0),
           cellAlignmentExact: table.cellAlignmentExact === true,
+          rows: Array.isArray(table.rows) ? table.rows.slice(0, 220).map(compactPpStructureRow) : [],
         }))
       : [],
     rowColorAnalysis: analysis.rowColorAnalysis
@@ -15358,6 +15544,7 @@ function restoreReviewSnapshot(table, snapshotId) {
   table.colorReviewSamples = { ...(state.colorReviewSamples || {}) };
   table.rowColorSource = state.rowColorSource || "";
   table.rowColorLogicVersion = Number(state.rowColorLogicVersion || 0);
+  table.visualInheritRepairVersion = Number(state.visualInheritRepairVersion || 0);
   table.publishDecisionLogicVersion = Number(state.publishDecisionLogicVersion || 0);
   table.rowColorReliable = Boolean(state.rowColorReliable);
   table.rowColorConfirmed = Boolean(state.rowColorConfirmed);
@@ -19091,6 +19278,7 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
       };
       table.ppStructureTicketRowMatches = matches;
       table.ppStructureMessage = getPpStructureMatchSummary(table) || "PP-Structure 已返回表格坐标，等待票行匹配。";
+      repairInheritedFieldsFromVisualTableStructure(table);
     }
     const effectiveColorAnalysis =
       colorAnalysis ||

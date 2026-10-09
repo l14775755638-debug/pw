@@ -2004,6 +2004,23 @@ function publicPpStructureAnalysis(analysis) {
           ocrBoxCount: table.ocrBoxCount || 0,
           htmlCellCount: table.htmlCellCount || 0,
           cellAlignmentExact: table.cellAlignmentExact === true,
+          rows: Array.isArray(table.rows)
+            ? table.rows.slice(0, 220).map((row) => ({
+                rowIndex: Number(row?.rowIndex || 0),
+                text: String(row?.text || "").slice(0, 300),
+                bbox: row?.bbox || null,
+                cells: Array.isArray(row?.cells)
+                  ? row.cells.slice(0, 30).map((cell) => ({
+                      rowIndex: Number(cell?.rowIndex || row?.rowIndex || 0),
+                      columnIndex: Number(cell?.columnIndex || 0),
+                      text: String(cell?.text || "").slice(0, 120),
+                      rowspan: Math.max(1, Number(cell?.rowspan || 1)),
+                      colspan: Math.max(1, Number(cell?.colspan || 1)),
+                      bbox: cell?.bbox || null,
+                    }))
+                  : [],
+              }))
+            : [],
         }))
       : [],
     rowColorAnalysis,
