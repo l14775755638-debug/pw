@@ -18,6 +18,7 @@ const STANDARD_REVIEW_ROW_WINDOW_SIZE = 24;
 const MAX_UPLOAD_RECORDS_RENDERED = 36;
 const MAX_PENDING_TABLES_NORMALIZE_ON_LOAD = 80;
 const MAX_PENDING_ROWS_NORMALIZE_ON_LOAD = 5000;
+const MAX_LOCAL_STORAGE_AUTO_RESTORE_BYTES = 2_000_000;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
 const DATE_COLUMN_NAMES = ["日期", "演出日期", "门票时间", "票期", "场次日期", "date", "day", "일자"];
@@ -11389,6 +11390,16 @@ function loadAppState({ includeArchives = true } = {}) {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (!saved) {
     restoreAppStateFromBackupAfterLoad("主缓存为空");
+    renderOperationArchives();
+    return;
+  }
+  if (saved.length > MAX_LOCAL_STORAGE_AUTO_RESTORE_BYTES) {
+    largeAppStateBackupRestorePending = true;
+    setUploadStatus(
+      `本机缓存约 ${(saved.length / 1024 / 1024).toFixed(1)}MB，已跳过自动恢复，避免页面卡死。需要旧数据时请用安全模式处理，或清空确认表后重新生成。`,
+      "idle",
+    );
+    updateLocalSaveStatus({ saved: false, backup: "主缓存过大，已跳过自动恢复" });
     renderOperationArchives();
     return;
   }
