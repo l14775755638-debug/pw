@@ -1189,6 +1189,22 @@ function putMappedCell(mapped, index, value, field = "") {
   return true;
 }
 
+function putCompositeSeatInfoIntoMappedRow(mapped, columns, parsed) {
+  if (!parsed || !Array.isArray(mapped) || !Array.isArray(columns)) return false;
+  let changed = false;
+  const zoneIndex = findFirstColumnIndexByField(columns, "区域");
+  const rowIndex = findFirstColumnIndexByField(columns, "排");
+  const seatIndex = findFirstColumnIndexByField(columns, "座位号");
+  const dateIndex = findFirstColumnIndexByField(columns, "日期");
+  const remarkIndex = findFirstColumnIndexByField(columns, "备注");
+  if (parsed.date && dateIndex >= 0) changed = putMappedCell(mapped, dateIndex, parsed.date, "日期") || changed;
+  if (parsed.zone && zoneIndex >= 0) changed = putMappedCell(mapped, zoneIndex, parsed.zone, "区域") || changed;
+  if (parsed.row && rowIndex >= 0) changed = putMappedCell(mapped, rowIndex, parsed.row, "排") || changed;
+  if (parsed.seat && seatIndex >= 0) changed = putMappedCell(mapped, seatIndex, parsed.seat, "座位号") || changed;
+  if (parsed.note && remarkIndex >= 0) changed = putMappedCell(mapped, remarkIndex, parsed.note, "备注") || changed;
+  return changed;
+}
+
 function compactTicketValueShouldGoToRemark(value = "") {
   const text = String(value || "").trim();
   if (!text) return false;
@@ -1273,7 +1289,7 @@ function alignCompactTicketRowToColumns(row, columns) {
     }
     const onlyComposite = parseCompositeSeatInfo(onlyValue);
     if (onlyComposite && zoneIndex >= 0) {
-      putMappedCell(mapped, zoneIndex, onlyValue, "区域");
+      putCompositeSeatInfoIntoMappedRow(mapped, columns, onlyComposite);
       return mapped;
     }
     if (remarkIndex >= 0 && (isStandaloneLogisticsValue(onlyValue) || isLikelyRemarkValue(onlyValue))) {
@@ -1332,8 +1348,15 @@ function alignCompactTicketRowToColumns(row, columns) {
       used.add("face");
       return;
     }
-    if (!used.has("zone") && zoneIndex >= 0 && (parseCompositeSeatInfo(value)?.zone || extractZoneTokenFromText(value) || isLikelyZoneCode(value))) {
-      putMappedCell(mapped, zoneIndex, value, "区域");
+    const composite = parseCompositeSeatInfo(value);
+    if (!used.has("zone") && zoneIndex >= 0 && (composite?.zone || extractZoneTokenFromText(value) || isLikelyZoneCode(value))) {
+      if (composite?.zone) {
+        putCompositeSeatInfoIntoMappedRow(mapped, columns, composite);
+        if (composite.row) used.add("row");
+        if (composite.seat) used.add("seat");
+      } else {
+        putMappedCell(mapped, zoneIndex, value, "区域");
+      }
       used.add("zone");
       return;
     }
@@ -1400,13 +1423,21 @@ function parseTableText(text) {
 
   if (firstLineIsData) {
     const dataStartIndex = Math.max(firstDataIndex, 0);
-    const dataRows = lines
+    let dataRows = lines
       .slice(dataStartIndex)
       .filter((line) => !looksLikeRecognizedTableHeader(line))
       .map((line) => splitTableLine(line).map((cell) => cell.trim()))
       .filter((row) => row.some(Boolean) && !isNonTicketFooterCells(row));
     const columns = inferColumnsForHeaderlessRows(dataRows);
-    const rows = [...getPreHeaderDateAnchorRows(lines, dataStartIndex, columns), ...dataRows];
+    const preHeaderDates = lines.slice(0, dataStartIndex).map(extractPreHeaderDateAnchor).filter(Boolean);
+    if (preHeaderDates.length && findColumnIndex(columns, DATE_COLUMN_NAMES) < 0) {
+      columns.unshift("日期");
+      dataRows = dataRows.map((row) => ["", ...row]);
+    }
+    const rows = [
+      ...preHeaderDates.map((date) => createDateAnchorRowForColumns(date, columns)).filter(Boolean),
+      ...dataRows,
+    ];
     extendColumnsForOverflowRows(columns, rows);
     if (!columns.some(Boolean) || !rows.length) return null;
     return { columns, rows, sourceTextColumns: [...columns], sourceTextRows: cloneRows(rows), headerless: true };
@@ -5845,9 +5876,25 @@ function setParsedBoundField(parsed, field, value) {
   return false;
 }
 
+function setParsedCompositeSeatFields(parsed, value) {
+  const parsedComposite = parseCompositeSeatInfo(value);
+  if (!parsedComposite) return false;
+  let changed = false;
+  if (parsedComposite.date) changed = setParsedBoundField(parsed, "日期", parsedComposite.date) || changed;
+  if (parsedComposite.zone) changed = setParsedBoundField(parsed, "区域", parsedComposite.zone) || changed;
+  if (parsedComposite.row) changed = setParsedBoundField(parsed, "排", parsedComposite.row) || changed;
+  if (parsedComposite.seat) changed = setParsedBoundField(parsed, "座位号", parsedComposite.seat) || changed;
+  if (parsedComposite.note) changed = setParsedBoundField(parsed, "备注", parsedComposite.note) || changed;
+  return changed;
+}
+
 function parseBoundTicketSourceRowByFields(sourceRow = [], sourceColumns = []) {
   const values = sourceRow.map((cell) => String(cell || "").trim()).filter(Boolean);
-  if (values.length < 3) return null;
+  const hasCompactLocationAndPrice =
+    values.length >= 2 &&
+    values.some((value) => parseCompositeSeatInfo(value)?.zone) &&
+    values.some((value) => hasPriceOrSoldValue(value));
+  if (values.length < 3 && !hasCompactLocationAndPrice) return null;
   const parsed = {};
   const sourceFields = Array.isArray(sourceColumns) ? sourceColumns.map((column) => getDefaultFieldForHeader(column)) : [];
   const likelySparseSourceRow = values.length < sourceFields.filter(Boolean).length;
@@ -5855,6 +5902,7 @@ function parseBoundTicketSourceRowByFields(sourceRow = [], sourceColumns = []) {
     values.forEach((value, index) => {
       const field = sourceFields[index];
       if (!field || parsed[field]) return;
+      if (["区域", "排", "座位号", "票面"].includes(field)) setParsedCompositeSeatFields(parsed, value);
       if (field === "序号" && isLikelySerialValue(value)) setParsedBoundField(parsed, field, value);
       if (field === "日期" && isLikelyDateValue(value)) setParsedBoundField(parsed, field, value);
       if (field === "票面" && (isNumericTicketFaceValue(value) || isLikelyFaceValue(value) || isGenericFaceValue(value))) setParsedBoundField(parsed, field, value);
@@ -5894,6 +5942,9 @@ function parseBoundTicketSourceRowByFields(sourceRow = [], sourceColumns = []) {
   } else {
     parsedPriceIndex = values.findIndex((value) => normalize(value) === normalize(parsed["售价"]));
   }
+  values.forEach((value) => {
+    setParsedCompositeSeatFields(parsed, value);
+  });
   let cursor = parsedPriceIndex >= 0 ? parsedPriceIndex - 1 : values.length - 1;
   const consumeFromRight = (field, predicate, transform = (value) => value) => {
     if (parsed[field]) return false;
@@ -6151,21 +6202,7 @@ function repairStandaloneDateAnchorRows(table) {
   });
 
   if (anchorOnlyRowIndexes.size) {
-    const originalEditedRows = table.userEditedRows && typeof table.userEditedRows === "object" ? table.userEditedRows : null;
-    table.rows = table.rows.filter((_, index) => !anchorOnlyRowIndexes.has(index));
-    if (Array.isArray(table.originalRows) && table.originalRows.length) {
-      table.originalRows = table.originalRows.filter((_, index) => !anchorOnlyRowIndexes.has(index));
-    }
-    if (originalEditedRows) {
-      const nextEditedRows = {};
-      let removedBefore = 0;
-      table.rows.forEach((_, nextIndex) => {
-        while (anchorOnlyRowIndexes.has(nextIndex + removedBefore)) removedBefore += 1;
-        const originalIndex = nextIndex + removedBefore;
-        if (originalEditedRows[originalIndex]) nextEditedRows[nextIndex] = originalEditedRows[originalIndex];
-      });
-      table.userEditedRows = nextEditedRows;
-    }
+    removeRowsFromTable(table, (_, index) => anchorOnlyRowIndexes.has(index));
     changed = true;
   }
 
@@ -12808,6 +12845,7 @@ function removeRowsFromTable(table, shouldRemove) {
   const nextUserEditedRows = {};
   const nextLinkedSeatPairRows = {};
   const nextRowColorRows = [];
+  const nextSourceTextRows = [];
   const nextRowColorSourceIndexes = [];
   const nextRowColorAutoSkipRows = [];
   let removedRowColorAutoSkipCount = 0;
@@ -12832,6 +12870,7 @@ function removeRowsFromTable(table, shouldRemove) {
     if (table.userEditedRows?.[rowIndex] !== undefined) nextUserEditedRows[nextIndex] = table.userEditedRows[rowIndex];
     if (table.linkedSeatPairRows?.[rowIndex] !== undefined) nextLinkedSeatPairRows[nextIndex] = table.linkedSeatPairRows[rowIndex];
     if (Array.isArray(table.rowColorRows) && table.rowColorRows[rowIndex]) nextRowColorRows[nextIndex] = table.rowColorRows[rowIndex];
+    if (Array.isArray(table.sourceTextRows) && table.sourceTextRows[rowIndex]) nextSourceTextRows[nextIndex] = table.sourceTextRows[rowIndex];
     if (Array.isArray(table.rowColorSourceIndexes) && table.rowColorSourceIndexes[rowIndex] !== undefined) {
       nextRowColorSourceIndexes[nextIndex] = table.rowColorSourceIndexes[rowIndex];
     }
@@ -12849,6 +12888,7 @@ function removeRowsFromTable(table, shouldRemove) {
     table.userEditedRows = nextUserEditedRows;
     if (table.linkedSeatPairRows) table.linkedSeatPairRows = nextLinkedSeatPairRows;
     if (Array.isArray(table.rowColorRows)) table.rowColorRows = nextRowColorRows;
+    if (Array.isArray(table.sourceTextRows)) table.sourceTextRows = nextSourceTextRows;
     if (Array.isArray(table.rowColorSourceIndexes)) table.rowColorSourceIndexes = nextRowColorSourceIndexes;
     if (Array.isArray(table.rowColorAutoSkipRows)) {
       table.rowColorAutoSkipRows = nextRowColorAutoSkipRows;
