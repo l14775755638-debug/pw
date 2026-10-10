@@ -8766,12 +8766,15 @@ function shouldAutoSkipForRowColor(table, rowIndex, options = {}) {
   const hasMixedColorConflict =
     typeof options.hasMixedColorConflict === "boolean"
       ? options.hasMixedColorConflict
-      : hasAnyOpenCvWhiteAndColoredConflict(table) || hasOpenCvPriceSideCellWhiteAndColoredConflict(table);
+      : hasAnyOpenCvWhiteAndColoredConflict(table) ||
+        hasOpenCvPriceSideCellWhiteAndColoredConflict(table) ||
+        hasExactAlignedRawWhiteAndNonWhiteLabels(table);
   if (!hasMixedColorConflict) return false;
   const hasPriceSideConflict =
     typeof options.hasOpenCvPriceSideCellWhiteAndColoredConflict === "boolean"
       ? options.hasOpenCvPriceSideCellWhiteAndColoredConflict
       : hasOpenCvPriceSideCellWhiteAndColoredConflict(table);
+  if (isExactMixedRawNonWhiteAutoSkipItem(table, rowIndex)) return true;
   if (!hasUsableRowColorItemForTicketRow(table, row, rowIndex, item)) return false;
   if (
     hasPriceSideConflict &&
@@ -9308,6 +9311,29 @@ function hasExactMixedRawRowColorConflict(table) {
   );
 }
 
+function hasExactAlignedRawWhiteAndNonWhiteLabels(table) {
+  if (
+    !hasOpenCvRowColorPreview(table) ||
+    table?.rowColorSource === "ai_row_color" ||
+    !Array.isArray(table?.rows) ||
+    !Array.isArray(table?.rowColorRows) ||
+    table.rows.length === 0 ||
+    table.rowColorRows.length !== table.rows.length ||
+    table.rowColorExactRowAligned !== true
+  ) {
+    return false;
+  }
+  let hasWhite = false;
+  let hasNonWhite = false;
+  table.rowColorRows.forEach((rowColorItem) => {
+    const label = getOpenCvItemRawColorLabel(rowColorItem);
+    if (!label) return;
+    if (isAvailableRowColorLabel(label)) hasWhite = true;
+    else hasNonWhite = true;
+  });
+  return hasWhite && hasNonWhite;
+}
+
 function hasSafePartialSequenceRowColorAlignment(table) {
   if (!table || table.rowColorPartialSequenceAligned !== true) return true;
   if (table.rowColorSourceIndexMode !== "sequence") return false;
@@ -9556,6 +9582,14 @@ function isMixedTableRawNonWhiteAutoSkipItem(table, rowIndex) {
   if (!isEffectiveTicketRowForColorDecision(ticket) || isSoldTicket(ticket)) return false;
   if (!hasUsableRowColorItemForTicketRow(table, ticket.row, rowIndex, table?.rowColorRows?.[rowIndex])) return false;
   return isRawNonWhiteColorStrongEnoughForMixedTable(table?.rowColorRows?.[rowIndex]);
+}
+
+function isExactMixedRawNonWhiteAutoSkipItem(table, rowIndex) {
+  if (!hasExactMixedRawRowColorConflict(table) && !hasExactAlignedRawWhiteAndNonWhiteLabels(table)) return false;
+  const ticket = { table, row: table?.rows?.[rowIndex], index: rowIndex };
+  if (ticket.row && isSoldTicket(ticket)) return true;
+  const label = getOpenCvItemRawColorLabel(table?.rowColorRows?.[rowIndex]);
+  return Boolean(label && !isAvailableRowColorLabel(label));
 }
 
 function hasStrongOpenCvWhiteAndColoredConflict(table) {
@@ -9834,7 +9868,10 @@ function applyOpenCvWhiteVsColoredAutoDecision(table) {
   if (table.rowColorSource === "ai_row_color") return applyAiRowColorActionDecision(table);
   table.publishRows = table.publishRows || {};
   const hasOpenCvPriceSideCellMixedColorConflict = hasOpenCvPriceSideCellWhiteAndColoredConflict(table);
-  const hasMixedColorConflict = hasAnyOpenCvWhiteAndColoredConflict(table) || hasOpenCvPriceSideCellMixedColorConflict;
+  const hasMixedColorConflict =
+    hasAnyOpenCvWhiteAndColoredConflict(table) ||
+    hasOpenCvPriceSideCellMixedColorConflict ||
+    hasExactAlignedRawWhiteAndNonWhiteLabels(table);
   const colorDecisionContext = {
     hasMixedColorConflict,
     hasVerifiedWhiteAndNonWhiteRowColorHold: hasVerifiedWhiteAndNonWhiteRowColorHold(table),
@@ -10340,11 +10377,13 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   const hasRowLevelMixedColorConflict = hasRowLevelMixedOpenCvColorConflict(table);
   const hasPriceSideCellMixedColorConflict = hasOpenCvPriceSideCellWhiteAndColoredConflict(table);
   const hasVerifiedRowColorConflict = hasVerifiedWhiteAndNonWhiteRowColorHold(table);
+  const hasExactAlignedRawColorConflict = hasExactAlignedRawWhiteAndNonWhiteLabels(table);
   const hasManualReviewMixedColorConflict = manualReviewOnly && hasManualReviewRowColorAutoSkipSource(table);
   table.rowColorActionableConflict = Boolean(
     hasManualReviewMixedColorConflict ||
       (!manualReviewOnly &&
         ((table.rowColorReliable && hasColorConflict) ||
+          hasExactAlignedRawColorConflict ||
           hasVerifiedRowColorConflict ||
           hasCountMatchedMixedColorConflict ||
           hasRowLevelMixedColorConflict ||

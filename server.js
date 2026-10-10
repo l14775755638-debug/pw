@@ -1078,6 +1078,74 @@ function generatePendingTablesWithClientRules(payload) {
   return { parsedTableCount: setup.parsedTableCount, tables, removedSoldRows, failedBatches, timings: { ...timings, batches: batchTimings } };
 }
 
+function hasUsableServerRowColorAnalysis(analysis) {
+  return Boolean(
+    analysis &&
+      typeof analysis === "object" &&
+      Array.isArray(analysis.rows) &&
+      analysis.rows.length > 0 &&
+      analysis.rows.some((row) => row && (row.label || row.rawLabel || Number(row.confidence || 0) > 0 || Number(row.coloredRatio || 0) > 0 || Number(row.whiteRatio || 0) > 0)),
+  );
+}
+
+async function analyzeUploadedSourceRowColors(uploadedSource, expectedRows, sourcePage = 1) {
+  const sourceUrl = String(uploadedSource?.url || "");
+  const sourcePath = sourceUrl.startsWith("uploads/") ? getReadableUploadPath(sourceUrl) : "";
+  if (!sourcePath) return null;
+  const mimeType = getMimeForExtension(sourcePath);
+  let analysis = null;
+  if (mimeType === "application/pdf") {
+    analysis = await analyzeTicketRowColorsFromPdfPath(sourcePath, sourcePage, expectedRows);
+    if (!(analysis?.reliable && analysis?.exactRowAligned === true)) {
+      const image = await renderPdfPagePathToImage(sourcePath, sourcePage);
+      analysis = await analyzeTicketRowColorsFromDataUrl(image, expectedRows);
+    }
+  } else if (mimeType.startsWith("image/")) {
+    const buffer = fs.readFileSync(sourcePath);
+    analysis = await analyzeTicketRowColorsFromDataUrl(`data:${mimeType};base64,${buffer.toString("base64")}`, expectedRows);
+  }
+  if (!analysis) return null;
+  return {
+    ...analysis,
+    rowColorLogicVersion,
+  };
+}
+
+async function realignMismatchedRowColorAnalyses(payload, generatedResult) {
+  const uploadedSource = payload.uploadedSource || {};
+  const tables = Array.isArray(generatedResult?.tables) ? generatedResult.tables : [];
+  if (!tables.length || !uploadedSource.url) return null;
+  const currentAnalyses = payload.rowColorAnalyses && typeof payload.rowColorAnalyses === "object" ? payload.rowColorAnalyses : {};
+  const nextAnalyses = { ...currentAnalyses };
+  let changed = false;
+  const attemptedPages = new Set();
+  for (const table of tables) {
+    const expectedRows = Array.isArray(table?.rows) ? table.rows.length : 0;
+    const sourcePage = Math.max(1, Math.floor(Number(table?.sourcePage || 1)));
+    const key = String(sourcePage);
+    if (!expectedRows || expectedRows > 400 || attemptedPages.has(key)) continue;
+    const current = nextAnalyses[key] || nextAnalyses[sourcePage] || null;
+    const currentRows = Array.isArray(current?.rows) ? current.rows.length : 0;
+    if (currentRows === expectedRows && Number(current?.rowColorLogicVersion || 0) === rowColorLogicVersion) continue;
+    if (currentRows <= 0 && !hasUsableServerRowColorAnalysis(current)) continue;
+    attemptedPages.add(key);
+    try {
+      const repaired = await analyzeUploadedSourceRowColors(uploadedSource, expectedRows, sourcePage);
+      if (!hasUsableServerRowColorAnalysis(repaired)) continue;
+      nextAnalyses[key] = repaired;
+      changed = true;
+    } catch (error) {
+      console.warn("Failed to realign row-color analysis during pending generation.", {
+        page: sourcePage,
+        expectedRows,
+        currentRows,
+        message: error?.message || String(error),
+      });
+    }
+  }
+  return changed ? nextAnalyses : null;
+}
+
 async function generatePendingTables(request, response) {
   const raw = await readBody(request);
   const payload = JSON.parse(raw || "{}");
@@ -1106,14 +1174,27 @@ async function generatePendingTables(request, response) {
     url: uploadedSourceUrl.startsWith("uploads/") ? uploadedSourceUrl : "",
   };
   const startedAt = Date.now();
-  const result = generatePendingTablesWithClientRules({
+  const generationPayload = {
     recognizedText,
     uploadedSource,
     currentEvent: payload.currentEvent || {},
     tableTitle: payload.tableTitle || "",
     rowColorAnalyses: payload.rowColorAnalyses || {},
     options: payload.options || {},
-  });
+  };
+  let result = generatePendingTablesWithClientRules(generationPayload);
+  const realignedRowColorAnalyses = await realignMismatchedRowColorAnalyses(generationPayload, result);
+  if (realignedRowColorAnalyses) {
+    result = generatePendingTablesWithClientRules({
+      ...generationPayload,
+      rowColorAnalyses: realignedRowColorAnalyses,
+      options: {
+        ...(generationPayload.options || {}),
+        rowColorRealigned: true,
+      },
+    });
+    result.rowColorRealigned = true;
+  }
   sendJson(response, 200, {
     ...result,
     serverGenerated: true,
