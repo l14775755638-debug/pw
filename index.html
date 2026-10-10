@@ -362,7 +362,10 @@
                 <button class="small-button danger ghost" id="clearGeneratedPendingButton" type="button">清空确认表重来</button>
                 <button class="small-button danger ghost" id="clearOcrTextButton" type="button">删除 OCR 文本</button>
               </div>
-              <p class="upload-status" id="uploadStatus">先选择原始图片/PDF，再生成待确认表。</p>
+              <div class="upload-status-row">
+                <p class="upload-status" id="uploadStatus">先选择原始图片/PDF，再生成待确认表。</p>
+                <button class="small-button ghost hidden" id="restoreLocalStateInlineButton" type="button" data-restore-local-state>恢复完整本地数据</button>
+              </div>
               <p class="local-save-status" id="localSaveStatus">本地保存：等待操作</p>
               <div class="ocr-task-panel hidden" id="ocrTaskPanel">
                 <div class="ocr-task-head">

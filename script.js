@@ -577,6 +577,7 @@ const pdfDetectionStatus = document.querySelector("#pdfDetectionStatus");
 const uploadTableText = document.querySelector("#uploadTableText");
 const uploadRowColorModeSelect = document.querySelector("#uploadRowColorMode");
 const uploadStatus = document.querySelector("#uploadStatus");
+const restoreLocalStateInlineButton = document.querySelector("#restoreLocalStateInlineButton");
 const localSaveStatus = document.querySelector("#localSaveStatus");
 const ocrTaskPanel = document.querySelector("#ocrTaskPanel");
 const ocrTaskTitle = document.querySelector("#ocrTaskTitle");
@@ -646,6 +647,7 @@ let activeTicketOcrPollTimer = null;
 let activeTicketOcrPollInFlight = false;
 let lastTicketOcrJobSnapshot = null;
 let autoPendingGenerationJobId = null;
+let lastPendingGenerationFailures = [];
 let uploadPendingGenerationBusy = false;
 let quickManualGenerationBusy = false;
 let pendingTableNormalizeDeferredOnLoad = false;
@@ -11354,6 +11356,7 @@ function buildSerializableAppState(serializableEvents, serializablePendingTables
     selectedPendingTableId,
     uploadedSource: serializableUploadedSource,
     ocrJobState: buildSerializableOcrJobState(),
+    pendingGenerationFailures: lastPendingGenerationFailures,
     uploadDraft: {
       tableTitle: uploadTableTitle.value,
       tableText: shouldStoreUploadDraft ? uploadDraftText : "",
@@ -12510,6 +12513,7 @@ function applyLoadedAppState(parsed) {
   pendingTables.splice(0, pendingTables.length, ...loadedPendingTables);
   selectedPendingTableId = parsed.selectedPendingTableId || null;
   uploadedSource = parsed.uploadedSource || null;
+  lastPendingGenerationFailures = Array.isArray(parsed.pendingGenerationFailures) ? parsed.pendingGenerationFailures : [];
   if (uploadedSource?.dataUrl && !uploadedSource.url) uploadedSource.url = uploadedSource.dataUrl;
   const loadedOcrJobState = parsed.ocrJobState || {};
   const loadedOcrSnapshot = loadedOcrJobState.lastTicketOcrJobSnapshot || null;
@@ -12614,7 +12618,7 @@ function loadAppState({ includeArchives = true, force = false } = {}) {
   if (!force && !FORCE_LOCAL_STATE_RESTORE && saved.length > MAX_FAST_LOCAL_STORAGE_AUTO_RESTORE_BYTES) {
     localStateRestoreSkippedForSpeed = true;
     largeAppStateBackupRestorePending = true;
-    setUploadStatus(
+    setLocalStateRestoreSkippedStatus(
       `本机缓存约 ${(saved.length / 1024 / 1024).toFixed(1)}MB，已先跳过自动恢复，避免打开网页卡死；需要旧确认表时点“恢复完整本地数据”。`,
       "idle",
     );
@@ -12622,10 +12626,10 @@ function loadAppState({ includeArchives = true, force = false } = {}) {
     renderOperationArchives();
     return;
   }
-  if (saved.length > MAX_LOCAL_STORAGE_AUTO_RESTORE_BYTES) {
+  if (!force && !FORCE_LOCAL_STATE_RESTORE && saved.length > MAX_LOCAL_STORAGE_AUTO_RESTORE_BYTES) {
     largeAppStateBackupRestorePending = true;
-    setUploadStatus(
-      `本机缓存约 ${(saved.length / 1024 / 1024).toFixed(1)}MB，已跳过自动恢复，避免页面卡死。需要旧数据时请用安全模式处理，或清空确认表后重新生成。`,
+    setLocalStateRestoreSkippedStatus(
+      `本机缓存约 ${(saved.length / 1024 / 1024).toFixed(1)}MB，已跳过自动恢复，避免页面卡死；需要旧确认表时点“恢复完整本地数据”。`,
       "idle",
     );
     updateLocalSaveStatus({ saved: false, backup: "主缓存过大，已跳过自动恢复" });
@@ -16051,9 +16055,18 @@ function renderAdminChecklist() {
   `;
 }
 
-function setUploadStatus(message, type = "idle") {
+function setUploadStatus(message, type = "idle", options = {}) {
   uploadStatus.textContent = message;
   uploadStatus.dataset.status = type;
+  if (restoreLocalStateInlineButton) {
+    restoreLocalStateInlineButton.classList.toggle("hidden", !options.restoreAction);
+    restoreLocalStateInlineButton.disabled = false;
+    restoreLocalStateInlineButton.textContent = "恢复完整本地数据";
+  }
+}
+
+function setLocalStateRestoreSkippedStatus(message, type = "idle") {
+  setUploadStatus(message, type, { restoreAction: true });
 }
 
 function setLocalSaveStatus(message, type = "idle") {
@@ -16182,6 +16195,7 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
   if (normalize && !deferHeavyReview) {
     normalizePendingTablesInMemory({ save });
   }
+  const generationFailureNotice = getPendingGenerationFailureNoticeHtml();
   const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id);
   const manualCount = allCurrentPending.filter((table) => table.needsManualReview).length;
   const currentPending = manualReviewOnly ? allCurrentPending.filter((table) => table.needsManualReview) : allCurrentPending;
@@ -16191,6 +16205,7 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
     manualReviewOnly = false;
     uploadRecords.innerHTML = `
       <strong>当前演出待确认/本次上传记录</strong>
+      ${generationFailureNotice}
       <div class="empty-upload-record">还没有发布记录。</div>
     `;
     return;
@@ -16198,6 +16213,7 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
   if (!currentPending.length) {
     uploadRecords.innerHTML = `
       <strong>当前演出待确认/本次上传记录</strong>
+      ${generationFailureNotice}
       <div class="empty-upload-record">当前没有需要人工确认的表。</div>
     `;
     return;
@@ -16232,6 +16248,7 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
 
   uploadRecords.innerHTML = `
     <strong>当前演出待确认/本次上传记录</strong>
+    ${generationFailureNotice}
     ${windowNote}
     ${visiblePending
       .map(
@@ -19978,6 +19995,7 @@ async function publishUploadInner(options = {}) {
   let serverGenerated = false;
   let serverFailedBatches = [];
   try {
+    lastPendingGenerationFailures = [];
     const recognizedPageCount = splitRecognizedPageBlocks(recognizedText).filter((block) => String(block?.text || "").trim()).length;
     const shouldUseServerRequestBatches = recognizedPageCount > 1 || parsedTables.length > 10 || recognizedText.length > 20000;
     setUploadStatus(
@@ -19994,6 +20012,7 @@ async function publishUploadInner(options = {}) {
     rawTables = Array.isArray(generated.tables) ? generated.tables : [];
     removedSoldRows = Number(generated.removedSoldRows || 0);
     serverFailedBatches = Array.isArray(generated.failedBatches) ? generated.failedBatches : [];
+    lastPendingGenerationFailures = serverFailedBatches;
     if (serverFailedBatches.length) {
       const failedPages = serverFailedBatches
         .map((item) => String(item.pageRange || ""))
@@ -20023,6 +20042,8 @@ async function publishUploadInner(options = {}) {
     const isLargePendingGeneration = parsedTables.length > 10 || recognizedText.length > 20000;
     if (isLargePendingGeneration) {
       const message = error?.message || "服务器生成待确认表失败。";
+      lastPendingGenerationFailures = [{ pageRange: "全部", message }];
+      renderUploadRecords({ save: false, normalize: false });
       setUploadStatus(`${message} OCR 文本已保留，请稍后点“用已识别页生成确认表”重试。`, "error");
       showToast("服务器生成待确认表失败，已停止网页兜底以避免卡死。", "error");
       return;
@@ -21907,6 +21928,38 @@ function renderLocalStateRestoreSkippedPanel() {
   reviewLayout.innerHTML = `<div class="empty-state">页面已可操作。恢复完整数据可能会花一点时间，但不会在首屏自动卡住。</div>`;
 }
 
+function getPendingGenerationFailureNoticeHtml() {
+  if (!Array.isArray(lastPendingGenerationFailures) || !lastPendingGenerationFailures.length) return "";
+  const failedPages = lastPendingGenerationFailures
+    .map((item) => String(item?.pageRange || "").trim())
+    .filter(Boolean);
+  const pageText = failedPages.length ? failedPages.join("、") : `${lastPendingGenerationFailures.length} 个批次`;
+  const detailText = lastPendingGenerationFailures
+    .slice(0, 3)
+    .map((item) => [item?.pageRange, item?.message].filter(Boolean).join("："))
+    .filter(Boolean)
+    .join("；");
+  return `
+    <div class="manual-review-note">
+      <strong>有页面未生成</strong>
+      <span>第 ${escapeHtml(pageText)} 页/批次生成失败，已生成的表已保留${detailText ? `；${escapeHtml(detailText)}` : ""}。</span>
+      <button class="small-button ghost" type="button" data-generate-partial-ocr-inline>用已识别页重试</button>
+    </div>
+  `;
+}
+
+function restoreFullLocalStateFromUserAction(button = null) {
+  if (button) {
+    button.disabled = true;
+    button.textContent = "正在恢复...";
+  }
+  setUploadStatus("正在恢复完整本地数据，请稍等。", "loading");
+  runWhenPageIdle(() => {
+    loadAppState({ includeArchives: true, force: true });
+    renderRestoredAppState();
+  }, 100);
+}
+
 function renderRestoredAppState() {
   render();
   renderAdminEvent({ deferHeavy: true });
@@ -22668,13 +22721,13 @@ copyEnvTemplateButton.addEventListener("click", async () => {
 uploadRecords.addEventListener("click", (event) => {
   const restoreLocalStateButton = event.target.closest("[data-restore-local-state]");
   if (restoreLocalStateButton) {
-    restoreLocalStateButton.disabled = true;
-    restoreLocalStateButton.textContent = "正在恢复...";
-    setUploadStatus("正在恢复完整本地数据，请稍等。", "loading");
-    runWhenPageIdle(() => {
-      loadAppState({ includeArchives: true, force: true });
-      renderRestoredAppState();
-    }, 100);
+    event.stopPropagation();
+    restoreFullLocalStateFromUserAction(restoreLocalStateButton);
+    return;
+  }
+  const retryGenerationButton = event.target.closest("[data-generate-partial-ocr-inline]");
+  if (retryGenerationButton) {
+    generatePendingFromRecognizedOcr();
     return;
   }
   const listWindowButton = event.target.closest("[data-review-list-window]");
@@ -22692,6 +22745,12 @@ uploadRecords.addEventListener("click", (event) => {
   const button = event.target.closest("[data-review-table]");
   if (!button) return;
   selectPendingTable(button.dataset.reviewTable, { scroll: true });
+});
+
+ticketUploadForm.addEventListener("click", (event) => {
+  const restoreLocalStateButton = event.target.closest("[data-restore-local-state]");
+  if (!restoreLocalStateButton || uploadRecords.contains(restoreLocalStateButton)) return;
+  restoreFullLocalStateFromUserAction(restoreLocalStateButton);
 });
 
 uploadRecords.addEventListener("keydown", (event) => {
@@ -23052,19 +23111,8 @@ loadExternalSeatmapTemplates();
 
 runWhenDocumentVisible(() => {
   renderInitialAdminShell();
-  if (IS_ADMIN_PAGE && !FORCE_LOCAL_STATE_RESTORE && !SKIP_LOCAL_STATE_RESTORE && !CLEAR_LOCAL_STATE_ON_LOAD) {
-    localStateRestoreSkippedForSpeed = true;
-    setUploadStatus("已先跳过本机缓存自动恢复，避免打开网页卡死；需要旧确认表时点“恢复完整本地数据”。", "idle");
-    render();
-    renderAdminEvent({ deferHeavy: true });
-    renderLocalStateRestoreSkippedPanel();
-    renderFieldMappingPreview();
-    renderPublishedTables();
-    setMode("admin");
-  } else {
-    runWhenPageIdle(() => {
-      loadAppState({ includeArchives: false });
-      renderRestoredAppState();
-    }, 450);
-  }
+  runWhenPageIdle(() => {
+    loadAppState({ includeArchives: false });
+    renderRestoredAppState();
+  }, 450);
 });

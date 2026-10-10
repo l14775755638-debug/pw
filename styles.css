@@ -1841,6 +1841,22 @@ tr.hit-row td {
   background: #f6fbfb;
 }
 
+.upload-status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.upload-status-row .upload-status {
+  min-width: 0;
+}
+
+.upload-status-row .small-button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+
 .admin-field textarea {
   min-height: 150px;
   resize: vertical;
@@ -1875,6 +1891,13 @@ tr.hit-row td {
   color: var(--accent-strong);
   border-color: rgba(20, 108, 117, 0.24);
   background: var(--soft);
+}
+
+.upload-status[data-status="warning"],
+.local-save-status[data-status="warning"] {
+  color: #98620f;
+  border-color: rgba(152, 98, 15, 0.24);
+  background: #fff8df;
 }
 
 .local-save-status {
