@@ -15,10 +15,12 @@ const MAX_AUTO_ANCHOR_PAGES_DURING_UPLOAD = 180;
 const MAX_ANCHOR_ROWS_PER_TABLE = 260;
 const MAX_ANCHOR_BATCH_PAGES_PER_REQUEST = 4;
 const MAX_REVIEW_ROWS_RENDERED = 240;
-const STANDARD_REVIEW_ROW_WINDOW_SIZE = 24;
-const MAX_UPLOAD_RECORDS_RENDERED = 36;
+const STANDARD_REVIEW_ROW_WINDOW_SIZE = 10;
+const MAX_UPLOAD_RECORDS_RENDERED = 24;
+const REVIEW_OPEN_HEAVY_RENDER_DELAY_MS = 80;
 const MAX_PENDING_TABLES_NORMALIZE_ON_LOAD = 80;
 const MAX_PENDING_ROWS_NORMALIZE_ON_LOAD = 5000;
+const MAX_FAST_LOCAL_STORAGE_AUTO_RESTORE_BYTES = 600_000;
 const MAX_LOCAL_STORAGE_AUTO_RESTORE_BYTES = 2_000_000;
 const MAX_OPENCV_PREVIEW_ROWS_RENDERED = 160;
 const AUTO_REPAIR_ROW_COLORS_ON_REVIEW_OPEN = false;
@@ -27,6 +29,7 @@ const SERIAL_COLUMN_NAMES = ["序号", "编号", "no", "num", "number", "index",
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const IS_ADMIN_PAGE = URL_PARAMS.get("admin") === "1";
 const SKIP_LOCAL_STATE_RESTORE = URL_PARAMS.has("safe") || URL_PARAMS.has("noRestore");
+const FORCE_LOCAL_STATE_RESTORE = URL_PARAMS.has("restoreState");
 const CLEAR_LOCAL_STATE_ON_LOAD = URL_PARAMS.has("clearState") || URL_PARAMS.has("resetState");
 const LAIZI_SEATMAP_SIZE = { width: 1108, height: 1108 };
 const ITZY_VENETIAN_SEATMAP_SIZE = { width: 1206, height: 1656 };
@@ -644,6 +647,7 @@ let autoPendingGenerationJobId = null;
 let uploadPendingGenerationBusy = false;
 let quickManualGenerationBusy = false;
 let pendingTableNormalizeDeferredOnLoad = false;
+let localStateRestoreSkippedForSpeed = false;
 let seatmapTemplates = [];
 let externalSeatmapTemplates = [];
 let templateLibraryOpen = false;
@@ -12467,7 +12471,8 @@ function applyLoadedAppState(parsed) {
   return true;
 }
 
-function loadAppState({ includeArchives = true } = {}) {
+function loadAppState({ includeArchives = true, force = false } = {}) {
+  localStateRestoreSkippedForSpeed = false;
   if (CLEAR_LOCAL_STATE_ON_LOAD) {
     if (includeArchives) loadOperationArchives();
     localStorage.removeItem(STORAGE_KEY);
@@ -12486,6 +12491,17 @@ function loadAppState({ includeArchives = true } = {}) {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (!saved) {
     restoreAppStateFromBackupAfterLoad("主缓存为空");
+    renderOperationArchives();
+    return;
+  }
+  if (!force && !FORCE_LOCAL_STATE_RESTORE && saved.length > MAX_FAST_LOCAL_STORAGE_AUTO_RESTORE_BYTES) {
+    localStateRestoreSkippedForSpeed = true;
+    largeAppStateBackupRestorePending = true;
+    setUploadStatus(
+      `本机缓存约 ${(saved.length / 1024 / 1024).toFixed(1)}MB，已先跳过自动恢复，避免打开网页卡死；需要旧确认表时点“恢复完整本地数据”。`,
+      "idle",
+    );
+    updateLocalSaveStatus({ saved: false, backup: "为避免卡顿，主缓存等待手动恢复" });
     renderOperationArchives();
     return;
   }
@@ -15849,7 +15865,7 @@ function getSeatmapFileName(event) {
   return event.seatmapFileName || event.seatmapImage.split("/").pop();
 }
 
-function renderAdminEvent() {
+function renderAdminEvent({ deferHeavy = false } = {}) {
   renderAdminEventList();
   adminEventTitle.textContent = currentEvent.name;
   adminPackageName.textContent = currentEvent.name;
@@ -15858,13 +15874,24 @@ function renderAdminEvent() {
   adminZoneCount.textContent = `${currentEvent.zones.length} 个`;
   uploadTargetEvent.textContent = currentEvent.name;
   selectedSeatmapName.textContent = `当前使用：${getSeatmapFileName(currentEvent)}`;
-  adminSeatmapPreview.src = currentEvent.seatmapImage;
-  adminSeatmapPreview.alt = `${currentEvent.name} 座位图预览`;
+  if (adminSeatmapPreview.getAttribute("src") !== currentEvent.seatmapImage) {
+    adminSeatmapPreview.src = currentEvent.seatmapImage;
+  }
+  const seatmapAlt = `${currentEvent.name} 座位图预览`;
+  if (adminSeatmapPreview.alt !== seatmapAlt) adminSeatmapPreview.alt = seatmapAlt;
   renderSeatmapMarkers();
   renderAdminChecklist();
-  renderSeatmapTemplates();
-  renderEventDraftHistory();
-  renderOperationArchives();
+  if (deferHeavy) {
+    runWhenPageIdle(() => {
+      renderSeatmapTemplates();
+      renderEventDraftHistory();
+      renderOperationArchives();
+    }, 1400);
+  } else {
+    renderSeatmapTemplates();
+    renderEventDraftHistory();
+    renderOperationArchives();
+  }
   deleteCurrentEventButton.disabled = events.length <= 1;
 }
 
@@ -16188,36 +16215,151 @@ function shiftReviewRowWindow(table, direction) {
   return true;
 }
 
-function selectPendingTable(tableId, { scroll = false } = {}) {
-  const table = pendingTables.find((item) => item.id === tableId && item.eventId === currentEvent.id);
-  if (!table) return false;
-  selectedPendingTableId = table.id;
-  ensurePendingTableReviewFlags(table);
-  pendingReviewFocusRowIndex = getReviewableRowIndexes(table)[0] ?? getVisibleReviewRowIndexes(table)[0] ?? null;
+let reviewAutoPagingScheduled = false;
+
+function maybeAutoLoadNextReviewRows() {
+  if (reviewAutoPagingScheduled) return;
+  const table = getSelectedPendingTable();
+  if (!table || table.quickManualMode) return;
+  const list = reviewLayout?.querySelector(".review-ticket-list");
+  if (!list) return;
+  const rect = list.getBoundingClientRect();
+  if (rect.bottom - window.innerHeight > 260) return;
+  reviewAutoPagingScheduled = true;
+  window.requestAnimationFrame(() => {
+    reviewAutoPagingScheduled = false;
+    const currentTable = getSelectedPendingTable();
+    if (!currentTable || currentTable.quickManualMode) return;
+    const reviewRows = getStandardReviewRows(currentTable);
+    const currentWindow = getReviewRowWindow(currentTable, reviewRows);
+    if (currentWindow.hasNext) shiftReviewRowWindow(currentTable, 1);
+  });
+}
+
+function getFirstNonEmptyPendingRowIndex(table) {
+  if (!table || !Array.isArray(table.rows)) return null;
+  const rowIndex = table.rows.findIndex((row) => Array.isArray(row) && row.some((cell) => String(cell || "").trim()));
+  return rowIndex >= 0 ? rowIndex : null;
+}
+
+function markSelectedUploadRecordActive() {
+  if (!uploadRecords) return;
+  uploadRecords.querySelectorAll(".upload-record").forEach((record) => {
+    record.classList.toggle("active", record.dataset.reviewTable === selectedPendingTableId);
+  });
+}
+
+function renderLightReviewRowCard(table, rowIndex) {
+  const row = Array.isArray(table?.rows?.[rowIndex]) ? table.rows[rowIndex] : [];
+  const columns = Array.isArray(table?.columns) ? table.columns : [];
+  const fields = columns
+    .map((column, index) => ({
+      label: String(column || `列 ${index + 1}`).trim() || `列 ${index + 1}`,
+      value: String(row[index] || "").trim(),
+    }))
+    .filter((field) => field.value)
+    .slice(0, 9);
+  return `
+    <article class="review-ticket-card opening-preview" data-review-row="${rowIndex}">
+      <header>
+        <strong>第 ${rowIndex + 1} 条票</strong>
+        <span>正在校验</span>
+      </header>
+      <div class="review-ticket-fields">
+        ${
+          fields.length
+            ? fields
+                .map(
+                  (field) => `
+                    <label>
+                      <span>${escapeHtml(field.label)}</span>
+                      <input type="text" value="${escapeHtml(field.value)}" readonly />
+                    </label>
+                  `,
+                )
+                .join("")
+            : `<div class="empty-state">这一行暂时没有可显示字段。</div>`
+        }
+      </div>
+    </article>
+  `;
+}
+
+function renderReviewPanelOpeningPreview(table) {
   reviewTitle.textContent = shortenFileName(table.title || "新上传票源", 36);
+  reviewTitle.title = table.title || "";
   confirmReviewButton.disabled = true;
   reviewLayout.classList.remove("quick-manual-review-layout");
   reviewLayout.classList.remove("source-action-review-layout");
   reviewLayout.classList.remove("quick-manual-fallback-review-layout");
-  reviewLayout.innerHTML = `<div class="empty-state">正在打开这张确认表...</div>`;
-  window.requestAnimationFrame(() => {
-    try {
-      renderReviewPanel(pendingReviewFocusRowIndex, { normalize: false });
-      renderUploadRecords({ normalize: false });
-      if (scroll) document.querySelector("#reviewPanel")?.scrollIntoView({ behavior: "auto", block: "start" });
-    } catch (error) {
-      console.error("Failed to render pending review table", error, table);
-      confirmReviewButton.disabled = true;
-      reviewLayout.innerHTML = `
-        <div class="manual-review-note danger">
-          <strong>这张确认表打开失败</strong>
-          <span>${escapeHtml(error?.message || "渲染确认表时发生错误。")}</span>
+  const rows = Array.isArray(table.rows) ? table.rows : [];
+  const start = Math.max(0, Math.floor(Number(table.reviewRowWindowStart || 0) || 0));
+  const previewIndexes = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => Array.isArray(row) && row.some((cell) => String(cell || "").trim()))
+    .slice(start, start + STANDARD_REVIEW_ROW_WINDOW_SIZE)
+    .map(({ index }) => index);
+  reviewLayout.innerHTML = `
+    <div class="manual-review-note">
+      <strong>正在打开</strong>
+      <span>已先显示前 ${Math.min(STANDARD_REVIEW_ROW_WINDOW_SIZE, previewIndexes.length || rows.length)} 条，继承和颜色校验马上完成。</span>
+    </div>
+    <div class="review-source-panel">
+      <div class="review-source-head">
+        <span>原始图片/PDF 页面</span>
+      </div>
+      <strong>${escapeHtml(getTableSourceSummary(table))}</strong>
+      <div class="empty-state">原图预览正在后台准备，票卡先给你显示出来。</div>
+    </div>
+    <div class="review-ticket-list">
+      <div class="review-ticket-list-head">
+        <div>
+          <strong>票卡确认</strong>
+          <span class="review-ticket-help">正在校验继承、颜色和发布状态。</span>
         </div>
-        <div class="empty-state">请先不要发布这一页；刷新或重新生成后仍失败，把这条错误发给我继续定位。</div>
-      `;
-      showToast("确认表打开失败，已把错误显示在校对区域。", "error");
-    }
-  });
+      </div>
+      ${
+        previewIndexes.length
+          ? previewIndexes.map((rowIndex) => renderLightReviewRowCard(table, rowIndex)).join("")
+          : `<div class="empty-state">这张表正在读取票源行。</div>`
+      }
+    </div>
+  `;
+}
+
+function scheduleSelectedReviewPanelRender(table, { scroll = false } = {}) {
+  const tableId = table?.id;
+  window.setTimeout(() => {
+    window.requestAnimationFrame(() => {
+      if (!tableId || selectedPendingTableId !== tableId) return;
+      try {
+        renderReviewPanel(pendingReviewFocusRowIndex, { normalize: false });
+        runWhenPageIdle(() => renderUploadRecords({ normalize: false }), 900);
+        if (scroll) document.querySelector("#reviewPanel")?.scrollIntoView({ behavior: "auto", block: "start" });
+      } catch (error) {
+        console.error("Failed to render pending review table", error, table);
+        confirmReviewButton.disabled = true;
+        reviewLayout.innerHTML = `
+          <div class="manual-review-note danger">
+            <strong>这张确认表打开失败</strong>
+            <span>${escapeHtml(error?.message || "渲染确认表时发生错误。")}</span>
+          </div>
+          <div class="empty-state">请先不要发布这一页；刷新或重新生成后仍失败，把这条错误发给我继续定位。</div>
+        `;
+        showToast("确认表打开失败，已把错误显示在校对区域。", "error");
+      }
+    });
+  }, REVIEW_OPEN_HEAVY_RENDER_DELAY_MS);
+}
+
+function selectPendingTable(tableId, { scroll = false } = {}) {
+  const table = pendingTables.find((item) => item.id === tableId && item.eventId === currentEvent.id);
+  if (!table) return false;
+  selectedPendingTableId = table.id;
+  pendingReviewFocusRowIndex = getFirstNonEmptyPendingRowIndex(table);
+  markSelectedUploadRecordActive();
+  renderReviewPanelOpeningPreview(table);
+  scheduleSelectedReviewPanelRender(table, { scroll });
   if (scroll) document.querySelector("#reviewPanel")?.scrollIntoView({ behavior: "auto", block: "start" });
   return true;
 }
@@ -21578,6 +21720,58 @@ function runWhenPageIdle(callback, timeout = 1200) {
   window.setTimeout(callback, 0);
 }
 
+function renderInitialAdminShell() {
+  if (!IS_ADMIN_PAGE) {
+    render();
+    return;
+  }
+  uploadRecords.innerHTML = `
+    <strong>当前演出待确认/本次上传记录</strong>
+    <div class="empty-upload-record">正在恢复本地数据...</div>
+  `;
+  reviewTitle.textContent = "正在恢复数据";
+  confirmReviewButton.disabled = true;
+  reviewLayout.innerHTML = `<div class="empty-state">页面先打开，票源和历史记录随后加载。</div>`;
+  publishedTables.innerHTML = `<div class="empty-state">正在加载已发布票源...</div>`;
+}
+
+function renderLocalStateRestoreSkippedPanel() {
+  uploadRecords.innerHTML = `
+    <strong>当前演出待确认/本次上传记录</strong>
+    <div class="manual-review-note">
+      <strong>已先跳过本机大缓存</strong>
+      <span>为了避免打开网页卡死，旧待确认表没有自动恢复；需要继续之前的数据时再手动恢复。</span>
+    </div>
+    <button class="small-button" type="button" data-restore-local-state>恢复完整本地数据</button>
+  `;
+  reviewTitle.textContent = "等待恢复本地数据";
+  confirmReviewButton.disabled = true;
+  reviewLayout.innerHTML = `<div class="empty-state">页面已可操作。恢复完整数据可能会花一点时间，但不会在首屏自动卡住。</div>`;
+}
+
+function renderRestoredAppState() {
+  render();
+  renderAdminEvent({ deferHeavy: true });
+  if (localStateRestoreSkippedForSpeed) {
+    renderLocalStateRestoreSkippedPanel();
+  } else {
+    renderUploadRecords({ normalize: false });
+  }
+  renderFieldMappingPreview();
+  renderPublishedTables();
+  setMode(IS_ADMIN_PAGE ? "admin" : "customer");
+  resumeRestoredTicketOcrJobIfNeeded();
+  reconnectLatestTicketOcrJobIfNeeded();
+  runWhenPageIdle(() => {
+    if (localStateRestoreSkippedForSpeed) return;
+    renderReviewPanel(undefined, { normalize: false });
+  }, 900);
+  runWhenPageIdle(() => {
+    loadOperationArchives();
+    renderOperationArchives();
+  }, 1600);
+}
+
 function waitForBrowserPaint() {
   return new Promise((resolve) => {
     if ("requestAnimationFrame" in window) {
@@ -22305,6 +22499,17 @@ copyEnvTemplateButton.addEventListener("click", async () => {
 });
 
 uploadRecords.addEventListener("click", (event) => {
+  const restoreLocalStateButton = event.target.closest("[data-restore-local-state]");
+  if (restoreLocalStateButton) {
+    restoreLocalStateButton.disabled = true;
+    restoreLocalStateButton.textContent = "正在恢复...";
+    setUploadStatus("正在恢复完整本地数据，请稍等。", "loading");
+    runWhenPageIdle(() => {
+      loadAppState({ includeArchives: true, force: true });
+      renderRestoredAppState();
+    }, 100);
+    return;
+  }
   const listWindowButton = event.target.closest("[data-review-list-window]");
   if (listWindowButton) {
     selectUploadRecordWindow(listWindowButton.dataset.reviewListWindow === "prev" ? -1 : 1);
@@ -22501,6 +22706,9 @@ reviewLayout.addEventListener("click", (event) => {
   if (table) openOriginalTable(table);
 });
 
+window.addEventListener("scroll", maybeAutoLoadNextReviewRows, { passive: true });
+reviewLayout.addEventListener("scroll", maybeAutoLoadNextReviewRows, { passive: true });
+
 confirmReviewButton.addEventListener("click", confirmSelectedPendingTable);
 
 if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
@@ -22676,28 +22884,20 @@ refreshAiStatus();
 loadExternalSeatmapTemplates();
 
 runWhenDocumentVisible(() => {
-  render();
-  renderAdminEvent();
-  renderUploadRecords();
-  renderFieldMappingPreview();
-  renderPublishedTables();
-  renderOperationArchives();
-
-  if (!IS_ADMIN_PAGE) {
-    renderReviewPanel();
+  renderInitialAdminShell();
+  if (IS_ADMIN_PAGE && !FORCE_LOCAL_STATE_RESTORE && !SKIP_LOCAL_STATE_RESTORE && !CLEAR_LOCAL_STATE_ON_LOAD) {
+    localStateRestoreSkippedForSpeed = true;
+    setUploadStatus("已先跳过本机缓存自动恢复，避免打开网页卡死；需要旧确认表时点“恢复完整本地数据”。", "idle");
+    render();
+    renderAdminEvent({ deferHeavy: true });
+    renderLocalStateRestoreSkippedPanel();
+    renderFieldMappingPreview();
+    renderPublishedTables();
+    setMode("admin");
+  } else {
+    runWhenPageIdle(() => {
+      loadAppState({ includeArchives: false });
+      renderRestoredAppState();
+    }, 450);
   }
 });
-
-window.setTimeout(() => runWhenDocumentVisible(() => {
-  loadAppState({ includeArchives: true });
-  render();
-  renderAdminEvent();
-  renderUploadRecords();
-  renderFieldMappingPreview();
-  renderPublishedTables();
-  renderOperationArchives();
-  setMode(IS_ADMIN_PAGE ? "admin" : "customer");
-  resumeRestoredTicketOcrJobIfNeeded();
-  reconnectLatestTicketOcrJobIfNeeded();
-  runWhenPageIdle(() => renderReviewPanel());
-}), 0);
