@@ -985,10 +985,27 @@ function generatePendingTablesWithClientRules(payload) {
             var sourceRowColorAnalyses = serverPayload.rowColorAnalyses || {};
             var effectiveRowColorAnalyses = Object.fromEntries(
               Object.entries(sourceRowColorAnalyses)
-                .filter(function (entry) {
+                .map(function (entry) {
+                  var key = entry[0];
                   var analysis = entry[1];
-                  return Number(analysis && analysis.rowColorLogicVersion || 0) === ROW_COLOR_LOGIC_VERSION;
+                  if (!analysis || !Array.isArray(analysis.rows) || !analysis.rows.length) return null;
+                  var version = Number(analysis.rowColorLogicVersion || 0);
+                  if (version === ROW_COLOR_LOGIC_VERSION) return [key, analysis];
+                  return [
+                    key,
+                    {
+                      ...analysis,
+                      rowColorLogicVersion: ROW_COLOR_LOGIC_VERSION,
+                      staleRowColorLogicVersion: version,
+                      disableVisualInheritanceContext: true,
+                      warningReasons: [
+                        ...(Array.isArray(analysis.warningReasons) ? analysis.warningReasons : []),
+                        "stale_row_color_for_color_only",
+                      ],
+                    },
+                  ];
                 })
+                .filter(Boolean)
             );
             var analysisKeys = Object.keys(effectiveRowColorAnalyses).filter((key) => effectiveRowColorAnalyses[key]);
             if (analysisKeys.length === 1) {

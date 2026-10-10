@@ -10188,8 +10188,11 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   table.rowColorUnreliableReasons = Array.isArray(analysis.unreliableReasons) ? analysis.unreliableReasons : [];
   table.rowColorWarningReasons = Array.isArray(analysis.warningReasons) ? analysis.warningReasons : [];
   const availableRows = Array.isArray(analysis.rows) ? analysis.rows : [];
+  const disableVisualInheritanceContext = analysis.disableVisualInheritanceContext === true;
   const sourceColumnsForContext = Array.isArray(table.sourceTextColumns) && table.sourceTextColumns.length ? table.sourceTextColumns : table.originalColumns || table.columns || [];
-  const visualSourceContext = extractRowColorSourceContextAnchorsFromRows(availableRows, sourceColumnsForContext);
+  const visualSourceContext = disableVisualInheritanceContext
+    ? { dateAnchors: [], faceAnchors: [], fieldAnchors: {}, sourceRows: [], sourceColumns: sourceColumnsForContext }
+    : extractRowColorSourceContextAnchorsFromRows(availableRows, sourceColumnsForContext);
   const hasVisualTextContext = Boolean(
     visualSourceContext.dateAnchors.length ||
       visualSourceContext.faceAnchors.length ||
@@ -10202,7 +10205,7 @@ function applyOpenCvRowColorsToTable(table, analysis, startIndex = 0) {
   );
   table.rowColorSourceContextAnchors = mergeSourceContextWithVisualBlockRows(
     hasVisualTextContext || !hasPreviousTextContext ? visualSourceContext : previousSourceContext,
-    availableRows,
+    disableVisualInheritanceContext ? [] : availableRows,
   );
   const aligned =
     analysis.source === "ai_row_color" || analysis.source === "ticket_row_anchor"
@@ -18907,7 +18910,14 @@ function getUploadRowColorModeLabel(mode) {
 }
 
 function getUploadRowColorItemLabel(item) {
-  return normalizeRowColorLabel(item?.label || item?.rawLabel || item?.localPixelLabel || "");
+  return normalizeRowColorLabel(
+    item?.label ||
+      item?.rawLabel ||
+      item?.localPixelLabel ||
+      item?.rightmostCellLabel ||
+      item?.rightmostCellRawLabel ||
+      "",
+  );
 }
 
 function uploadRowNeedsAnchorColorCheck(table, row, rowIndex, item) {
