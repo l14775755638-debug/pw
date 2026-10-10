@@ -64,6 +64,7 @@ const batchOcrRetryDelayMs = Math.max(300, readPositiveIntegerEnv("TICKET_OCR_RE
 const serverCpuCount = Math.max(1, os.cpus()?.length || 1);
 const defaultLocalOcrParallelJobs = Math.max(1, Math.min(2, Math.floor(serverCpuCount / 3) || 1));
 const localOcrParallelJobs = Math.max(1, Math.min(readPositiveIntegerEnv("TICKET_LOCAL_OCR_PARALLEL_JOBS", defaultLocalOcrParallelJobs), 4));
+const localOcrBatchPages = Math.max(1, Math.min(readPositiveIntegerEnv("TICKET_LOCAL_OCR_BATCH_PAGES", 4), 8));
 const aiRequestTimeoutSeconds = Math.max(25, readPositiveIntegerEnv("AI_REQUEST_TIMEOUT_SECONDS", 180));
 const externalApiMaxConcurrency = Math.max(1, Math.min(readPositiveIntegerEnv("EXTERNAL_API_MAX_CONCURRENCY", 5), 10));
 const externalApiRetries = Math.max(0, Math.min(readPositiveIntegerEnv("EXTERNAL_API_RETRIES", 3), 6));
@@ -2501,6 +2502,58 @@ async function processTicketPdfPageLocally(pdfPath, page, job) {
   };
 }
 
+async function processTicketPdfPagesLocally(pdfPath, pages, job) {
+  const normalizedPages = (Array.isArray(pages) ? pages : [pages])
+    .map((page) => Math.max(1, Math.floor(Number(page || 1))))
+    .filter((page, index, list) => page > 0 && list.indexOf(page) === index);
+  if (!normalizedPages.length) return [];
+  if (normalizedPages.length === 1) return [await processTicketPdfPageLocally(pdfPath, normalizedPages[0], job)];
+  if (!fs.existsSync(ticketLocalPdfPageScriptPath)) {
+    throw new Error("本地逐页 OCR 脚本不存在。");
+  }
+  if (!isReadableSavedFile(pdfPath)) {
+    throw new Error("PDF 原文件不可读，请重新上传后再识别。");
+  }
+  const timeoutMs = Math.max(
+    180000,
+    readPositiveIntegerEnv("TICKET_LOCAL_PAGE_TIMEOUT_MS", 240000) * Math.max(1, Math.ceil(normalizedPages.length / 2)),
+  );
+  const { stdout } = await runLocalOcrQueued(() =>
+    runFileWithTimeout(
+      getLocalTicketOcrPythonPath(),
+      [
+        ticketLocalPdfPageScriptPath,
+        pdfPath,
+        "--pages",
+        normalizedPages.join(","),
+        "--task-id",
+        String(job?.id || ""),
+        "--pdftoppm",
+        pdftoppmPath,
+      ],
+      timeoutMs,
+    ),
+  );
+  const parsed = JSON.parse(stdout || "{}");
+  const rawPages = Array.isArray(parsed.pages) ? parsed.pages : [];
+  if (!rawPages.length && parsed.error) throw new Error(parsed.error);
+  return rawPages.map((item, index) => {
+    const text = stripRecognizedColorColumns(item?.text || "");
+    const recognizedRows = Number(item?.recognizedRows || countRecognizedDataRows(text) || 0);
+    return {
+      page: Number(item?.page || normalizedPages[index] || 1),
+      text,
+      attempts: 1,
+      recognizedRows,
+      localProcessing: true,
+      rowColorAnalysis: normalizeManualReviewRowColorAnalysis(item?.rowColorAnalysis, recognizedRows),
+      ocrInitSeconds: Number(item?.initSeconds || 0),
+      ocrInferSeconds: Number(item?.inferSeconds || 0),
+      error: item?.error || "",
+    };
+  });
+}
+
 function startTicketRowColorAnalysisForPage(job, item, result) {
   if (!ocrRowColorDuringScanEnabled) return null;
   if (!result?.text || !item?.image) return null;
@@ -2646,11 +2699,15 @@ async function runTicketOcrBatch(job, source, maxPages) {
     const requestedPages = getRequestedTicketOcrPages(maxPages, job.totalPages);
     const pagesToProcess = Math.min(requestedPages, job.totalPages);
     const pages = Array.from({ length: pagesToProcess }, (_, index) => index + 1);
+    const pageBatches = [];
+    for (let index = 0; index < pages.length; index += localOcrBatchPages) {
+      pageBatches.push(pages.slice(index, index + localOcrBatchPages));
+    }
     job.pagesQueued = pages.length;
     job.status = "running";
     const limitText = pages.length < job.totalPages ? formatTicketOcrPageLimit() : "";
-    const workerCount = Math.min(localOcrParallelJobs, pages.length);
-    job.message = `正在本地逐页识别 0/${pages.length} 页，总页数 ${job.totalPages}${limitText}，并发 ${workerCount} 页...`;
+    const workerCount = Math.min(localOcrParallelJobs, pageBatches.length || pages.length);
+    job.message = `正在本地逐页识别 0/${pages.length} 页，总页数 ${job.totalPages}${limitText}，并发 ${workerCount} 组，每组最多 ${localOcrBatchPages} 页...`;
     job.aiColorTasks = [];
     job.aiColorPagesQueued = 0;
     job.aiColorPagesProcessed = 0;
@@ -2660,7 +2717,7 @@ async function runTicketOcrBatch(job, source, maxPages) {
     job.ppStructurePagesProcessed = 0;
     job.ppStructurePagesFailed = 0;
 
-    let nextPageIndex = 0;
+    let nextBatchIndex = 0;
     const activePages = new Set();
     const processNextPage = async () => {
       while (!job.cancelRequested) {
@@ -2673,27 +2730,36 @@ async function runTicketOcrBatch(job, source, maxPages) {
           await sleep(1000);
           continue;
         }
-        const page = pages[nextPageIndex];
-        nextPageIndex += 1;
-        if (!page) return;
-        activePages.add(page);
+        const batchPages = pageBatches[nextBatchIndex] || [];
+        nextBatchIndex += 1;
+        if (!batchPages.length) return;
+        batchPages.forEach((page) => activePages.add(page));
         try {
           job.status = "running";
           job.currentPage = Math.min(...activePages);
           const activeText = [...activePages].sort((a, b) => a - b).join("、");
           job.message = `正在本地逐页识别 ${job.pagesProcessed}/${pages.length} 页，并发处理 PDF 第 ${activeText} 页...`;
-          const result = await processTicketPdfPageLocally(pdfPath, page, job);
-          if (result.text) {
-            job.results = job.results.filter((existing) => existing.page !== page);
-            job.results.push(result);
-            job.results.sort((a, b) => a.page - b.page);
+          const results = await processTicketPdfPagesLocally(pdfPath, batchPages, job);
+          for (const result of results) {
+            if (result.error && !result.text) {
+              job.errors = job.errors.filter((existing) => existing.page !== result.page);
+              job.errors.push({ page: result.page, stage: "local_page_ocr", message: result.error });
+              continue;
+            }
+            if (result.text) {
+              job.results = job.results.filter((existing) => existing.page !== result.page);
+              job.results.push(result);
+              job.results.sort((a, b) => a.page - b.page);
+            }
           }
         } catch (error) {
-          job.errors = job.errors.filter((existing) => existing.page !== page);
-          job.errors.push({ page, stage: "local_page_ocr", message: formatErrorMessage(error) });
+          batchPages.forEach((page) => {
+            job.errors = job.errors.filter((existing) => existing.page !== page);
+            job.errors.push({ page, stage: "local_page_ocr", message: formatErrorMessage(error) });
+          });
         } finally {
-          activePages.delete(page);
-          job.pagesProcessed += 1;
+          batchPages.forEach((page) => activePages.delete(page));
+          job.pagesProcessed += batchPages.length;
           job.currentPage = activePages.size ? Math.min(...activePages) : 0;
           const success = job.results.filter((result) => result.text).length;
           const failed = job.errors.length;

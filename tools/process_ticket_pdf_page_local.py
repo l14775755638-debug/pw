@@ -121,12 +121,14 @@ def should_use_chunked_highres_ocr(image_path):
         return False
 
 
-def ocr_tall_image_in_chunks(image_path):
+def ocr_tall_image_in_chunks(image_path, engine=None):
     import cv2
 
-    started = time.time()
-    engine = create_paddle_ocr()
-    init_seconds = time.time() - started
+    init_seconds = 0
+    if engine is None:
+        started = time.time()
+        engine = create_paddle_ocr()
+        init_seconds = time.time() - started
     image = cv2.imread(str(image_path))
     if image is None:
         raise RuntimeError(f"cannot read image: {image_path}")
@@ -172,10 +174,12 @@ def ocr_tall_image_in_chunks(image_path):
     }
 
 
-def ocr_image(image_path):
-    started = time.time()
-    engine = create_paddle_ocr()
-    init_seconds = time.time() - started
+def ocr_image(image_path, engine=None):
+    init_seconds = 0
+    if engine is None:
+        started = time.time()
+        engine = create_paddle_ocr()
+        init_seconds = time.time() - started
     infer_started = time.time()
     items = run_paddle_ocr(engine, image_path)
     infer_seconds = time.time() - infer_started
@@ -276,10 +280,96 @@ def manual_only_color_analysis(image_path, expected_rows, ocr_rows=None):
     return analysis
 
 
+def parse_pages(value, fallback_page):
+    raw = str(value or "").strip()
+    if not raw:
+        return [max(1, int(fallback_page or 1))]
+    pages = []
+    for part in raw.replace("，", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            left, right = part.split("-", 1)
+            try:
+                start = max(1, int(left.strip()))
+                end = max(start, int(right.strip()))
+            except ValueError:
+                continue
+            pages.extend(range(start, end + 1))
+            continue
+        try:
+            pages.append(max(1, int(part)))
+        except ValueError:
+            continue
+    deduped = []
+    seen = set()
+    for page in pages or [max(1, int(fallback_page or 1))]:
+        if page in seen:
+            continue
+        seen.add(page)
+        deduped.append(page)
+    return deduped
+
+
+def cleanup_temp_dir(temp_dir):
+    if not temp_dir:
+        return
+    for item in sorted(Path(temp_dir).glob("*"), reverse=True):
+        try:
+            item.unlink()
+        except Exception:
+            pass
+    try:
+        Path(temp_dir).rmdir()
+    except Exception:
+        pass
+
+
+def process_page(pdf_path, page, pdftoppm, task_id="", engine=None, shared_init_seconds=0):
+    temp_dir = None
+    page = max(1, int(page or 1))
+    try:
+        image_path, temp_dir = render_pdf_page(pdf_path, page, pdftoppm)
+        if should_use_chunked_highres_ocr(image_path):
+            cleanup_temp_dir(temp_dir)
+            highres_dpi = int(os.environ.get("TICKET_TALL_PAGE_RENDER_DPI") or 300)
+            image_path, temp_dir = render_pdf_page(pdf_path, page, pdftoppm, dpi=highres_dpi)
+            ocr_result = ocr_tall_image_in_chunks(image_path, engine=engine)
+        else:
+            ocr_result = ocr_image(image_path, engine=engine)
+        data_ocr_rows = get_ticket_data_ocr_rows(ocr_result.get("ocrRows"))
+        color_analysis = manual_only_color_analysis(image_path, len(data_ocr_rows), ocr_result.get("ocrRows"))
+        return {
+            "source": "local_pdf_page",
+            "taskId": task_id,
+            "page": page,
+            "text": ocr_result["text"],
+            "recognizedRows": ocr_result["recognizedRows"],
+            "ocrRows": ocr_result["ocrRows"],
+            "rowColorAnalysis": color_analysis,
+            "initSeconds": round(float(shared_init_seconds or 0) + float(ocr_result["initSeconds"] or 0), 3),
+            "inferSeconds": ocr_result["inferSeconds"],
+            "ocrMode": ocr_result.get("ocrMode") or "single_image",
+        }
+    except Exception as error:
+        return {
+            "source": "local_pdf_page",
+            "taskId": task_id,
+            "page": page,
+            "error": str(error),
+            "text": "",
+            "recognizedRows": 0,
+        }
+    finally:
+        cleanup_temp_dir(temp_dir)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("pdf")
-    parser.add_argument("--page", type=int, required=True)
+    parser.add_argument("--page", type=int, default=1)
+    parser.add_argument("--pages", default="")
     parser.add_argument("--task-id", default="")
     parser.add_argument("--pdftoppm", default=os.environ.get("PDFTOPPM_PATH") or "pdftoppm")
     args = parser.parse_args()
@@ -300,58 +390,20 @@ def main():
         )
         return 2
 
-    temp_dir = None
-    try:
-        image_path, temp_dir = render_pdf_page(pdf_path, max(1, args.page), args.pdftoppm)
-        if should_use_chunked_highres_ocr(image_path):
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            highres_dpi = int(os.environ.get("TICKET_TALL_PAGE_RENDER_DPI") or 300)
-            image_path, temp_dir = render_pdf_page(pdf_path, max(1, args.page), args.pdftoppm, dpi=highres_dpi)
-            ocr_result = ocr_tall_image_in_chunks(image_path)
-        else:
-            ocr_result = ocr_image(image_path)
-        data_ocr_rows = get_ticket_data_ocr_rows(ocr_result.get("ocrRows"))
-        color_analysis = manual_only_color_analysis(image_path, len(data_ocr_rows), ocr_result.get("ocrRows"))
-        payload = {
-            "source": "local_pdf_page",
-            "taskId": args.task_id,
-            "page": max(1, args.page),
-            "text": ocr_result["text"],
-            "recognizedRows": ocr_result["recognizedRows"],
-            "ocrRows": ocr_result["ocrRows"],
-            "rowColorAnalysis": color_analysis,
-            "initSeconds": ocr_result["initSeconds"],
-            "inferSeconds": ocr_result["inferSeconds"],
-            "ocrMode": ocr_result.get("ocrMode") or "single_image",
-        }
+    pages = parse_pages(args.pages, args.page)
+    if len(pages) <= 1 and not args.pages:
+        payload = process_page(pdf_path, pages[0], args.pdftoppm, args.task_id)
         print(json.dumps(payload, ensure_ascii=False))
-        return 0
-    except Exception as error:
-        print(
-            json.dumps(
-                {
-                    "source": "local_pdf_page",
-                    "taskId": args.task_id,
-                    "page": max(1, args.page),
-                    "error": str(error),
-                    "text": "",
-                    "recognizedRows": 0,
-                },
-                ensure_ascii=False,
-            )
-        )
-        return 1
-    finally:
-        if temp_dir:
-            for item in sorted(Path(temp_dir).glob("*"), reverse=True):
-                try:
-                    item.unlink()
-                except Exception:
-                    pass
-            try:
-                Path(temp_dir).rmdir()
-            except Exception:
-                pass
+        return 1 if payload.get("error") else 0
+
+    init_started = time.time()
+    engine = create_paddle_ocr()
+    init_seconds = time.time() - init_started
+    results = []
+    for index, page in enumerate(pages):
+        results.append(process_page(pdf_path, page, args.pdftoppm, args.task_id, engine=engine, shared_init_seconds=init_seconds if index == 0 else 0))
+    print(json.dumps({"source": "local_pdf_page_batch", "taskId": args.task_id, "pages": results}, ensure_ascii=False))
+    return 1 if any(item.get("error") for item in results) and not any(item.get("text") for item in results) else 0
 
 
 if __name__ == "__main__":
