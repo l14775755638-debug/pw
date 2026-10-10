@@ -712,7 +712,7 @@ function extractJsonValue(text) {
     }
     return null;
   };
-  const repairedWhole = value.endsWith("}}]") && value.startsWith('{"tables":[') ? `${value.slice(0, -3)}]}` : "";
+  const repairedWhole = value.endsWith("}}]") && value.startsWith('{"tables":[') ? `${value.slice(0, -3)}}]}` : "";
   const direct = parseCandidates([value, repairedWhole]);
   if (direct) return direct;
   const objectStart = value.indexOf("{");
@@ -722,7 +722,7 @@ function extractJsonValue(text) {
   const end = startsWithArray ? value.lastIndexOf("]") : value.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
   const sliced = value.slice(start, end + 1);
-  const repairedSliced = sliced.endsWith("}}]") && sliced.startsWith('{"tables":[') ? `${sliced.slice(0, -3)}]}` : "";
+  const repairedSliced = sliced.endsWith("}}]") && sliced.startsWith('{"tables":[') ? `${sliced.slice(0, -3)}}]}` : "";
   return parseCandidates([sliced, repairedSliced]);
 }
 
