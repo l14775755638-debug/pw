@@ -1834,11 +1834,38 @@ tr.hit-row td {
   font-weight: 900;
 }
 
+.upload-parse-mode-field,
 .upload-color-mode-field {
   padding: 12px;
   border: 1px solid rgba(20, 108, 117, 0.2);
   border-radius: 8px;
   background: #f6fbfb;
+}
+
+.upload-parse-mode-field {
+  background: #fffaf0;
+  border-color: rgba(152, 98, 15, 0.22);
+}
+
+.generation-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 3px 7px;
+  margin-left: 6px;
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  border: 1px solid rgba(20, 108, 117, 0.22);
+  border-radius: 999px;
+  background: #eefafa;
+}
+
+.generation-mode-badge.vlm {
+  color: #98620f;
+  border-color: rgba(152, 98, 15, 0.26);
+  background: #fff3c2;
 }
 
 .upload-status-row {

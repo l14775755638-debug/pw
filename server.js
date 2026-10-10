@@ -697,6 +697,28 @@ function extractJsonObject(text) {
   }
 }
 
+function extractJsonValue(text) {
+  const value = String(text || "")
+    .replace(/```(?:json)?/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {}
+  const objectStart = value.indexOf("{");
+  const arrayStart = value.indexOf("[");
+  const startsWithArray = arrayStart >= 0 && (objectStart < 0 || arrayStart < objectStart);
+  const start = startsWithArray ? arrayStart : objectStart;
+  const end = startsWithArray ? value.lastIndexOf("]") : value.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(value.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
 function getActiveProvider() {
   const provider = String(process.env.AI_PROVIDER || "aliyun").toLowerCase();
   return providerConfigs[provider] ? provider : "aliyun";
@@ -1205,6 +1227,74 @@ async function generatePendingTables(request, response) {
   });
 }
 
+async function getVlmSourcePageImage({ file, sourceUrl, pageNumber }) {
+  const sourcePath = sourceUrl.startsWith("uploads/") ? getReadableUploadPath(sourceUrl) : "";
+  const sourceMime = sourcePath ? getMimeForExtension(sourcePath) : "";
+  if (sourcePath && sourceMime === "application/pdf") return renderPdfPagePathToImage(sourcePath, pageNumber);
+  if (sourcePath && /^image\//i.test(sourceMime)) {
+    const buffer = fs.readFileSync(sourcePath);
+    return `data:${sourceMime};base64,${buffer.toString("base64")}`;
+  }
+  if (String(file || "").startsWith("data:application/pdf")) return renderPdfPageToImage(file, pageNumber);
+  if (String(file || "").startsWith("data:image/")) return file;
+  throw new Error("没有可用的原图/PDF，无法使用 VLM 解析。");
+}
+
+async function parseTicketTablesWithVlm(request, response) {
+  const config = providerConfigs.aliyun;
+  if (!process.env[config.keyName]) {
+    sendJson(response, 501, { error: `${config.keyName} is not configured`, message: `未配置阿里云百炼密钥。请在 .env 里设置 ${config.keyName}。` });
+    return;
+  }
+  const raw = await readBody(request);
+  const payload = JSON.parse(raw || "{}");
+  const file = String(payload.file || "");
+  const sourceUrl = String(payload.sourceUrl || "");
+  const pageNumber = Math.max(1, Math.floor(Number(payload.page || payload.sourcePage || 1)));
+  const image = await getVlmSourcePageImage({ file, sourceUrl, pageNumber });
+  const vlmResult = await parseTicketTableWithAliyunVlm(image, pageNumber);
+  const recognizedText = vlmTablesToRecognizedText(vlmResult.tables, pageNumber);
+  const uploadedSource = {
+    name: String(payload.uploadedSource?.name || payload.fileName || "票源文件"),
+    type: String(payload.uploadedSource?.type || payload.fileType || (sourceUrl.toLowerCase().includes(".pdf") ? "application/pdf" : "image/jpeg")),
+    url: sourceUrl.startsWith("uploads/") ? sourceUrl : "",
+  };
+  const generationPayload = {
+    recognizedText,
+    uploadedSource,
+    currentEvent: payload.currentEvent || {},
+    tableTitle: payload.tableTitle || "",
+    rowColorAnalyses: {},
+    options: {
+      ...(payload.options || {}),
+      sourcePage: pageNumber,
+      totalPageCount: Number(payload.totalPages || payload.detectedPages || 0) || 0,
+      skipRowColor: true,
+      generationMode: "vlm",
+      forceLightReviewFlags: true,
+    },
+  };
+  const generated = generatePendingTablesWithClientRules(generationPayload);
+  generated.tables = (Array.isArray(generated.tables) ? generated.tables : []).map((table) => ({
+    ...table,
+    generationMode: "vlm",
+    generationModeLabel: "VLM视觉模式",
+    vlmProvider: "aliyun",
+    vlmModel: config.model,
+    vlmPage: pageNumber,
+  }));
+  sendJson(response, 200, {
+    ...generated,
+    page: pageNumber,
+    recognizedText,
+    vlmTables: vlmResult.tables,
+    generationMode: "vlm",
+    provider: "aliyun",
+    providerName: config.name,
+    model: config.model,
+  });
+}
+
 function buildSeatmapPrompt(width, height) {
   return [
     "你是演唱会票务系统的座位图识别器。",
@@ -1276,6 +1366,84 @@ function buildTablePrompt(pageNumber) {
     "每一张票源一行。不要输出图片标题、水印、页码、空白说明。",
     "如果本页没有票源表格，输出空字符串。",
   ].join("\n");
+}
+
+function buildVlmTicketTablePrompt(pageNumber) {
+  return [
+    "你是票务表格视觉结构解析器，不是普通 OCR。",
+    `请直接观察这张票源表第 ${pageNumber} 页的原图，识别所有可见票源行。`,
+    "必须理解表格线、合并单元格、跨行日期/票面/楼层/区域/排数/备注的继承范围；继承必须按原图格子边界，不要只按文字出现位置猜。",
+    "输出严格 JSON，不要 Markdown，不要解释。",
+    "JSON 格式：{\"tables\":[{\"columns\":[\"序号\",\"日期\",\"票面\",\"楼层\",\"区域\",\"排数\",\"座位号\",\"售价\",\"数量\",\"状态\",\"备注\"],\"rows\":[[\"1\",\"8.21\",\"253000\",\"1层\",\"F3\",\"6排\",\"x\",\"9000\",\"1\",\"\",\"\"], ...]}]}",
+    "columns 可以按原表实际列名调整，但必须尽量包含可识别的日期、票面、楼层、区域、排数、座位号、售价、数量、状态、备注。",
+    "每一张票源一行。不要输出标题、水印、页脚说明、空白行、筛选按钮。",
+    "如果一个单元格跨多行，例如日期、票面、楼层、区域、备注，必须把该值填到它视觉覆盖的每一条票源行。",
+    "如果边框显示上一个合并格已经结束、下一个合并格开始，必须切换继承值；不要因为 OCR 文字靠近边界就串到上一组或下一组。",
+    "Day1、Day2、D1、D2 如果是演出第几天，应按标题/日期列映射为真实日期；如果它出现在序号列，例如 Day1-2，它是序号，不是日期。",
+    "ADD-1、new1、序号7、Day1-2 这类在序号/编号列里的内容必须放在序号列，不能拆成日期。",
+    "售价/价格必须放价格列；票面/面值/等级不能和售价重复。价格如 6000、10800、SOLD 按原表放售价或状态列。",
+    "区域、排数、座位号要分清：F9区17排 可以拆为 区域=F9、排数=17排；如果原表只有位置一列，也可以在备注保留原文。",
+    "白底/无填充的数据行视为正常可发布，状态留空。红底、黄底、橙底、绿底、蓝底、紫底、灰底、黑底或明显非白底的数据行视为已售/下架，状态写“已售”。",
+    "如果文字明确写 SOLD、sold、已售、下架、매진、판매완료，也在状态列写“已售”。如果写 not sold、可售、未售、available，不要标已售。",
+    "连坐、二连、三连、贴舞台4内、看台R席等备注必须保留在备注或座位号原列，不要丢。",
+    "不要合并两张不同票。只有原图某个单元格跨两行写连坐/二连，或相邻两行备注明确都写同一连坐，才可在备注保留连坐；本次 JSON 仍逐行输出，前端确认阶段再处理是否合并展示。",
+    "如果某格为空，输出空字符串。不要用邻列补位，不要把售价移动到数量，不要把备注移动到售价。",
+    "返回前从上到下核对所有可见序号，尤其底部最后 3 行，不能漏行。",
+  ].join("\n");
+}
+
+function normalizeVlmCell(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
+  return String(value).replace(/\s+/g, " ").trim();
+}
+
+function normalizeVlmTableRows(table) {
+  const fallbackColumns = ["序号", "日期", "票面", "楼层", "区域", "排数", "座位号", "售价", "数量", "状态", "备注"];
+  let columns = Array.isArray(table?.columns) ? table.columns.map(normalizeVlmCell).filter(Boolean) : [];
+  const rawRows = Array.isArray(table?.rows) ? table.rows : [];
+  const objectRows = rawRows.filter((row) => row && typeof row === "object" && !Array.isArray(row));
+  if (!columns.length && objectRows.length) {
+    const seen = new Set();
+    objectRows.forEach((row) => {
+      Object.keys(row).forEach((key) => {
+        const label = normalizeVlmCell(key);
+        if (!label || seen.has(label)) return;
+        seen.add(label);
+        columns.push(label);
+      });
+    });
+  }
+  if (!columns.length) columns = fallbackColumns;
+  const rows = rawRows
+    .map((row) => {
+      if (Array.isArray(row)) return columns.map((_, index) => normalizeVlmCell(row[index]));
+      if (row && typeof row === "object") return columns.map((column) => normalizeVlmCell(row[column]));
+      return [];
+    })
+    .filter((row) => row.some(Boolean));
+  return rows.length ? { columns, rows } : null;
+}
+
+function normalizeVlmTicketTables(parsed) {
+  const sourceTables = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.tables)
+      ? parsed.tables
+      : Array.isArray(parsed?.rows)
+        ? [{ columns: parsed.columns, rows: parsed.rows }]
+        : [];
+  return sourceTables.map(normalizeVlmTableRows).filter(Boolean);
+}
+
+function vlmTablesToRecognizedText(tables, pageNumber) {
+  return tables
+    .map((table) => {
+      const lines = [table.columns.map(normalizeVlmCell).join("\t")];
+      table.rows.forEach((row) => lines.push(row.map(normalizeVlmCell).join("\t")));
+      return `-- PDF 第 ${pageNumber} 页 --\n${lines.join("\n")}`;
+    })
+    .join("\n\n");
 }
 
 function buildTableCompletenessPrompt(pageNumber, previousText, detectedRows, recognizedRows) {
@@ -1445,6 +1613,25 @@ async function recognizeImageTextWithAliyun(image, prompt) {
     throw error;
   }
   return String(apiResponse.body?.choices?.[0]?.message?.content || "").trim();
+}
+
+async function parseTicketTableWithAliyunVlm(image, pageNumber) {
+  const config = providerConfigs.aliyun;
+  if (!process.env[config.keyName]) {
+    const error = new Error(`未配置阿里云百炼密钥。请在 .env 里设置 ${config.keyName}。`);
+    error.status = 501;
+    throw error;
+  }
+  const text = await recognizeImageTextWithAliyun(image, buildVlmTicketTablePrompt(pageNumber));
+  const parsed = extractJsonValue(text);
+  const tables = normalizeVlmTicketTables(parsed);
+  if (!tables.length) {
+    const error = new Error("VLM 没有返回可用票源 JSON。");
+    error.status = 502;
+    error.detail = text.slice(0, 1200);
+    throw error;
+  }
+  return { tables, raw: parsed, rawText: text };
 }
 
 async function recognizeSeatmapWithOpenAI(image, prompt) {
@@ -3932,6 +4119,14 @@ const server = http.createServer((request, response) => {
     generatePendingTables(request, response).catch((error) => {
       console.error("Pending table generation failed", error);
       const message = formatPendingGenerationErrorMessage(error);
+      sendJson(response, error.status || 500, { error: message, message });
+    });
+    return;
+  }
+  if (request.method === "POST" && request.url === "/api/tables/vlm-parse-page") {
+    parseTicketTablesWithVlm(request, response).catch((error) => {
+      console.error("VLM ticket table parse failed", error);
+      const message = formatErrorMessage(error);
       sendJson(response, error.status || 500, { error: message, message });
     });
     return;

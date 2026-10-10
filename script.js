@@ -575,6 +575,7 @@ const selectedSourceName = document.querySelector("#selectedSourceName");
 const uploadTableTitle = document.querySelector("#uploadTableTitle");
 const pdfDetectionStatus = document.querySelector("#pdfDetectionStatus");
 const uploadTableText = document.querySelector("#uploadTableText");
+const uploadParseModeSelect = document.querySelector("#uploadParseMode");
 const uploadRowColorModeSelect = document.querySelector("#uploadRowColorMode");
 const uploadStatus = document.querySelector("#uploadStatus");
 const restoreLocalStateInlineButton = document.querySelector("#restoreLocalStateInlineButton");
@@ -3240,6 +3241,10 @@ async function reconnectLatestTicketOcrJobIfNeeded() {
 }
 
 async function recognizeTicketSource(file, detectedTables) {
+  if (getSelectedUploadParseMode() === "vlm") {
+    await recognizeTicketSourceWithVlm(file, detectedTables);
+    return;
+  }
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   stopTicketOcrPolling();
   lastTicketOcrJobSnapshot = null;
@@ -11360,6 +11365,7 @@ function buildSerializableAppState(serializableEvents, serializablePendingTables
     uploadDraft: {
       tableTitle: uploadTableTitle.value,
       tableText: shouldStoreUploadDraft ? uploadDraftText : "",
+      parseMode: getSelectedUploadParseMode(),
       rowColorMode: getSelectedUploadRowColorMode(),
       status: shouldStoreUploadDraft ? uploadStatus.textContent : "",
       pdfStatus: shouldStoreUploadDraft ? pdfDetectionStatus.textContent : "",
@@ -11480,6 +11486,8 @@ function makeCompactPendingTable(table) {
     sourcePart: table.sourcePart,
     eventId: table.eventId,
     quickManualMode: Boolean(table.quickManualMode),
+    generationMode: normalizeUploadParseMode(table.generationMode),
+    generationModeLabel: table.generationModeLabel || getGenerationModeLabel(table),
     quickCheckVisible: Boolean(table.quickCheckVisible),
     columns: Array.isArray(table.columns) ? [...table.columns] : [],
     rows: Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [],
@@ -12531,6 +12539,7 @@ function applyLoadedAppState(parsed) {
     const draftText = String(parsed.uploadDraft.tableText || "");
     uploadTableTitle.value = parsed.uploadDraft.tableTitle || "";
     uploadTableText.value = draftText || recoverableOcrText || "";
+    if (uploadParseModeSelect) uploadParseModeSelect.value = normalizeUploadParseMode(parsed.uploadDraft.parseMode);
     if (uploadRowColorModeSelect) uploadRowColorModeSelect.value = normalizeUploadRowColorMode(parsed.uploadDraft.rowColorMode);
     uploadStatus.textContent = parsed.uploadDraft.status || uploadStatus.textContent;
     pdfDetectionStatus.textContent = parsed.uploadDraft.pdfStatus || pdfDetectionStatus.textContent;
@@ -15709,6 +15718,16 @@ function getTableSourceSummary(table) {
   return pageText ? `${sourceName} · ${pageText}` : sourceName;
 }
 
+function getGenerationModeLabel(table) {
+  const mode = normalizeUploadParseMode(table?.generationMode);
+  return mode === "vlm" ? "VLM视觉模式" : "OCR模式";
+}
+
+function getGenerationModeBadgeHtml(table) {
+  const mode = normalizeUploadParseMode(table?.generationMode);
+  return `<em class="generation-mode-badge ${mode === "vlm" ? "vlm" : ""}">${escapeHtml(getGenerationModeLabel(table))}</em>`;
+}
+
 function getCustomerTableSourceSummary(table) {
   const pageText = getTablePageText(table);
   return pageText ? `表格来源 · ${pageText}` : "表格来源";
@@ -16262,7 +16281,7 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
           return `
           <div class="upload-record ${table.id === selectedPendingTableId ? "active" : ""}" data-review-table="${table.id}" role="button" tabindex="0">
             <span>
-              <b title="${escapeHtml(table.title || "")}">${escapeHtml(titleText)}${reviewBadge}</b>
+              <b title="${escapeHtml(table.title || "")}">${escapeHtml(titleText)}${reviewBadge}${getGenerationModeBadgeHtml(table)}</b>
               <small title="${escapeHtml(sourceText)}">${escapeHtml(shortenFileName(sourceText, 46))} · ${table.rows.length} 条票源 · 待确认${reasons.length ? ` · ${escapeHtml(reasons.join(" / "))}` : ""}</small>
             </span>
             <button class="small-button ghost" type="button" data-review-table="${table.id}">打开这一页</button>
@@ -18950,6 +18969,10 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
   const hasSourceRowActions = false;
   reviewLayout.classList.remove("source-action-review-layout");
   reviewLayout.innerHTML = `
+    <div class="manual-review-note ok">
+      <strong>生成来源</strong>
+      <span>${escapeHtml(getGenerationModeLabel(table))}</span>
+    </div>
     ${
       table.needsManualReview
         ? `<div class="manual-review-note"><strong>需人工确认</strong><span>${escapeHtml((table.reviewReasons || []).join(" / "))}</span></div>`
@@ -19328,6 +19351,18 @@ function getSelectedUploadRowColorMode() {
   return normalizeUploadRowColorMode(uploadRowColorModeSelect?.value || UPLOAD_ROW_COLOR_MODE_HYBRID);
 }
 
+function normalizeUploadParseMode(mode) {
+  return String(mode || "").trim().toLowerCase() === "vlm" ? "vlm" : "ocr";
+}
+
+function getSelectedUploadParseMode() {
+  return normalizeUploadParseMode(uploadParseModeSelect?.value || "ocr");
+}
+
+function getUploadParseModeLabel(mode = getSelectedUploadParseMode()) {
+  return normalizeUploadParseMode(mode) === "vlm" ? "VLM视觉模式" : "OCR模式";
+}
+
 function getUploadRowColorModeLabel(mode) {
   const normalized = normalizeUploadRowColorMode(mode);
   if (normalized === UPLOAD_ROW_COLOR_MODE_ANCHOR) return "纯文字锚点";
@@ -19636,6 +19671,7 @@ function setPublishUploadBusy(isBusy) {
     generatePartialOcrButton.textContent = isBusy ? "正在生成..." : "用已识别页生成确认表";
   }
   if (uploadRowColorModeSelect) uploadRowColorModeSelect.disabled = isBusy || quickManualGenerationBusy;
+  if (uploadParseModeSelect) uploadParseModeSelect.disabled = isBusy || quickManualGenerationBusy;
   if (saveOcrTextButton) saveOcrTextButton.disabled = isBusy;
   if (clearGeneratedPendingButton) clearGeneratedPendingButton.disabled = isBusy;
   if (clearOcrTextButton) clearOcrTextButton.disabled = isBusy;
@@ -19660,6 +19696,19 @@ function setQuickManualUploadBusy(isBusy) {
 }
 
 async function publishUpload() {
+  if (getSelectedUploadParseMode() === "vlm") {
+    if (!uploadedSource) {
+      setUploadStatus("请先选择一张图片或 PDF。", "error");
+      showToast("上传失败：请先选择文件。", "error");
+      return;
+    }
+    const fallbackFile = uploadedSource.sourceFile || null;
+    await recognizeTicketSourceWithVlm(
+      fallbackFile || { name: uploadedSource.name || "票源文件", type: uploadedSource.type || "", size: 0 },
+      uploadedSource.detectedTables || 1,
+    );
+    return;
+  }
   setPublishUploadBusy(true);
   setUploadStatus("正在检查上传内容...", "loading");
   showToast("正在处理上传...", "loading");
@@ -19793,6 +19842,33 @@ async function createUploadedTablesOnServer(rowColorAnalyses = {}, options = {},
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.message || result.error || "服务器生成待确认表失败。");
+  return result;
+}
+
+async function createUploadedTablesWithVlmPageOnServer({ page = 1, totalPages = 1, file = null } = {}) {
+  const sourceContext = getServerPendingUploadedSourceContext();
+  let fallbackDataUrl = "";
+  if (!sourceContext.url && uploadedSource?.dataUrl) fallbackDataUrl = uploadedSource.dataUrl;
+  if (!sourceContext.url && !fallbackDataUrl && file instanceof Blob) fallbackDataUrl = await readFileAsDataUrl(file);
+  const response = await fetch("/api/tables/vlm-parse-page", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file: fallbackDataUrl,
+      sourceUrl: sourceContext.url,
+      fileName: sourceContext.name,
+      fileType: sourceContext.type,
+      uploadedSource: sourceContext,
+      tableTitle: uploadTableTitle.value.trim(),
+      currentEvent: getServerPendingEventContext(),
+      page,
+      totalPages,
+      detectedPages: totalPages,
+      options: { generationMode: "vlm", skipRowColor: true },
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.message || result.error || `VLM 第 ${page} 页解析失败。`);
   return result;
 }
 
@@ -20109,6 +20185,83 @@ async function generatePendingFromRecognizedOcr() {
   }
 }
 
+async function recognizeTicketSourceWithVlm(file, detectedTables) {
+  if (!uploadedSource) throw new Error("请先选择一张图片或 PDF。");
+  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  const totalPages = isPdf ? Math.max(1, Number(detectedTables || uploadedSource.detectedTables || 1)) : 1;
+  const allTables = [];
+  const failedBatches = [];
+  lastPendingGenerationFailures = [];
+  setPublishUploadBusy(true);
+  uploadTableText.value = "";
+  renderTicketOcrTaskPanel({
+    id: "vlm-live",
+    fileName: file.name,
+    status: "running",
+    totalPages,
+    pagesQueued: totalPages,
+    pagesProcessed: 0,
+    pagesSucceeded: 0,
+    pagesFailed: 0,
+    message: "VLM 视觉大模型逐页解析中。",
+  });
+  try {
+    for (let page = 1; page <= totalPages; page += 1) {
+      setUploadStatus(`VLM 视觉大模型解析中：第 ${page}/${totalPages} 页...`, "loading");
+      pdfDetectionStatus.textContent = `VLM 模式：正在直接看图解析第 ${page}/${totalPages} 页。`;
+      await waitForBrowserPaint();
+      try {
+        const result = await createUploadedTablesWithVlmPageOnServer({ page, totalPages, file });
+        const tables = (Array.isArray(result.tables) ? result.tables : []).filter((table) => Array.isArray(table.rows) && table.rows.length);
+        if (result.recognizedText) {
+          uploadTableText.value = [uploadTableText.value.trim(), result.recognizedText.trim()].filter(Boolean).join("\n\n");
+        }
+        if (tables.length) {
+          const replacedPendingTables = removeExistingPendingTablesForGeneratedTables(tables);
+          pendingTables.unshift(...tables);
+          allTables.push(...tables);
+          selectedPendingTableId = tables[0]?.id || selectedPendingTableId;
+          renderUploadRecords({ save: false, normalize: false });
+          renderPublishedTables();
+          renderAdminEvent();
+          if (replacedPendingTables) showToast(`VLM 第 ${page} 页已替换 ${replacedPendingTables} 张旧待确认表。`, "success");
+        }
+      } catch (error) {
+        failedBatches.push({ pageRange: String(page), message: error?.message || "VLM 解析失败" });
+        lastPendingGenerationFailures = [...failedBatches];
+        renderUploadRecords({ save: false, normalize: false });
+        console.warn("VLM page parse failed.", { page, error });
+      }
+      renderTicketOcrTaskPanel({
+        id: "vlm-live",
+        fileName: file.name,
+        status: page >= totalPages ? "done" : "running",
+        totalPages,
+        pagesQueued: totalPages,
+        pagesProcessed: page,
+        pagesSucceeded: page - failedBatches.length,
+        pagesFailed: failedBatches.length,
+        message: `VLM 已处理 ${page}/${totalPages} 页。`,
+      });
+      scheduleAppStateSave(0);
+      await waitForBrowserPaint();
+    }
+    const failedText = failedBatches.length
+      ? `，${failedBatches.map((item) => item.pageRange).join("、")} 页失败，可切回 OCR 模式或重试`
+      : "";
+    setUploadStatus(`VLM 视觉模式已生成 ${allTables.length} 张待确认表${failedText}。校对确认后才会发布给客户。`, failedBatches.length ? "warning" : "success");
+    pdfDetectionStatus.textContent = `VLM 模式完成：已生成 ${allTables.length} 张待确认表${failedText}。`;
+    showToast(`VLM 已生成 ${allTables.length} 张待确认表。`, failedBatches.length ? "warning" : "success");
+    reviewTitle.textContent = "VLM待确认表已生成";
+    confirmReviewButton.disabled = true;
+    reviewLayout.innerHTML = `<div class="empty-state">VLM 视觉模式已生成 ${allTables.length} 张待确认表。请从上方待确认列表逐页校对。</div>`;
+    saveAndArchiveAppStep(`VLM生成待确认表：${uploadedSource?.name || uploadTableTitle.value || currentEvent.name}`, "VLM生成");
+  } finally {
+    setPublishUploadBusy(false);
+    renderTicketOcrTaskPanel(lastTicketOcrJobSnapshot);
+  }
+}
+
 async function publishUploadQuickManual() {
   if (quickManualGenerationBusy) return;
   if (fieldMappingDraft) {
@@ -20409,6 +20562,7 @@ function mergeParsedTablesByPdfPage(parsedTables = []) {
 function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {}) {
   const skipRowColor = options.skipRowColor === true;
   const quickManualMode = options.quickManualMode === true;
+  const generationMode = normalizeUploadParseMode(options.generationMode || getSelectedUploadParseMode());
   const isPdf = uploadedSource.type === "application/pdf" || uploadedSource.name.toLowerCase().endsWith(".pdf");
   const uploadTables = isPdf ? mergeParsedTablesByPdfPage(parsedTables) : parsedTables;
   const count = uploadTables.length;
@@ -20449,6 +20603,8 @@ function createUploadedTables(parsedTables, rowColorAnalyses = null, options = {
       sourceTextRows: Array.isArray(parsedTable.sourceTextRows) ? cloneRows(parsedTable.sourceTextRows) : Array.isArray(parsedTable.originalRows) ? cloneRows(parsedTable.originalRows) : cloneRows(parsedTable.rows),
       rows: parsedTable.rows,
       quickManualMode,
+      generationMode,
+      generationModeLabel: getUploadParseModeLabel(generationMode),
       rowColorPageRowOffset: Math.max(0, Math.floor(Number(parsedTable.rowColorPageRowOffset || 0) || 0)),
       rowColorSourceIndexes: Array.isArray(parsedTable.rowColorSourceIndexes) ? [...parsedTable.rowColorSourceIndexes] : null,
     };
@@ -22446,6 +22602,17 @@ clearPendingButton.addEventListener("click", clearCurrentPendingTables);
 if (clearGeneratedPendingButton) clearGeneratedPendingButton.addEventListener("click", clearGeneratedPendingTablesAndKeepOcr);
 if (saveOcrTextButton) saveOcrTextButton.addEventListener("click", saveCurrentOcrTextManually);
 if (clearOcrTextButton) clearOcrTextButton.addEventListener("click", clearSavedOcrText);
+if (uploadParseModeSelect) {
+  uploadParseModeSelect.addEventListener("change", () => {
+    const mode = getSelectedUploadParseMode();
+    if (mode === "vlm") {
+      setUploadStatus("已选择 VLM 视觉大模型解析：上传图片/PDF 后会直接看图逐页生成待确认表，不跑传统 OCR。", "idle");
+    } else {
+      setUploadStatus("已选择 OCR+规则解析：沿用当前 OCR、颜色识别和继承规则。", "idle");
+    }
+    scheduleAppStateSave(0);
+  });
+}
 
 sourceFileInput.addEventListener("change", async () => {
   const file = sourceFileInput.files?.[0];
