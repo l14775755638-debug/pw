@@ -61,7 +61,9 @@ const maxBatchOcrPages = readPositiveIntegerEnv("TICKET_OCR_MAX_PAGES", Number.P
 const batchOcrConcurrency = Math.max(1, Math.min(readPositiveIntegerEnv("TICKET_OCR_CONCURRENCY", 1), 3));
 const batchOcrRetries = Math.max(0, Math.min(readPositiveIntegerEnv("TICKET_OCR_RETRIES", 3), 6));
 const batchOcrRetryDelayMs = Math.max(300, readPositiveIntegerEnv("TICKET_OCR_RETRY_DELAY_MS", 1800));
-const localOcrParallelJobs = Math.max(1, Math.min(readPositiveIntegerEnv("TICKET_LOCAL_OCR_PARALLEL_JOBS", 1), 4));
+const serverCpuCount = Math.max(1, os.cpus()?.length || 1);
+const defaultLocalOcrParallelJobs = Math.max(1, Math.min(2, Math.floor(serverCpuCount / 3) || 1));
+const localOcrParallelJobs = Math.max(1, Math.min(readPositiveIntegerEnv("TICKET_LOCAL_OCR_PARALLEL_JOBS", defaultLocalOcrParallelJobs), 4));
 const aiRequestTimeoutSeconds = Math.max(25, readPositiveIntegerEnv("AI_REQUEST_TIMEOUT_SECONDS", 180));
 const externalApiMaxConcurrency = Math.max(1, Math.min(readPositiveIntegerEnv("EXTERNAL_API_MAX_CONCURRENCY", 5), 10));
 const externalApiRetries = Math.max(0, Math.min(readPositiveIntegerEnv("EXTERNAL_API_RETRIES", 3), 6));
@@ -70,10 +72,10 @@ const ocrCompletenessCheckEnabled = process.env.TICKET_OCR_COMPLETENESS_CHECK ==
 const ocrRowColorDuringScanEnabled = process.env.TICKET_OCR_ROW_COLOR_DURING_SCAN === "1";
 const ocrPpStructureDuringScanEnabled = process.env.TICKET_OCR_PPSTRUCTURE_DURING_SCAN === "1";
 const externalAiFeaturesEnabled = process.env.EXTERNAL_AI_FEATURES === "1";
-const serverCpuCount = Math.max(1, os.cpus()?.length || 1);
+const effectiveOcrWorkers = Math.max(batchOcrConcurrency, localOcrParallelJobs);
 const paddleCpuThreads = Math.max(
   1,
-  Math.min(readPositiveIntegerEnv("PADDLE_CPU_THREADS", Math.max(1, Math.floor(serverCpuCount / batchOcrConcurrency))), serverCpuCount),
+  Math.min(readPositiveIntegerEnv("PADDLE_CPU_THREADS", Math.max(1, Math.floor(serverCpuCount / effectiveOcrWorkers))), serverCpuCount),
 );
 const rowColorLogicVersion = 125;
 const maxAnchorRowsPerTable = Math.max(40, readPositiveIntegerEnv("TICKET_ANCHOR_MAX_ROWS_PER_TABLE", 260));
@@ -2647,7 +2649,8 @@ async function runTicketOcrBatch(job, source, maxPages) {
     job.pagesQueued = pages.length;
     job.status = "running";
     const limitText = pages.length < job.totalPages ? formatTicketOcrPageLimit() : "";
-    job.message = `正在本地逐页识别 0/${pages.length} 页，总页数 ${job.totalPages}${limitText}...`;
+    const workerCount = Math.min(localOcrParallelJobs, pages.length);
+    job.message = `正在本地逐页识别 0/${pages.length} 页，总页数 ${job.totalPages}${limitText}，并发 ${workerCount} 页...`;
     job.aiColorTasks = [];
     job.aiColorPagesQueued = 0;
     job.aiColorPagesProcessed = 0;
@@ -2657,35 +2660,48 @@ async function runTicketOcrBatch(job, source, maxPages) {
     job.ppStructurePagesProcessed = 0;
     job.ppStructurePagesFailed = 0;
 
-    for (const page of pages) {
-      if (job.cancelRequested) break;
-      while (job.pauseRequested && !job.cancelRequested) {
-        job.status = "paused";
-        job.currentPage = 0;
-        job.message = `已暂停在 ${job.pagesProcessed}/${pages.length} 页；可以继续识别，或用已识别页先生成确认表。`;
-        await sleep(1000);
-      }
-      if (job.cancelRequested) break;
-      try {
-        job.status = "running";
-        job.currentPage = page;
-        job.message = `正在本地逐页识别 ${job.pagesProcessed}/${pages.length} 页，当前处理 PDF 第 ${page} 页...`;
-        const result = await processTicketPdfPageLocally(pdfPath, page, job);
-        if (result.text) {
-          job.results = job.results.filter((existing) => existing.page !== page);
-          job.results.push(result);
-          job.results.sort((a, b) => a.page - b.page);
+    let nextPageIndex = 0;
+    const activePages = new Set();
+    const processNextPage = async () => {
+      while (!job.cancelRequested) {
+        if (job.pauseRequested) {
+          if (!activePages.size) {
+            job.status = "paused";
+            job.currentPage = 0;
+            job.message = `已暂停在 ${job.pagesProcessed}/${pages.length} 页；可以继续识别，或用已识别页先生成确认表。`;
+          }
+          await sleep(1000);
+          continue;
         }
-      } catch (error) {
-        job.errors = job.errors.filter((existing) => existing.page !== page);
-        job.errors.push({ page, stage: "local_page_ocr", message: formatErrorMessage(error) });
-      } finally {
-        job.pagesProcessed += 1;
-        const success = job.results.filter((result) => result.text).length;
-        const failed = job.errors.length;
-        job.message = `正在本地逐页识别 ${job.pagesProcessed}/${pages.length} 页，已读到 ${success} 页${failed ? `，失败 ${failed} 页` : ""}...`;
+        const page = pages[nextPageIndex];
+        nextPageIndex += 1;
+        if (!page) return;
+        activePages.add(page);
+        try {
+          job.status = "running";
+          job.currentPage = Math.min(...activePages);
+          const activeText = [...activePages].sort((a, b) => a - b).join("、");
+          job.message = `正在本地逐页识别 ${job.pagesProcessed}/${pages.length} 页，并发处理 PDF 第 ${activeText} 页...`;
+          const result = await processTicketPdfPageLocally(pdfPath, page, job);
+          if (result.text) {
+            job.results = job.results.filter((existing) => existing.page !== page);
+            job.results.push(result);
+            job.results.sort((a, b) => a.page - b.page);
+          }
+        } catch (error) {
+          job.errors = job.errors.filter((existing) => existing.page !== page);
+          job.errors.push({ page, stage: "local_page_ocr", message: formatErrorMessage(error) });
+        } finally {
+          activePages.delete(page);
+          job.pagesProcessed += 1;
+          job.currentPage = activePages.size ? Math.min(...activePages) : 0;
+          const success = job.results.filter((result) => result.text).length;
+          const failed = job.errors.length;
+          job.message = `正在本地逐页识别 ${job.pagesProcessed}/${pages.length} 页，已读到 ${success} 页${failed ? `，失败 ${failed} 页` : ""}...`;
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: workerCount }, () => processNextPage()));
 
     const text = getTicketOcrText(job);
     job.currentPage = 0;
