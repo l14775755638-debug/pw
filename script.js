@@ -17,7 +17,7 @@ const MAX_ANCHOR_BATCH_PAGES_PER_REQUEST = 4;
 const MAX_REVIEW_ROWS_RENDERED = 240;
 const STANDARD_REVIEW_ROW_WINDOW_SIZE = 10;
 const MAX_UPLOAD_RECORDS_RENDERED = 24;
-const REVIEW_OPEN_HEAVY_RENDER_DELAY_MS = 80;
+const REVIEW_OPEN_HEAVY_RENDER_DELAY_MS = 180;
 const MAX_PENDING_TABLES_NORMALIZE_ON_LOAD = 80;
 const MAX_PENDING_ROWS_NORMALIZE_ON_LOAD = 5000;
 const MAX_FAST_LOCAL_STORAGE_AUTO_RESTORE_BYTES = 600_000;
@@ -622,9 +622,9 @@ const OPERATION_ARCHIVE_KEY = "ticket-admin-operation-archives-v1";
 const APP_STATE_BACKUP_DB = "ticket-admin-state-backup-v1";
 const APP_STATE_BACKUP_STORE = "state";
 const APP_STATE_BACKUP_KEY = "latest";
-const MAX_OPERATION_ARCHIVES = 12;
-const MAX_OPERATION_ARCHIVE_PENDING_TABLES = 80;
-const MAX_OPERATION_ARCHIVE_STORAGE_CHARS = 6 * 1024 * 1024;
+const MAX_OPERATION_ARCHIVES = 5;
+const MAX_OPERATION_ARCHIVE_PENDING_TABLES = 24;
+const MAX_OPERATION_ARCHIVE_STORAGE_CHARS = 1.5 * 1024 * 1024;
 const MAX_UPLOAD_DRAFT_STORAGE_CHARS = 240 * 1024;
 let eventDraftHistory = { artists: [], cities: [], venues: [] };
 let operationArchives = [];
@@ -648,6 +648,8 @@ let uploadPendingGenerationBusy = false;
 let quickManualGenerationBusy = false;
 let pendingTableNormalizeDeferredOnLoad = false;
 let localStateRestoreSkippedForSpeed = false;
+let pendingReviewRenderTimer = null;
+let pendingReviewRenderToken = 0;
 let seatmapTemplates = [];
 let externalSeatmapTemplates = [];
 let templateLibraryOpen = false;
@@ -11864,7 +11866,7 @@ function loadOperationArchives() {
     if (saved && saved.length > MAX_OPERATION_ARCHIVE_STORAGE_CHARS) {
       operationArchives = [];
       localStorage.removeItem(OPERATION_ARCHIVE_KEY);
-      window.setTimeout(() => showToast("旧操作存档过大，已自动清理以避免刷新白屏；当前主数据未删除。", "warning"), 0);
+      window.setTimeout(() => showToast("旧操作存档过大，已自动清理以避免页面卡死；当前主数据未删除。", "warning"), 0);
       return;
     }
     const parsed = saved ? JSON.parse(saved) : [];
@@ -11900,6 +11902,8 @@ function getOperationArchiveSummary() {
 }
 
 function archiveCurrentSavedState(label, type = "操作", { silent = true } = {}) {
+  const shouldKeepFullArchive = silent === false || /删除前备份|恢复前备份|手动存档/i.test(type);
+  if (!shouldKeepFullArchive) return true;
   compactLargeStateBeforeSave();
   const archive = {
     id: `operation-archive-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -16368,9 +16372,16 @@ function renderReviewPanelOpeningPreview(table) {
 
 function scheduleSelectedReviewPanelRender(table, { scroll = false } = {}) {
   const tableId = table?.id;
-  window.setTimeout(() => {
+  pendingReviewRenderToken += 1;
+  const renderToken = pendingReviewRenderToken;
+  if (pendingReviewRenderTimer) {
+    window.clearTimeout(pendingReviewRenderTimer);
+    pendingReviewRenderTimer = null;
+  }
+  pendingReviewRenderTimer = window.setTimeout(() => {
+    pendingReviewRenderTimer = null;
     window.requestAnimationFrame(() => {
-      if (!tableId || selectedPendingTableId !== tableId) return;
+      if (!tableId || selectedPendingTableId !== tableId || renderToken !== pendingReviewRenderToken) return;
       try {
         renderReviewPanel(pendingReviewFocusRowIndex, { normalize: false });
         runWhenPageIdle(() => renderUploadRecords({ normalize: false }), 900);
