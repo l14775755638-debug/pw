@@ -1507,8 +1507,12 @@ function buildVlmTicketTablePrompt(pageNumber) {
     `请直接观察这张票源表第 ${pageNumber} 页的原图，识别所有可见票源行。`,
     "必须理解表格线、合并单元格、跨行日期/票面/楼层/区域/排数/备注的继承范围；继承必须按原图格子边界，不要只按文字出现位置猜。",
     "输出严格 JSON，不要 Markdown，不要解释。",
-    "JSON 格式：{\"tables\":[{\"columns\":[\"序号\",\"日期\",\"票面\",\"楼层\",\"区域\",\"排数\",\"座位号\",\"售价\",\"数量\",\"状态\",\"备注\"],\"rows\":[[\"1\",\"8.21\",\"253000\",\"1层\",\"F3\",\"6排\",\"x\",\"9000\",\"1\",\"\",\"\"], ...]}]}",
-    "columns 可以按原表实际列名调整，但必须尽量包含可识别的日期、票面、楼层、区域、排数、座位号、售价、数量、状态、备注。",
+    "JSON 格式：{\"tables\":[{\"columns\":[\"序号\",\"日期\",\"票面\",\"楼层\",\"区域\",\"排数\",\"座位号\",\"售价\",\"数量\",\"状态\",\"备注\",\"背景色\",\"是否白底\",\"发布动作\",\"下架原因\"],\"rows\":[[\"1\",\"8.21\",\"253000\",\"1层\",\"F3\",\"6排\",\"x\",\"9000\",\"1\",\"\",\"\",\"白底\",\"是\",\"publish\",\"\"] , ...]}]}",
+    "columns 可以按原表实际列名调整，但必须尽量包含可识别的日期、票面、楼层、区域、排数、座位号、售价、数量、状态、备注；另外必须给每行输出 背景色、是否白底、发布动作、下架原因。",
+    "背景色写这一行数据单元格的主要底色，例如 白底、无填充、红底、黄底、橙底、绿底、蓝底、紫底、灰底、黑底。不要写表头颜色或标题颜色。",
+    "是否白底只能写 是 或 否。白底、无填充、接近白色写 是；红/黄/橙/绿/蓝/紫/灰/黑等明显有色底写 否。",
+    "发布动作只能写 publish 或 skip。白底/无填充且没有 sold 文字写 publish；非白底或文字明确 sold/已售/下架写 skip。",
+    "下架原因简短写明原因，例如 非白底、红底、黄底、文字SOLD、已售文字；publish 行留空。",
     "每一张票源一行。不要输出标题、水印、页脚说明、空白行、筛选按钮。",
     "如果一个单元格跨多行，例如日期、票面、楼层、区域、备注，必须把该值填到它视觉覆盖的每一条票源行。",
     "如果边框显示上一个合并格已经结束、下一个合并格开始，必须切换继承值；不要因为 OCR 文字靠近边界就串到上一组或下一组。",
@@ -1516,8 +1520,8 @@ function buildVlmTicketTablePrompt(pageNumber) {
     "ADD-1、new1、序号7、Day1-2 这类在序号/编号列里的内容必须放在序号列，不能拆成日期。",
     "售价/价格必须放价格列；票面/面值/等级不能和售价重复。价格如 6000、10800、SOLD 按原表放售价或状态列。",
     "区域、排数、座位号要分清：F9区17排 可以拆为 区域=F9、排数=17排；如果原表只有位置一列，也可以在备注保留原文。",
-    "白底/无填充的数据行视为正常可发布，状态留空。红底、黄底、橙底、绿底、蓝底、紫底、灰底、黑底或明显非白底的数据行视为已售/下架，状态写“已售”。",
-    "如果文字明确写 SOLD、sold、已售、下架、매진、판매완료，也在状态列写“已售”。如果写 not sold、可售、未售、available，不要标已售。",
+    "白底/无填充的数据行视为正常可发布，状态留空，发布动作写 publish。红底、黄底、橙底、绿底、蓝底、紫底、灰底、黑底或明显非白底的数据行视为已售/下架，状态写“已售”，发布动作写 skip。",
+    "如果文字明确写 SOLD、sold、已售、下架、매진、판매완료，也在状态列写“已售”，发布动作写 skip。如果写 not sold、可售、未售、available，不要标已售，发布动作写 publish。",
     "连坐、二连、三连、贴舞台4内、看台R席等备注必须保留在备注或座位号原列，不要丢。",
     "不要合并两张不同票。只有原图某个单元格跨两行写连坐/二连，或相邻两行备注明确都写同一连坐，才可在备注保留连坐；本次 JSON 仍逐行输出，前端确认阶段再处理是否合并展示。",
     "如果某格为空，输出空字符串。不要用邻列补位，不要把售价移动到数量，不要把备注移动到售价。",
@@ -1529,6 +1533,94 @@ function normalizeVlmCell(value) {
   if (value === null || value === undefined) return "";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
   return String(value).replace(/\s+/g, " ").trim();
+}
+
+function normalizeVlmKey(value) {
+  return normalizeVlmCell(value).toLowerCase().replace(/[\s_：:()（）/\\-]+/g, "");
+}
+
+function isVlmMetaColumnName(column) {
+  return [
+    "背景色",
+    "底色",
+    "行底色",
+    "颜色",
+    "是否白底",
+    "白底",
+    "iswhitebackground",
+    "backgroundcolor",
+    "rowcolor",
+    "publishaction",
+    "action",
+    "发布动作",
+    "发布状态",
+    "下架原因",
+    "skipreason",
+    "reason",
+  ].includes(normalizeVlmKey(column));
+}
+
+function findVlmColumnIndex(columns, names) {
+  const keys = names.map(normalizeVlmKey);
+  return columns.findIndex((column) => keys.includes(normalizeVlmKey(column)));
+}
+
+function getVlmMappedValue(columns, values, names) {
+  const index = findVlmColumnIndex(columns, names);
+  return index >= 0 ? normalizeVlmCell(values[index]) : "";
+}
+
+function isVlmAvailableText(value) {
+  return /(not\s*sold|unsold|available|可售|未售|未出|판매중|판매가능)/i.test(normalizeVlmCell(value));
+}
+
+function isVlmSoldText(value) {
+  const text = normalizeVlmCell(value);
+  if (!text || isVlmAvailableText(text)) return false;
+  return /(sold\s*out|sold|s\/o|已售|售罄|售完|售出|已出|下架|매진|판매완료|팔림|완료)/i.test(text);
+}
+
+function isVlmNonWhiteColor(value) {
+  const text = normalizeVlmCell(value);
+  if (!text) return false;
+  if (/(白底|白色|无填充|無填充|透明|none|white|blank|no\s*fill)/i.test(text)) return false;
+  return /(红|紅|赤|黄|黃|橙|绿|綠|蓝|藍|紫|粉|灰|黑|青|非白|有色|red|yellow|orange|green|blue|purple|pink|gray|grey|black|cyan)/i.test(text);
+}
+
+function applyVlmVisualDecision(columns, row, sourceColumns, sourceValues) {
+  let statusIndex = findVlmColumnIndex(columns, ["状态", "售卖状态", "销售状态", "status"]);
+  let remarkIndex = findVlmColumnIndex(columns, ["备注", "说明", "remark", "note"]);
+  const sourceStatus = getVlmMappedValue(sourceColumns, sourceValues, ["状态", "售卖状态", "销售状态", "status"]);
+  const background = getVlmMappedValue(sourceColumns, sourceValues, ["背景色", "底色", "行底色", "颜色", "backgroundColor", "rowColor"]);
+  const isWhite = getVlmMappedValue(sourceColumns, sourceValues, ["是否白底", "白底", "isWhiteBackground"]);
+  const action = getVlmMappedValue(sourceColumns, sourceValues, ["发布动作", "发布状态", "publishAction", "action"]);
+  const reason = getVlmMappedValue(sourceColumns, sourceValues, ["下架原因", "skipReason", "reason"]);
+  const rowText = sourceValues.map(normalizeVlmCell).join(" ");
+  const hasExplicitSold = isVlmSoldText(sourceStatus) || isVlmSoldText(rowText);
+  const actionSaysSkip = /skip|不发布|下架|已售|sold/i.test(action) && !/publish|发布|可售|available/i.test(action);
+  const whiteSaysNo = /^(否|不是|no|false|0)$/i.test(isWhite);
+  const nonWhite = whiteSaysNo || isVlmNonWhiteColor(background) || sourceValues.some((value) => isVlmNonWhiteColor(value));
+  if (!hasExplicitSold && !actionSaysSkip && !nonWhite) return row;
+
+  const next = row.slice();
+  if (statusIndex < 0) {
+    statusIndex = columns.length;
+    columns.push("状态");
+  }
+  if (remarkIndex < 0) {
+    remarkIndex = columns.length;
+    columns.push("备注");
+  }
+  while (next.length < columns.length) next.push("");
+  if (statusIndex >= 0 && !isVlmAvailableText(next[statusIndex])) next[statusIndex] = "已售";
+  if (remarkIndex >= 0) {
+    const current = normalizeVlmCell(next[remarkIndex]);
+    const visualReason = reason || (hasExplicitSold ? "文字已售" : background ? `${background}下架` : "非白底");
+    if (visualReason && !normalizeVlmKey(current).includes(normalizeVlmKey(visualReason))) {
+      next[remarkIndex] = current ? `${current} ${visualReason}` : visualReason;
+    }
+  }
+  return next;
 }
 
 function normalizeVlmTableRows(table) {
@@ -1548,14 +1640,30 @@ function normalizeVlmTableRows(table) {
     });
   }
   if (!columns.length) columns = fallbackColumns;
+  const outputColumnIndexes = columns.map((column, index) => ({ column, index })).filter(({ column }) => !isVlmMetaColumnName(column));
+  let outputColumns = outputColumnIndexes.map(({ column }) => column);
+  if (!outputColumns.length) outputColumns = fallbackColumns;
   const rows = rawRows
     .map((row) => {
-      if (Array.isArray(row)) return columns.map((_, index) => normalizeVlmCell(row[index]));
-      if (row && typeof row === "object") return columns.map((column) => normalizeVlmCell(row[column]));
+      if (Array.isArray(row)) {
+        const sourceValues = columns.map((_, index) => normalizeVlmCell(row[index]));
+        const outputRow = outputColumnIndexes.length
+          ? outputColumnIndexes.map(({ index }) => normalizeVlmCell(row[index]))
+          : outputColumns.map((_, index) => normalizeVlmCell(row[index]));
+        return applyVlmVisualDecision(outputColumns, outputRow, columns, sourceValues);
+      }
+      if (row && typeof row === "object") {
+        const sourceValues = columns.map((column) => normalizeVlmCell(row[column]));
+        const outputRow = outputColumns.map((column) => normalizeVlmCell(row[column]));
+        return applyVlmVisualDecision(outputColumns, outputRow, columns, sourceValues);
+      }
       return [];
     })
     .filter((row) => row.some(Boolean));
-  return rows.length ? { columns, rows } : null;
+  rows.forEach((row) => {
+    while (row.length < outputColumns.length) row.push("");
+  });
+  return rows.length ? { columns: outputColumns, rows } : null;
 }
 
 function normalizeVlmTicketTables(parsed) {
