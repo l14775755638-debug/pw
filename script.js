@@ -3200,12 +3200,30 @@ async function reconnectLatestTicketOcrJobIfNeeded() {
 
 async function recognizeTicketSource(file, detectedTables) {
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  if (!isPdf) return;
   stopTicketOcrPolling();
   lastTicketOcrJobSnapshot = null;
   renderFailedOcrPanel(null);
   const sourceUrl = uploadedSource?.sourceFile === file ? uploadedSource.url || "" : uploadedSource?.url || "";
   const dataUrl = String(sourceUrl || "").startsWith("uploads/") ? "" : await readFileAsDataUrl(file);
+  if (!isPdf) {
+    setUploadStatus("正在识别图片里的票源表...", "loading");
+    pdfDetectionStatus.textContent = "图片已上传，正在 OCR 识别票源表。";
+    const response = await fetch("/api/tables/recognize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file: dataUrl, sourceUrl, fileName: file.name, detectedPages: detectedTables || 1 }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.message || result.error || "图片 OCR 识别失败。");
+    const text = String(result.text || result.partialText || "").trim();
+    if (!text) throw new Error(result.message || "图片 OCR 没有识别到表格文字，请换更清晰的图或手动粘贴文本。");
+    setRecognizedOcrText(text, { final: true, snapshot: { ...result, status: "done", totalPages: 1, pagesSucceeded: 1 } });
+    renderTicketOcrTaskPanel(lastTicketOcrJobSnapshot);
+    pdfDetectionStatus.textContent = result.message || "图片 OCR 已完成，正在生成待确认表。";
+    setUploadStatus("图片 OCR 已完成，正在生成待确认表...", "loading");
+    await publishUpload({ recognizedText: text, serverOptions: { sourcePage: 1 } });
+    return;
+  }
   const estimatedPages = Math.max(detectedTables || 1, 1);
   setUploadStatus(`正在创建批量识别任务，预计处理整份 PDF（约 ${estimatedPages} 页）...`, "loading");
   pdfDetectionStatus.textContent = `PDF 约 ${estimatedPages} 页，正在创建完整批量 OCR 任务。`;
@@ -22093,9 +22111,9 @@ sourceFileInput.addEventListener("change", async () => {
   try {
     await recognizeTicketSource(file, detectedTables);
   } catch (error) {
-    pdfDetectionStatus.textContent = error.message || "PDF 表格识别失败，请手动粘贴 OCR 文字。";
-    setUploadStatus("PDF 表格识别失败，请手动粘贴识别文本。", "error");
-    showToast("PDF 表格识别失败。", "error");
+    pdfDetectionStatus.textContent = error.message || "文件表格识别失败，请手动粘贴 OCR 文字。";
+    setUploadStatus("文件表格识别失败，请手动粘贴识别文本。", "error");
+    showToast("文件表格识别失败。", "error");
   }
 });
 

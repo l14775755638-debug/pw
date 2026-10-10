@@ -2688,6 +2688,33 @@ async function recognizeTicketTables(request, response) {
   const maxPages = Number(payload.maxPages || 0) > 0 ? getRequestedTicketOcrPages(payload.maxPages, Number(payload.maxPages)) : null;
   const sourcePath = sourceUrl.startsWith("uploads/") ? getReadableUploadPath(sourceUrl) : "";
   const sourceIsPdf = sourcePath ? getMimeForExtension(sourcePath) === "application/pdf" : file.startsWith("data:application/pdf");
+  const sourceIsImage = sourcePath ? /^image\//i.test(getMimeForExtension(sourcePath)) : file.startsWith("data:image/");
+  if (sourceIsImage) {
+    const config = getProviderConfig();
+    if (getActiveProvider() !== "aliyun") {
+      sendJson(response, 400, { error: "Image OCR requires Aliyun provider", message: "图片 OCR 当前请使用阿里云百炼。" });
+      return;
+    }
+    if (!process.env[config.keyName]) {
+      sendJson(response, 501, { error: `${config.keyName} is not configured`, message: `未配置阿里云百炼密钥。请在 .env 里设置 ${config.keyName}。` });
+      return;
+    }
+    const image = sourcePath
+      ? `data:${getMimeForExtension(sourcePath)};base64,${fs.readFileSync(sourcePath).toString("base64")}`
+      : file;
+    const rawText = await recognizeImageTextWithAliyun(image, buildTablePrompt(1));
+    const text = stripRecognizedColorColumns(rawText);
+    sendJson(response, 200, {
+      text,
+      partialText: text,
+      pagesProcessed: 1,
+      pagesFailed: 0,
+      fileName,
+      message: text.trim() ? "图片 OCR 已完成。" : "图片 OCR 没有返回可用文本。",
+      errors: text.trim() ? [] : [{ page: 1, stage: "ocr", message: "图片 OCR 没有返回可用文本。" }],
+    });
+    return;
+  }
   if (!sourceIsPdf) {
     sendJson(response, 400, { error: "Only PDF OCR is supported here", message: "当前自动 OCR 只处理 PDF；图片会作为单张表入库。" });
     return;
