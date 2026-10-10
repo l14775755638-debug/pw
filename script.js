@@ -10592,6 +10592,26 @@ function isInternalColorColumn(column = "") {
   return ["行底色", "底色", "背景色", "颜色标记", "颜色", "row color", "background"].some((name) => normalize(column).includes(normalize(name)));
 }
 
+function isInternalReviewDebugColumn(column = "") {
+  const text = normalize(column);
+  if (!text) return false;
+  return [
+    "继承来源",
+    "继承来由",
+    "识别来源",
+    "调试来源",
+    "来源解释",
+    "inherit source",
+    "inherited source",
+    "source debug",
+    "debug source",
+  ].some((name) => text.includes(normalize(name)));
+}
+
+function isHiddenReviewDisplayColumn(column = "") {
+  return isInternalColorColumn(column) || isInternalReviewDebugColumn(column);
+}
+
 function analyzePendingTableRisk(table) {
   pruneNonTicketRowsFromTable(table);
   normalizePendingTableColumns(table);
@@ -10728,6 +10748,18 @@ function tableHasReviewDisplayOffset(table) {
   return table.rows.some((row, index) => !table.userEditedRows?.[index] && rowLooksRightShiftedMergedTicket(table, row));
 }
 
+function tableNeedsLinkedDuplicateCollapse(table) {
+  if (!table || !Array.isArray(table.rows) || table.rows.length < 2) return false;
+  for (let rowIndex = 1; rowIndex < table.rows.length; rowIndex += 1) {
+    const previousRow = table.rows[rowIndex - 1];
+    const row = table.rows[rowIndex];
+    if (!Array.isArray(previousRow) || !Array.isArray(row)) continue;
+    if (isUnavailableTicket({ table, row: previousRow, index: rowIndex - 1 }) || isUnavailableTicket({ table, row, index: rowIndex })) continue;
+    if (getMergedLinkedRemarkBetweenRows(table, previousRow, rowIndex - 1, row, rowIndex)) return true;
+  }
+  return false;
+}
+
 function ensureReviewTableCanonicalRows(table) {
   if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows)) return false;
   const expectedVersion = `${COLUMN_NORMALIZATION_VERSION}:${REVIEW_FLAGS_VERSION}`;
@@ -10738,6 +10770,7 @@ function ensureReviewTableCanonicalRows(table) {
     (tableHasVisualBlockContext(table) && Number(table.visualInheritRepairVersion || 0) !== VISUAL_INHERIT_REPAIR_VERSION) ||
     tableNeedsVisualInheritedFieldRepair(table) ||
     tableNeedsAdditiveSerialDateRepair(table) ||
+    tableNeedsLinkedDuplicateCollapse(table) ||
     (Number(table.sourcePage || 0) > 0 && table._forceCanonicalDisplay !== true);
   if (!needsRepair) return false;
   const beforeSignature = getPendingTableRuntimeSignature(table);
@@ -10749,6 +10782,7 @@ function ensureReviewTableCanonicalRows(table) {
   repairInheritedFieldsFromVisualTableStructure(table);
   repairAdditiveSerialDatesFromSourceText(table);
   ensurePendingTableSourceRowIndexes(table);
+  collapseLinkedDuplicateRowsFromTable(table);
   if (Number(table.sourcePage || 0) > 0) forceCanonicalOriginalDisplay(table);
   table.visualInheritRepairVersion = VISUAL_INHERIT_REPAIR_VERSION;
   table._reviewDisplayRepairVersion = expectedVersion;
@@ -10795,6 +10829,20 @@ function ensurePendingTableReviewFlags(table) {
   }
   repairMisreadDataHeaderTable(table);
   return updatePendingTableReviewFlags(table);
+}
+
+function hasUsablePendingTableReviewFlags(table) {
+  return Boolean(
+    table &&
+      table.reviewFlagsVersion === REVIEW_FLAGS_VERSION &&
+      typeof table.needsManualReview === "boolean" &&
+      Array.isArray(table.reviewReasons) &&
+      table._columnRepairChanged !== true,
+  );
+}
+
+function getPendingTableListReviewState(table) {
+  return hasUsablePendingTableReviewFlags(table) ? table : ensurePendingTableReviewFlags(table);
 }
 
 function formatStandardDateLabel(year, month, day) {
@@ -12755,6 +12803,12 @@ function getTicketLinkedSeatRemark(ticket) {
 
 function getLinkedDuplicateTicketKey(ticket) {
   if (!ticket?.table || !Array.isArray(ticket.row)) return "";
+  const values = getLinkedDuplicateTicketKeyValues(ticket);
+  if (![values.date, values.zone, values.rowValue, values.seat, values.salePrice].every((value) => String(value || "").trim())) return "";
+  return [values.date, values.face, values.floor, values.zone, values.rowValue, values.seat, values.salePrice].map(normalizeLinkedDuplicateKeyValue).join("|");
+}
+
+function getLinkedDuplicateTicketKeyValues(ticket) {
   const date = getTicketPrimaryDateValue(ticket) || getFirstNonEmptyColumnValue(ticket.table, ticket.row, DATE_COLUMN_NAMES);
   const face = getFirstFaceValueFromTicket(ticket);
   const floor = getFirstNonEmptyColumnValue(ticket.table, ticket.row, ["楼层", "層数", "层数", "楼座", "floor", "tier", "level", "층"]);
@@ -12762,8 +12816,24 @@ function getLinkedDuplicateTicketKey(ticket) {
   const rowValue = getTicketRowValue(ticket);
   const seat = getTicketSeatValue(ticket);
   const salePrice = getTicketSalePriceValue(ticket);
-  if (![date, zone, rowValue, seat, salePrice].every((value) => String(value || "").trim())) return "";
-  return [date, face, floor, zone, rowValue, seat, salePrice].map(normalizeLinkedDuplicateKeyValue).join("|");
+  return { date, face, floor, zone, rowValue, seat, salePrice };
+}
+
+function isBlankLinkedSeatValue(value) {
+  const text = String(value || "").trim();
+  return !text || text === "/" || isMergedCellArtifact(text);
+}
+
+function getLinkedDuplicateTicketRelaxedKey(ticket) {
+  if (!ticket?.table || !Array.isArray(ticket.row)) return "";
+  const values = getLinkedDuplicateTicketKeyValues(ticket);
+  if (![values.date, values.zone, values.rowValue, values.salePrice].every((value) => String(value || "").trim())) return "";
+  if (!isBlankLinkedSeatValue(values.seat)) return "";
+  return [values.date, values.face, values.floor, values.zone, values.rowValue, values.salePrice].map(normalizeLinkedDuplicateKeyValue).join("|");
+}
+
+function getLinkedDuplicateCandidateKey(ticket) {
+  return getLinkedDuplicateTicketKey(ticket) || getLinkedDuplicateTicketRelaxedKey(ticket);
 }
 
 function getLinkedRemarkColumnIndexes(columns = []) {
@@ -12822,7 +12892,15 @@ function getSourceLinkedDuplicateContext(table, row, rowIndex) {
 function getMergedLinkedRemarkBetweenRows(table, leftRow, leftIndex, rightRow, rightIndex) {
   const left = getSourceLinkedDuplicateContext(table, leftRow, leftIndex);
   const right = getSourceLinkedDuplicateContext(table, rightRow, rightIndex);
-  if (!left.key || left.key !== right.key) return "";
+  const strictMatch = left.key && left.key === right.key;
+  const relaxedLeftKey = getLinkedDuplicateTicketRelaxedKey({ table, row: leftRow, index: leftIndex });
+  const relaxedRightKey = getLinkedDuplicateTicketRelaxedKey({ table, row: rightRow, index: rightIndex });
+  const relaxedSourceLeftKey = getLinkedDuplicateTicketRelaxedKey({ table, row: left.row, index: left.sourceIndex });
+  const relaxedSourceRightKey = getLinkedDuplicateTicketRelaxedKey({ table, row: right.row, index: right.sourceIndex });
+  const relaxedMatch =
+    (relaxedLeftKey && relaxedLeftKey === relaxedRightKey) ||
+    (relaxedSourceLeftKey && relaxedSourceLeftKey === relaxedSourceRightKey);
+  if (!strictMatch && !relaxedMatch) return "";
   if (!Number.isInteger(left.sourceIndex) || !Number.isInteger(right.sourceIndex) || Math.abs(left.sourceIndex - right.sourceIndex) !== 1) return "";
   const leftSharedCell = left.linkedCells.find(({ index }) => isBlankMergedPeerCellValue(right.row?.[index]));
   if (leftSharedCell) return leftSharedCell.value;
@@ -12841,6 +12919,19 @@ function markLinkedSeatPairRow(table, rowIndex, remark) {
   if (!text || !table) return;
   table.linkedSeatPairRows = table.linkedSeatPairRows || {};
   table.linkedSeatPairRows[rowIndex] = text;
+}
+
+function setLinkedSeatPairQuantity(table, rowIndex, quantity = 2) {
+  if (!table?.rows?.[rowIndex]) return false;
+  ensureOriginalTableSnapshot(table);
+  const quantityIndex = ensureNamedColumn(table, "数量", ["数量", "张数", "连坐", "连坐数量", "count", "qty", "매수"]);
+  const row = table.rows[rowIndex];
+  while (row.length < table.columns.length) row.push("");
+  const nextValue = String(quantity);
+  if (String(row[quantityIndex] || "").trim() === nextValue) return false;
+  row[quantityIndex] = nextValue;
+  syncOriginalRowValue(table, rowIndex, quantityIndex, nextValue, { appendMissing: true });
+  return true;
 }
 
 function getLinkedSeatPairRemarkForTicket(ticket) {
@@ -12932,6 +13023,7 @@ function repairCollapsedLinkedRemarkFromSourceRows(table) {
     const remark = key ? linkedRemarkByKey.get(key) : "";
     if (!remark) return;
     markLinkedSeatPairRow(table, rowIndex, remark);
+    if (setLinkedSeatPairQuantity(table, rowIndex, 2)) changed = true;
     if (mergeLinkedRemarkIntoTableRow(table, rowIndex, remark)) changed = true;
   });
   return changed;
@@ -12945,7 +13037,7 @@ function collapseLinkedDuplicateRowsFromTable(table) {
   table.rows.forEach((row, rowIndex) => {
     if (isUnavailableTicket({ table, row, index: rowIndex }) || !hasTicketSalePrice({ table, row, index: rowIndex })) return;
     const ticket = { table, row, index: rowIndex };
-    const key = getLinkedDuplicateTicketKey(ticket);
+    const key = getLinkedDuplicateCandidateKey(ticket);
     if (!key) return;
     const previous = seen.get(key);
     if (!previous) {
@@ -12957,6 +13049,7 @@ function collapseLinkedDuplicateRowsFromTable(table) {
     if (!mergedRemark) return;
     markLinkedSeatPairRow(table, previous.rowIndex, mergedRemark);
     if (mergedRemark && mergeLinkedRemarkIntoTableRow(table, previous.rowIndex, mergedRemark)) changed = true;
+    if (setLinkedSeatPairQuantity(table, previous.rowIndex, 2)) changed = true;
     removeIndexes.add(rowIndex);
   });
   const removed = removeRowsFromTable(table, (_row, rowIndex) => removeIndexes.has(rowIndex));
@@ -12975,7 +13068,7 @@ function collapseLinkedDuplicateTicketsForDisplay(tickets = []) {
   const kept = [];
   const positions = new Map();
   tickets.forEach((ticket) => {
-    const key = getLinkedDuplicateTicketKey(ticket);
+    const key = getLinkedDuplicateCandidateKey(ticket);
     if (!key) {
       kept.push(ticket);
       return;
@@ -14246,7 +14339,7 @@ function displayPairLooksOffset(label = "", value = "") {
 
 function originalDisplayFieldsLookOffset(fields = []) {
   const visibleFields = fields.filter(
-    (field) => String(field?.label || "").trim() && String(field?.value || "").trim() && !isInternalColorColumn(field.label),
+    (field) => String(field?.label || "").trim() && String(field?.value || "").trim() && !isHiddenReviewDisplayColumn(field.label),
   );
   if (visibleFields.length < 2) return false;
   const strongLabelCount = visibleFields.filter((field) => isStrongRecognizedHeaderName(field.label)).length;
@@ -14308,7 +14401,7 @@ function getOriginalTicketFields(ticket, options = {}) {
         value: String(originalRow[columnIndex] || "").trim(),
       }))
       .filter((field) => field.label && field.value)
-      .filter((field) => !isInternalColorColumn(field.label));
+      .filter((field) => !isHiddenReviewDisplayColumn(field.label));
     if (originalDisplayFieldsLookOffset(originalFields)) {
       return getOriginalTicketFields(ticket, { ...options, preserveOriginal: false });
     }
@@ -15504,7 +15597,7 @@ function renderRecognizedTableCard(group) {
   const displayRows = useOriginalDisplay ? table.originalRows : table.rows;
   const visibleColumns = displayColumns
     .map((column, columnIndex) => ({ column, columnIndex }))
-    .filter((field) => !isInternalColorColumn(field.column));
+    .filter((field) => !isHiddenReviewDisplayColumn(field.column));
   const headers = visibleColumns.map(({ column }) => `<th>${escapeHtml(column || "")}</th>`).join("");
   const rows = displayRows
     .map(
@@ -15867,7 +15960,7 @@ async function refreshAiStatus() {
 }
 
 function getCurrentUploadRecordPendingTables() {
-  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(getPendingTableListReviewState);
   return manualReviewOnly ? allCurrentPending.filter((table) => table.needsManualReview) : allCurrentPending;
 }
 
@@ -15926,7 +16019,7 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
   }
   const allCurrentPending = pendingTables
     .filter((table) => table.eventId === currentEvent.id)
-    .map((table) => (deferHeavyReview ? table : ensurePendingTableReviewFlags(table)));
+    .map((table) => (deferHeavyReview ? table : getPendingTableListReviewState(table)));
   const repairedTables = allCurrentPending.filter((table) => table._columnRepairChanged);
   if (repairedTables.length) {
     repairedTables.forEach((table) => {
@@ -16005,7 +16098,7 @@ function getSelectedPendingTable() {
 }
 
 function getCurrentPendingTables({ manualOnly = manualReviewOnly } = {}) {
-  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(ensurePendingTableReviewFlags);
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(getPendingTableListReviewState);
   return manualOnly ? allCurrentPending.filter((table) => table.needsManualReview) : allCurrentPending;
 }
 
@@ -16611,7 +16704,7 @@ function renderReviewEditPanelHtml(table, rowIndex) {
   const currentRow = table?.rows?.[rowIndex] || [];
   const editFields = (table?.columns || [])
     .map((column, index) => ({ column, index }))
-    .filter((field) => !isInternalColorColumn(field.column))
+    .filter((field) => !isHiddenReviewDisplayColumn(field.column))
     .map(
       (field) => `
         <label class="review-edit-field">

@@ -797,7 +797,7 @@ function createPendingGenerationVmContext(payload) {
   return context;
 }
 
-let pendingGenerationClientScriptCache = { mtimeMs: 0, source: "" };
+let pendingGenerationClientScriptCache = { mtimeMs: 0, source: "", script: null };
 const PENDING_GENERATION_VM_TIMEOUT_MS = 180000;
 const PENDING_GENERATION_BATCH_TIMEOUT_MS = 240000;
 
@@ -870,13 +870,21 @@ function preparePendingGenerationClientScript(rawScript) {
 function getPendingGenerationClientScript() {
   const scriptPath = path.join(root, "script.js");
   const stat = fs.statSync(scriptPath);
-  if (pendingGenerationClientScriptCache.source && pendingGenerationClientScriptCache.mtimeMs === stat.mtimeMs) {
-    return pendingGenerationClientScriptCache.source;
+  if (
+    pendingGenerationClientScriptCache.source &&
+    pendingGenerationClientScriptCache.script &&
+    pendingGenerationClientScriptCache.mtimeMs === stat.mtimeMs
+  ) {
+    return pendingGenerationClientScriptCache;
   }
   const rawScript = fs.readFileSync(scriptPath, "utf8");
   const source = preparePendingGenerationClientScript(rawScript);
-  pendingGenerationClientScriptCache = { mtimeMs: stat.mtimeMs, source };
-  return source;
+  pendingGenerationClientScriptCache = {
+    mtimeMs: stat.mtimeMs,
+    source,
+    script: new vm.Script(source, { filename: "script.js" }),
+  };
+  return pendingGenerationClientScriptCache;
 }
 
 function formatPendingGenerationErrorMessage(error) {
@@ -921,7 +929,7 @@ function generatePendingTablesWithClientRules(payload) {
   const timingStartedAt = Date.now();
   const timings = {};
   try {
-    vm.runInContext(clientScript, context, { filename: "script.js", timeout: PENDING_GENERATION_VM_TIMEOUT_MS });
+    clientScript.script.runInContext(context, { timeout: PENDING_GENERATION_VM_TIMEOUT_MS });
   } catch (error) {
     throw decoratePendingGenerationError(error, { stage: "加载生成规则" });
   }
