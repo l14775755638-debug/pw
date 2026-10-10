@@ -703,20 +703,27 @@ function extractJsonValue(text) {
     .replace(/```/g, "")
     .trim();
   if (!value) return null;
-  try {
-    return JSON.parse(value);
-  } catch {}
+  const parseCandidates = (candidates) => {
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      try {
+        return JSON.parse(candidate);
+      } catch {}
+    }
+    return null;
+  };
+  const repairedWhole = value.endsWith("}}]") && value.startsWith('{"tables":[') ? `${value.slice(0, -3)}]}` : "";
+  const direct = parseCandidates([value, repairedWhole]);
+  if (direct) return direct;
   const objectStart = value.indexOf("{");
   const arrayStart = value.indexOf("[");
   const startsWithArray = arrayStart >= 0 && (objectStart < 0 || arrayStart < objectStart);
   const start = startsWithArray ? arrayStart : objectStart;
   const end = startsWithArray ? value.lastIndexOf("]") : value.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
-  try {
-    return JSON.parse(value.slice(start, end + 1));
-  } catch {
-    return null;
-  }
+  const sliced = value.slice(start, end + 1);
+  const repairedSliced = sliced.endsWith("}}]") && sliced.startsWith('{"tables":[') ? `${sliced.slice(0, -3)}]}` : "";
+  return parseCandidates([sliced, repairedSliced]);
 }
 
 function getActiveProvider() {
