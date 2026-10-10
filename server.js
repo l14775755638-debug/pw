@@ -1110,6 +1110,122 @@ function generatePendingTablesWithClientRules(payload) {
   return { parsedTableCount: setup.parsedTableCount, tables, removedSoldRows, failedBatches, timings: { ...timings, batches: batchTimings } };
 }
 
+function generatePendingTablesFromVlmTables(payload) {
+  const clientScript = getPendingGenerationClientScript();
+  const context = createPendingGenerationVmContext(payload);
+  const timingStartedAt = Date.now();
+  const timings = {};
+  try {
+    clientScript.script.runInContext(context, { timeout: PENDING_GENERATION_VM_TIMEOUT_MS });
+  } catch (error) {
+    throw decoratePendingGenerationError(error, { stage: "加载生成规则" });
+  }
+  timings.loadRulesMs = Date.now() - timingStartedAt;
+  try {
+    const generatedText = vm.runInContext(
+      `
+        (function () {
+          currentEvent = {
+            id: "server-event",
+            name: "服务器生成",
+            dateOptions: [],
+            zones: [],
+            tables: [],
+            ...(serverPayload.currentEvent || {}),
+          };
+          if (!Array.isArray(currentEvent.dateOptions)) currentEvent.dateOptions = [];
+          if (!Array.isArray(currentEvent.zones)) currentEvent.zones = [];
+          if (!Array.isArray(currentEvent.tables)) currentEvent.tables = [];
+          uploadedSource = serverPayload.uploadedSource || {};
+          uploadTableTitle.value = serverPayload.tableTitle || uploadedSource.name || "";
+          uploadTableText.value = serverPayload.recognizedText || "";
+          lastTicketOcrJobSnapshot = { rowColorAnalyses: {} };
+          var parsedTables = (serverPayload.vlmTables || [])
+            .filter(function (table) { return table && Array.isArray(table.columns) && Array.isArray(table.rows); })
+            .map(function (table, index) {
+              var sourcePage = Number(table.sourcePage || (serverPayload.options || {}).sourcePage || index + 1) || index + 1;
+              return {
+                columns: table.columns,
+                originalColumns: Array.isArray(table.originalColumns) ? table.originalColumns : table.columns,
+                sourceTextColumns: Array.isArray(table.sourceTextColumns) ? table.sourceTextColumns : table.columns,
+                rows: table.rows,
+                originalRows: Array.isArray(table.originalRows) ? table.originalRows : table.rows,
+                sourceTextRows: Array.isArray(table.sourceTextRows) ? table.sourceTextRows : table.rows,
+                sourcePage: sourcePage,
+                sourcePart: Number(table.sourcePart || index + 1) || index + 1,
+              };
+            });
+          var createOptions = {
+            ...(serverPayload.options || {}),
+            skipRowColor: true,
+            generationMode: "vlm",
+            forceLightReviewFlags: true,
+          };
+          var rawTables = createUploadedTables(parsedTables, {}, createOptions);
+          rawTables = (Array.isArray(rawTables) ? rawTables : []).filter(function (table) {
+            return table && Array.isArray(table.rows);
+          });
+          function cloneRowsDirect(rows) {
+            return (Array.isArray(rows) ? rows : []).map(function (row) {
+              return Array.isArray(row) ? row.slice() : [];
+            });
+          }
+          rawTables.forEach(function (table, index) {
+            var source = parsedTables[index] || {};
+            var sourceColumns = Array.isArray(source.columns) ? source.columns.slice() : table.columns || [];
+            var sourceRows = cloneRowsDirect(source.rows);
+            table.columns = normalizeSalePriceColumnLabels(sourceColumns);
+            table.originalColumns = table.columns.slice();
+            table.sourceTextColumns = table.columns.slice();
+            table.rows = cloneRowsDirect(sourceRows);
+            table.originalRows = cloneRowsDirect(sourceRows);
+            table.sourceTextRows = cloneRowsDirect(sourceRows);
+            table.rowColorSourceIndexes = table.rows.map(function (_row, rowIndex) { return rowIndex; });
+            table.vlmDirect = true;
+            table.lightReviewFlags = true;
+            table.needsManualReview = false;
+            table.reviewReasons = [];
+            table.reviewFlagsVersion = REVIEW_FLAGS_VERSION;
+          });
+          var removedSoldRows = 0;
+          rawTables.forEach(function (table) {
+            removedSoldRows += removeRowsFromTable(table, function (row, rowIndex) {
+              return (
+                isSoldTicket({ table: table, row: row, index: rowIndex }) ||
+                !hasTicketSalePrice({ table: table, row: row, index: rowIndex }) ||
+                isNonTicketFooterRow(table, row)
+              );
+            });
+            removedSoldRows += collapseLinkedDuplicateRowsFromTable(table);
+            sanitizeSeatConditionColumnValues(table);
+            table.lightReviewFlags = true;
+            table.needsManualReview = false;
+            table.reviewReasons = [];
+            table.reviewFlagsVersion = REVIEW_FLAGS_VERSION;
+          });
+          var tables = rawTables.filter(function (table) {
+            return Array.isArray(table.rows) && table.rows.length;
+          });
+          return JSON.stringify({ tables: tables, removedSoldRows: removedSoldRows });
+        })();
+      `,
+      context,
+      { filename: "pending-generate-vlm.vm", timeout: PENDING_GENERATION_BATCH_TIMEOUT_MS },
+    );
+    const generated = JSON.parse(generatedText);
+    timings.totalMs = Date.now() - timingStartedAt;
+    return {
+      parsedTableCount: Array.isArray(payload.vlmTables) ? payload.vlmTables.length : 0,
+      tables: Array.isArray(generated.tables) ? generated.tables : [],
+      removedSoldRows: Number(generated.removedSoldRows || 0),
+      failedBatches: [],
+      timings,
+    };
+  } catch (error) {
+    throw decoratePendingGenerationError(error, { stage: "生成 VLM 确认表" });
+  }
+}
+
 function hasUsableServerRowColorAnalysis(analysis) {
   return Boolean(
     analysis &&
@@ -1260,7 +1376,16 @@ async function parseTicketTablesWithVlm(request, response) {
   const pageNumber = Math.max(1, Math.floor(Number(payload.page || payload.sourcePage || 1)));
   const image = await getVlmSourcePageImage({ file, sourceUrl, pageNumber });
   const vlmResult = await parseTicketTableWithAliyunVlm(image, pageNumber);
-  const recognizedText = vlmTablesToRecognizedText(vlmResult.tables, pageNumber);
+  const vlmTables = vlmResult.tables.map((table, index) => ({
+    ...table,
+    sourcePage: pageNumber,
+    sourcePart: index + 1,
+    originalColumns: table.columns,
+    originalRows: table.rows,
+    sourceTextColumns: table.columns,
+    sourceTextRows: table.rows,
+  }));
+  const recognizedText = vlmTablesToRecognizedText(vlmTables, pageNumber);
   const uploadedSource = {
     name: String(payload.uploadedSource?.name || payload.fileName || "票源文件"),
     type: String(payload.uploadedSource?.type || payload.fileType || (sourceUrl.toLowerCase().includes(".pdf") ? "application/pdf" : "image/jpeg")),
@@ -1268,6 +1393,7 @@ async function parseTicketTablesWithVlm(request, response) {
   };
   const generationPayload = {
     recognizedText,
+    vlmTables,
     uploadedSource,
     currentEvent: payload.currentEvent || {},
     tableTitle: payload.tableTitle || "",
@@ -1281,7 +1407,7 @@ async function parseTicketTablesWithVlm(request, response) {
       forceLightReviewFlags: true,
     },
   };
-  const generated = generatePendingTablesWithClientRules(generationPayload);
+  const generated = generatePendingTablesFromVlmTables(generationPayload);
   generated.tables = (Array.isArray(generated.tables) ? generated.tables : []).map((table) => ({
     ...table,
     generationMode: "vlm",
@@ -1562,6 +1688,8 @@ async function recognizeSeatmapWithAliyun(image, prompt) {
     config.endpoint,
     {
       model: config.model,
+      temperature: 0,
+      max_tokens: 16000,
       messages: [
         {
           role: "user",
@@ -1597,6 +1725,8 @@ async function recognizeImageTextWithAliyun(image, prompt) {
     config.endpoint,
     {
       model: config.model,
+      temperature: 0,
+      max_tokens: 16000,
       messages: [
         {
           role: "user",
