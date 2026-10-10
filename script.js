@@ -17,6 +17,7 @@ const MAX_ANCHOR_BATCH_PAGES_PER_REQUEST = 4;
 const MAX_REVIEW_ROWS_RENDERED = 240;
 const STANDARD_REVIEW_ROW_WINDOW_SIZE = 10;
 const MAX_UPLOAD_RECORDS_RENDERED = 24;
+const MAX_PUBLISHED_TABLES_RENDERED = 24;
 const REVIEW_OPEN_HEAVY_RENDER_DELAY_MS = 180;
 const MAX_PENDING_TABLES_NORMALIZE_ON_LOAD = 80;
 const MAX_PENDING_ROWS_NORMALIZE_ON_LOAD = 5000;
@@ -617,6 +618,7 @@ const uploadedTables = [];
 const pendingTables = [];
 let selectedPendingTableId = null;
 let uploadRecordWindowStart = 0;
+let publishedTableWindowStart = 0;
 const STORAGE_KEY = "ticket-admin-state-v1";
 const OPERATION_ARCHIVE_KEY = "ticket-admin-operation-archives-v1";
 const APP_STATE_BACKUP_DB = "ticket-admin-state-backup-v1";
@@ -11633,7 +11635,7 @@ function clonePpStructureMatches(matches) {
   return Array.isArray(matches) ? matches.map(clonePpStructureMatch) : [];
 }
 
-function buildSerializableEvents() {
+function buildSerializableEvents({ compactTables = false } = {}) {
   return events.map((event) => ({
     id: event.id,
     name: event.name,
@@ -11655,12 +11657,12 @@ function buildSerializableEvents() {
     seatmapTestRequired: event.seatmapTestRequired === true,
     seatmapTestReason: event.seatmapTestReason || "",
     zones: event.zones,
-    tables: event.tables,
+    tables: compactTables && Array.isArray(event.tables) ? event.tables.map(makeCompactPendingTable) : event.tables,
   }));
 }
 
-function buildSerializablePendingTables({ compact = false } = {}) {
-  if (compact) return pendingTables.slice(0, MAX_OPERATION_ARCHIVE_PENDING_TABLES).map(makeCompactPendingTable);
+function buildSerializablePendingTables({ compact = false, limit = Infinity } = {}) {
+  if (compact) return pendingTables.slice(0, limit).map(makeCompactPendingTable);
   return pendingTables.map((table) => ({
     ...table,
     columns: Array.isArray(table.columns) ? [...table.columns] : [],
@@ -11800,12 +11802,14 @@ function shouldReplaceIndexedBackup(existingState, nextState) {
 
 function saveAppState(options = {}) {
   compactLargeStateBeforeSave();
-  const serializableEvents = buildSerializableEvents();
-  const serializablePendingTables = buildSerializablePendingTables();
+  const useCompactMainCache = options.fullLocalCache !== true;
+  const serializableEvents = buildSerializableEvents({ compactTables: useCompactMainCache });
+  const serializablePendingTables = buildSerializablePendingTables({ compact: useCompactMainCache });
   const serializableUploadedSource = buildSerializableUploadedSource();
   const indexedBackupState = () =>
-    buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource, { keepLargeDrafts: true });
+    buildSerializableAppState(buildSerializableEvents({ compactTables: true }), buildSerializablePendingTables({ compact: true }), serializableUploadedSource, { keepLargeDrafts: true });
   const saveIndexedBackup = () => {
+    if (options.skipIndexedBackup === true) return;
     if (largeAppStateBackupRestorePending && !String(uploadTableText.value || "").trim() && options.forceIndexedBackupReplace !== true) return;
     const nextState = indexedBackupState();
     if (options.forceIndexedBackupReplace === true) {
@@ -11826,7 +11830,11 @@ function saveAppState(options = {}) {
     mergeEventDraftHistory();
     const state = buildSerializableAppState(serializableEvents, serializablePendingTables, serializableUploadedSource);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(trimAppStateForLocalStorage(state)));
-    saveIndexedBackup();
+    if (options.deferIndexedBackup === false || options.forceIndexedBackupReplace === true) {
+      saveIndexedBackup();
+    } else {
+      queueIndexedBackupSave(saveIndexedBackup);
+    }
     updateLocalSaveStatus({ saved: true, backup: largeAppStateBackupRestorePending ? "等待恢复完整 OCR" : "主缓存完成" });
     return true;
   } catch (error) {
@@ -11834,7 +11842,11 @@ function saveAppState(options = {}) {
     try {
       const state = buildSerializableAppState(serializableEvents, trimmedPendingTables, serializableUploadedSource, { omitLargeDrafts: true });
       localStorage.setItem(STORAGE_KEY, JSON.stringify(trimAppStateForLocalStorage(state)));
-      saveIndexedBackup();
+      if (options.deferIndexedBackup === false || options.forceIndexedBackupReplace === true) {
+        saveIndexedBackup();
+      } else {
+        queueIndexedBackupSave(saveIndexedBackup);
+      }
       updateLocalSaveStatus({ saved: true, backup: "主缓存精简保存" });
       pendingTables.forEach((table) => {
         table.reviewSnapshots = [];
@@ -11847,11 +11859,19 @@ function saveAppState(options = {}) {
           STORAGE_KEY,
           JSON.stringify(trimAppStateForLocalStorage(state)),
         );
-        saveIndexedBackup();
+        if (options.deferIndexedBackup === false || options.forceIndexedBackupReplace === true) {
+          saveIndexedBackup();
+        } else {
+          queueIndexedBackupSave(saveIndexedBackup);
+        }
         updateLocalSaveStatus({ saved: true, backup: "主缓存压缩保存" });
         return true;
       } catch {
-        saveIndexedBackup();
+        if (options.deferIndexedBackup === false || options.forceIndexedBackupReplace === true) {
+          saveIndexedBackup();
+        } else {
+          queueIndexedBackupSave(saveIndexedBackup);
+        }
         console.warn("App state auto-save skipped because local storage is full.");
         updateLocalSaveStatus({ error: "主缓存已满，正在依赖大容量备份" });
       }
@@ -11914,7 +11934,12 @@ function archiveCurrentSavedState(label, type = "操作", { silent = true } = {}
     eventId: currentEvent.id,
     eventName: currentEvent.name,
     summary: getOperationArchiveSummary(),
-    state: buildSerializableAppState(buildSerializableEvents(), buildSerializablePendingTables({ compact: true }), buildSerializableUploadedSource(), { omitLargeDrafts: true }),
+    state: buildSerializableAppState(
+      buildSerializableEvents({ compactTables: true }),
+      buildSerializablePendingTables({ compact: true, limit: MAX_OPERATION_ARCHIVE_PENDING_TABLES }),
+      buildSerializableUploadedSource(),
+      { omitLargeDrafts: true },
+    ),
   };
   operationArchives = [archive, ...operationArchives].slice(0, MAX_OPERATION_ARCHIVES);
   const saved = saveOperationArchives();
@@ -11924,7 +11949,10 @@ function archiveCurrentSavedState(label, type = "操作", { silent = true } = {}
 }
 
 function saveAndArchiveAppStep(label, type = "操作", options = {}) {
-  const saved = saveAppState();
+  const saved = saveAppState({
+    skipIndexedBackup: !/删除前备份|恢复前备份|手动存档|生成待确认|快速人工生成|发布/i.test(type),
+    deferIndexedBackup: true,
+  });
   if (!saved) return false;
   return archiveCurrentSavedState(label, type, options);
 }
@@ -11990,6 +12018,7 @@ function clearOperationArchives() {
 }
 
 let pendingAppStateSaveTimer = null;
+let pendingIndexedBackupTimer = null;
 let appStateSaveBackoffUntil = 0;
 let largeAppStateBackupRestorePending = false;
 
@@ -12017,6 +12046,14 @@ function scheduleAppStateSave(delay = 500) {
       window.setTimeout(runSave, 0);
     }
   }, wait);
+}
+
+function queueIndexedBackupSave(callback) {
+  if (pendingIndexedBackupTimer) window.clearTimeout(pendingIndexedBackupTimer);
+  pendingIndexedBackupTimer = window.setTimeout(() => {
+    pendingIndexedBackupTimer = null;
+    runWhenPageIdle(callback, 5000);
+  }, 1200);
 }
 
 function restoreAppStateFromBackupAfterLoad(reason = "") {
@@ -16048,7 +16085,7 @@ async function refreshAiStatus() {
 }
 
 function getCurrentUploadRecordPendingTables() {
-  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(getPendingTableListReviewState);
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id);
   return manualReviewOnly ? allCurrentPending.filter((table) => table.needsManualReview) : allCurrentPending;
 }
 
@@ -16105,16 +16142,7 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
   if (normalize && !deferHeavyReview) {
     normalizePendingTablesInMemory({ save });
   }
-  const allCurrentPending = pendingTables
-    .filter((table) => table.eventId === currentEvent.id)
-    .map((table) => (deferHeavyReview ? table : getPendingTableListReviewState(table)));
-  const repairedTables = allCurrentPending.filter((table) => table._columnRepairChanged);
-  if (repairedTables.length) {
-    repairedTables.forEach((table) => {
-      delete table._columnRepairChanged;
-    });
-    scheduleAppStateSave();
-  }
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id);
   const manualCount = allCurrentPending.filter((table) => table.needsManualReview).length;
   const currentPending = manualReviewOnly ? allCurrentPending.filter((table) => table.needsManualReview) : allCurrentPending;
   showManualReviewButton.textContent = manualReviewOnly ? "查看全部待确认" : `查看需人工确认${manualCount ? `（${manualCount}）` : ""}`;
@@ -16136,7 +16164,16 @@ function renderUploadRecords({ save = true, normalize = true } = {}) {
   }
   const shouldWindowRecords = currentPending.length > MAX_UPLOAD_RECORDS_RENDERED;
   const windowStart = shouldWindowRecords ? getUploadRecordWindowStart(currentPending) : 0;
-  const visiblePending = shouldWindowRecords ? currentPending.slice(windowStart, windowStart + MAX_UPLOAD_RECORDS_RENDERED) : currentPending;
+  const visiblePending = (shouldWindowRecords ? currentPending.slice(windowStart, windowStart + MAX_UPLOAD_RECORDS_RENDERED) : currentPending).map((table) =>
+    deferHeavyReview ? table : getPendingTableListReviewState(table),
+  );
+  const repairedTables = visiblePending.filter((table) => table._columnRepairChanged);
+  if (repairedTables.length) {
+    repairedTables.forEach((table) => {
+      delete table._columnRepairChanged;
+    });
+    scheduleAppStateSave();
+  }
   const windowEnd = windowStart + visiblePending.length;
   const primaryVisibleTable = visiblePending.find((table) => table.id === selectedPendingTableId) || visiblePending[0] || currentPending[0];
   const windowNote = shouldWindowRecords
@@ -16186,7 +16223,7 @@ function getSelectedPendingTable() {
 }
 
 function getCurrentPendingTables({ manualOnly = manualReviewOnly } = {}) {
-  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id).map(getPendingTableListReviewState);
+  const allCurrentPending = pendingTables.filter((table) => table.eventId === currentEvent.id);
   return manualOnly ? allCurrentPending.filter((table) => table.needsManualReview) : allCurrentPending;
 }
 
@@ -18987,7 +19024,20 @@ function renderReviewPanel(focusRowIndex = pendingReviewFocusRowIndex, { normali
 }
 
 function renderPublishedTables() {
-  const rows = currentEvent.tables
+  const tables = Array.isArray(currentEvent.tables) ? currentEvent.tables : [];
+  const shouldWindowTables = tables.length > MAX_PUBLISHED_TABLES_RENDERED;
+  const maxStart = shouldWindowTables ? Math.floor((tables.length - 1) / MAX_PUBLISHED_TABLES_RENDERED) * MAX_PUBLISHED_TABLES_RENDERED : 0;
+  publishedTableWindowStart = Math.max(0, Math.min(Number(publishedTableWindowStart || 0), maxStart));
+  const visibleTables = shouldWindowTables ? tables.slice(publishedTableWindowStart, publishedTableWindowStart + MAX_PUBLISHED_TABLES_RENDERED) : tables;
+  const windowEnd = publishedTableWindowStart + visibleTables.length;
+  const windowNote = shouldWindowTables
+    ? `<div class="upload-record-window-note">
+        <span>为避免页面卡顿，只显示第 ${publishedTableWindowStart + 1}-${windowEnd} / ${tables.length} 张已发布表。</span>
+        <button class="small-button ghost" type="button" data-published-list-window="prev" ${publishedTableWindowStart > 0 ? "" : "disabled"}>上一组</button>
+        <button class="small-button ghost" type="button" data-published-list-window="next" ${windowEnd < tables.length ? "" : "disabled"}>下一组</button>
+      </div>`
+    : "";
+  const rows = visibleTables
     .map(
       (table) => `
         <div class="admin-table-row">
@@ -19005,6 +19055,7 @@ function renderPublishedTables() {
     .join("");
 
   publishedTables.innerHTML = `
+    ${windowNote}
     <div class="admin-table-head">
       <span>表名</span>
       <span>演出</span>
@@ -19014,7 +19065,22 @@ function renderPublishedTables() {
       <span>操作</span>
     </div>
     ${rows || `<div class="empty-state">当前演出还没有已发布票源。</div>`}
+    ${windowNote}
   `;
+}
+
+function shiftPublishedTableWindow(direction) {
+  const tables = Array.isArray(currentEvent.tables) ? currentEvent.tables : [];
+  if (tables.length <= MAX_PUBLISHED_TABLES_RENDERED) return;
+  const maxStart = Math.floor((tables.length - 1) / MAX_PUBLISHED_TABLES_RENDERED) * MAX_PUBLISHED_TABLES_RENDERED;
+  const currentStart = Math.max(0, Math.min(Number(publishedTableWindowStart || 0), maxStart));
+  const nextStart =
+    direction < 0
+      ? Math.max(0, currentStart - MAX_PUBLISHED_TABLES_RENDERED)
+      : Math.min(maxStart, currentStart + MAX_PUBLISHED_TABLES_RENDERED);
+  if (nextStart === currentStart) return;
+  publishedTableWindowStart = nextStart;
+  renderPublishedTables();
 }
 
 function clonePublishedTableForPendingReview(table) {
@@ -21648,6 +21714,8 @@ function createNewEvent() {
   searchTerm = "";
   searchInput.value = "";
   manualReviewOnly = false;
+  uploadRecordWindowStart = 0;
+  publishedTableWindowStart = 0;
   newEventForm.classList.add("hidden");
   newEventForm.reset();
   newEventStatus.dataset.status = "success";
@@ -21887,6 +21955,8 @@ adminEventList.addEventListener("click", (event) => {
   searchInput.value = "";
   pendingSeatmap = null;
   manualReviewOnly = false;
+  uploadRecordWindowStart = 0;
+  publishedTableWindowStart = 0;
   render();
   renderAdminEvent();
   renderUploadRecords();
@@ -21908,6 +21978,8 @@ eventList.addEventListener("click", (event) => {
   eventSearchInput.value = "";
   searchInput.value = "";
   manualReviewOnly = false;
+  uploadRecordWindowStart = 0;
+  publishedTableWindowStart = 0;
   render();
   renderAdminEvent();
   renderUploadRecords();
@@ -22246,6 +22318,11 @@ confirmAllButton.addEventListener("click", confirmAllPendingTables);
 publishReadyButton.addEventListener("click", confirmReadyPendingTables);
 clearPublishedButton.addEventListener("click", clearCurrentPublishedTables);
 publishedTables.addEventListener("click", (event) => {
+  const windowButton = event.target.closest("[data-published-list-window]");
+  if (windowButton) {
+    shiftPublishedTableWindow(windowButton.dataset.publishedListWindow === "prev" ? -1 : 1);
+    return;
+  }
   const button = event.target.closest("[data-published-table-action]");
   if (!button) return;
   handlePublishedTableAction(button.dataset.publishedTableAction);
